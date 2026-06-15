@@ -1,0 +1,11 @@
+node_modules/
+build/
+.svelte-kit/
+
+src-tauri/target/
+src-tauri/binaries/helper-*
+
+swift-helper/.build/
+
+references/
+.DS_Store
