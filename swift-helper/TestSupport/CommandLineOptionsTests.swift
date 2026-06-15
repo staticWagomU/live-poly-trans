@@ -1,9 +1,12 @@
+import Foundation
+
 @main
 struct CommandLineOptionsTests {
   static func main() throws {
     try parsesDetectLanguagesCommand()
     try parsesMicStreamCommandWithLocales()
     try readsValueAfterFlag()
+    try formatsLanguageInfoWithBcp47Identifier()
   }
 
   static func parsesDetectLanguagesCommand() throws {
@@ -36,6 +39,12 @@ struct CommandLineOptionsTests {
   static func readsValueAfterFlag() throws {
     try expectEqual(value(after: "--stream", in: ["helper", "--stream", "mic"]), "mic")
     try expectEqual(value(after: "--missing", in: ["helper", "--stream", "mic"]), nil)
+  }
+
+  static func formatsLanguageInfoWithBcp47Identifier() throws {
+    let language = languageInfo(from: Locale(identifier: "ja_JP"))
+    try expectEqual(language.id, "ja-JP")
+    try expectEqual(language.label, "Japanese (Japan)")
   }
 }
 
