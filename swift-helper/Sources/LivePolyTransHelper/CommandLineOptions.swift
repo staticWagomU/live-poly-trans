@@ -1,14 +1,14 @@
-public enum HelperCommand: Equatable {
+public enum HelperCommand: Equatable, Sendable {
   case detectLanguages
   case stream(AudioStream)
 }
 
-public enum AudioStream: String, Equatable {
+public enum AudioStream: String, Equatable, Sendable {
   case mic
   case speaker
 }
 
-public struct CommandLineOptions: Equatable {
+public struct CommandLineOptions: Equatable, Sendable {
   public let command: HelperCommand
   public let sourceLanguage: String?
   public let targetLanguage: String?
@@ -33,7 +33,7 @@ public struct CommandLineOptions: Equatable {
   }
 }
 
-public enum CommandLineOptionsError: Error, Equatable {
+public enum CommandLineOptionsError: Error, Equatable, Sendable {
   case unsupportedArguments([String])
 }
 

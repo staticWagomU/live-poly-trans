@@ -8,6 +8,7 @@ struct CommandLineOptionsTests {
     try readsValueAfterFlag()
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
+    try formatsTranscriptEvent()
   }
 
   static func parsesDetectLanguagesCommand() throws {
@@ -51,6 +52,21 @@ struct CommandLineOptionsTests {
   static func encodesJsonLine() throws {
     let line = try jsonLine(for: LanguageInfo(id: "en-US", label: "English"))
     try expectEqual(line, #"{"id":"en-US","label":"English"}"#)
+  }
+
+  static func formatsTranscriptEvent() throws {
+    let event = transcriptEvent(
+      stream: .mic,
+      language: "en-US",
+      text: "hello",
+      translation: nil,
+      isFinal: true,
+      timestamp: Date(timeIntervalSince1970: 0)
+    )
+
+    try expectEqual(event.type, "transcript")
+    try expectEqual(event.stream, "mic")
+    try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
   }
 }
 
