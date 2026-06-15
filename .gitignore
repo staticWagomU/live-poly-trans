@@ -4,6 +4,7 @@ build/
 
 src-tauri/target/
 src-tauri/binaries/helper-*
+src-tauri/gen/
 
 swift-helper/.build/
 

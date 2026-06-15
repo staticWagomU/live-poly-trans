@@ -80,76 +80,80 @@ pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) 
     });
 }
 
-#[tauri::command]
-pub fn detect_languages() -> Result<LanguageDetectionPayload, String> {
-    let output = Command::new(resolve_helper_path()?)
-        .arg("--detect-languages")
-        .output()
-        .map_err(|error| error.to_string())?;
+pub mod commands {
+    use super::*;
 
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    #[tauri::command]
+    pub fn detect_languages() -> Result<LanguageDetectionPayload, String> {
+        let output = Command::new(resolve_helper_path()?)
+            .arg("--detect-languages")
+            .output()
+            .map_err(|error| error.to_string())?;
+
+        if !output.status.success() {
+            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+        }
+
+        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
     }
 
-    serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
-}
+    #[tauri::command]
+    pub fn start_microphone_session(
+        app: AppHandle,
+        state: State<'_, HelperSession>,
+        source_language: String,
+        target_language: String,
+    ) -> Result<(), String> {
+        stop_helper_child(&state)?;
 
-#[tauri::command]
-pub fn start_microphone_session(
-    app: AppHandle,
-    state: State<'_, HelperSession>,
-    source_language: String,
-    target_language: String,
-) -> Result<(), String> {
-    stop_helper_child(&state)?;
+        let mut child = Command::new(resolve_helper_path()?)
+            .args([
+                "--stream",
+                "mic",
+                "--source-language",
+                &source_language,
+                "--target-language",
+                &target_language,
+            ])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| error.to_string())?;
 
-    let mut child = Command::new(resolve_helper_path()?)
-        .args([
-            "--stream",
-            "mic",
-            "--source-language",
-            &source_language,
-            "--target-language",
-            &target_language,
-        ])
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
+        if let Some(stdout) = child.stdout.take() {
+            read_json_lines(app.clone(), stdout);
+        }
 
-    if let Some(stdout) = child.stdout.take() {
-        read_json_lines(app.clone(), stdout);
+        if let Some(stderr) = child.stderr.take() {
+            read_stderr(app, stderr);
+        }
+
+        *state.child.lock().map_err(|error| error.to_string())? = Some(child);
+        Ok(())
     }
 
-    if let Some(stderr) = child.stderr.take() {
-        read_stderr(app, stderr);
+    #[tauri::command]
+    pub fn stop_microphone_session(state: State<'_, HelperSession>) -> Result<(), String> {
+        stop_helper_child(&state)
     }
 
-    *state.child.lock().map_err(|error| error.to_string())? = Some(child);
-    Ok(())
-}
+    pub fn stop_helper_child(state: &State<'_, HelperSession>) -> Result<(), String> {
+        if let Some(mut child) = state.child.lock().map_err(|error| error.to_string())?.take() {
+            child.kill().map_err(|error| error.to_string())?;
+            let _ = child.wait();
+        }
 
-#[tauri::command]
-pub fn stop_microphone_session(state: State<'_, HelperSession>) -> Result<(), String> {
-    stop_helper_child(&state)
-}
-
-pub fn stop_helper_child(state: &State<'_, HelperSession>) -> Result<(), String> {
-    if let Some(mut child) = state.child.lock().map_err(|error| error.to_string())?.take() {
-        child.kill().map_err(|error| error.to_string())?;
-        let _ = child.wait();
+        Ok(())
     }
-
-    Ok(())
 }
 
 pub fn run() {
     tauri::Builder::default()
         .manage(HelperSession::default())
         .invoke_handler(tauri::generate_handler![
-            detect_languages,
-            start_microphone_session,
-            stop_microphone_session
+            commands::detect_languages,
+            commands::start_microphone_session,
+            commands::stop_microphone_session
         ])
         .setup(|app| {
             let _ = app.get_webview_window("main");
