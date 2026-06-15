@@ -21,3 +21,10 @@ export function chooseDefaultLanguagePair(languages: LanguageInfo[]): LanguagePa
     target: languages[1]?.id ?? languages[0]?.id ?? 'ja-JP'
   };
 }
+
+export function languageControlLabel(language: LanguageInfo): string {
+  const baseName = language.label.replace(/\s*\(.+\)\s*$/, '');
+  const region = language.id.split('-')[1];
+
+  return region ? `${baseName} ${region.toUpperCase()}` : baseName;
+}

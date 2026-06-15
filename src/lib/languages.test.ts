@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseDefaultLanguagePair } from './languages';
+import { chooseDefaultLanguagePair, languageControlLabel } from './languages';
 
 describe('chooseDefaultLanguagePair', () => {
   it('prefers Japanese and English when both installed', () => {
@@ -10,5 +10,12 @@ describe('chooseDefaultLanguagePair', () => {
         { id: 'ja-JP', label: 'Japanese' }
       ])
     ).toEqual({ source: 'en-US', target: 'ja-JP' });
+  });
+});
+
+describe('languageControlLabel', () => {
+  it('uses a compact locale suffix for long region names', () => {
+    expect(languageControlLabel({ id: 'en-AU', label: 'English (Australia)' })).toBe('English AU');
+    expect(languageControlLabel({ id: 'ja-JP', label: 'Japanese (Japan)' })).toBe('Japanese JP');
   });
 });
