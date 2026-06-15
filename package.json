@@ -7,7 +7,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run",
+    "test": "vitest run && scripts/test-swift-helper.sh",
+    "test:ui": "vitest run",
+    "test:swift": "scripts/test-swift-helper.sh",
     "tauri": "tauri",
     "build:helper": "scripts/build-helper.sh"
   },
