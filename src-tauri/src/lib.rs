@@ -70,7 +70,9 @@ pub fn helper_binary_candidates(manifest_dir: &Path, current_exe: &Path) -> Vec<
         exe_dir.join("../Resources").join(&helper_app_binary),
         exe_dir.join("../Resources").join(binary),
         exe_dir.join("../Resources").join("helper"),
-        exe_dir.join("../Resources/binaries").join(&helper_app_binary),
+        exe_dir
+            .join("../Resources/binaries")
+            .join(&helper_app_binary),
         exe_dir.join("../Resources/binaries").join(binary),
     ]
 }
@@ -117,7 +119,10 @@ pub fn read_json_lines(
 
 pub fn attach_session_id(value: &mut Value, session_id: &str) {
     if let Value::Object(object) = value {
-        object.insert("sessionId".to_string(), Value::String(session_id.to_string()));
+        object.insert(
+            "sessionId".to_string(),
+            Value::String(session_id.to_string()),
+        );
     }
 }
 
