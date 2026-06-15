@@ -7,6 +7,7 @@ struct CommandLineOptionsTests {
     try parsesMicStreamCommandWithLocales()
     try readsValueAfterFlag()
     try formatsLanguageInfoWithBcp47Identifier()
+    try encodesJsonLine()
   }
 
   static func parsesDetectLanguagesCommand() throws {
@@ -45,6 +46,11 @@ struct CommandLineOptionsTests {
     let language = languageInfo(from: Locale(identifier: "ja_JP"))
     try expectEqual(language.id, "ja-JP")
     try expectEqual(language.label, "Japanese (Japan)")
+  }
+
+  static func encodesJsonLine() throws {
+    let line = try jsonLine(for: LanguageInfo(id: "en-US", label: "English"))
+    try expectEqual(line, #"{"id":"en-US","label":"English"}"#)
   }
 }
 
