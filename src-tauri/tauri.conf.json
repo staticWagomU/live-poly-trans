@@ -5,7 +5,7 @@
   "identifier": "com.staticwagomu.live-poly-trans",
   "build": {
     "beforeDevCommand": "bun run build:helper && bun run dev",
-    "beforeBuildCommand": "bun run build:helper && bun run build",
+    "beforeBuildCommand": "bun scripts/prepare-dmg-background.mjs && bun run build:helper && bun run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../build"
   },
@@ -27,10 +27,27 @@
     }
   },
   "bundle": {
-    "active": false,
-    "icon": [],
+    "active": true,
+    "targets": ["dmg"],
+    "icon": ["icons/icon.png"],
+    "externalBin": ["binaries/helper"],
     "macOS": {
-      "minimumSystemVersion": "26.0"
+      "minimumSystemVersion": "26.0",
+      "dmg": {
+        "background": "icons/dmg-background.png",
+        "windowSize": {
+          "width": 760,
+          "height": 430
+        },
+        "appPosition": {
+          "x": 165,
+          "y": 220
+        },
+        "applicationFolderPosition": {
+          "x": 595,
+          "y": 220
+        }
+      }
     }
   }
 }

@@ -12,7 +12,8 @@
     "test:ui": "vitest run",
     "test:swift": "scripts/test-swift-helper.sh",
     "tauri": "tauri",
-    "build:helper": "scripts/build-helper.sh"
+    "build:helper": "scripts/build-helper.sh",
+    "build:dist": "scripts/build-distribution.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.6.0",

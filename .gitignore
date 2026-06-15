@@ -4,6 +4,7 @@ build/
 
 src-tauri/target/
 src-tauri/binaries/helper-*
+src-tauri/icons/dmg-background.png
 src-tauri/gen/
 
 swift-helper/.build/
