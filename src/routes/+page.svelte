@@ -95,34 +95,33 @@
 <main class="stage">
   <section class="window" aria-label="LivePolyTrans">
     <header class="toolbar" data-tauri-drag-region>
-      <div class="identity">
-        <strong>LivePolyTrans</strong>
-        <span>Speaker and mic appear in one conversation</span>
-      </div>
+      <div class="toolbar-spacer"></div>
 
-      <div class="language-strip" aria-label="Translation languages">
-        <label>
-          <span>From</span>
-          <select bind:value={sourceLanguage} aria-label="Source language">
-            {#each installedLanguages as language}
-              <option value={language.id}>{languageControlLabel(language)}</option>
-            {/each}
-          </select>
-        </label>
+      <div class="toolbar-actions">
+        <div class="language-strip" aria-label="Main and sub languages">
+          <label>
+            <span>Main</span>
+            <select bind:value={sourceLanguage} aria-label="Main language">
+              {#each installedLanguages as language}
+                <option value={language.id}>{languageControlLabel(language)}</option>
+              {/each}
+            </select>
+          </label>
         <span class="arrow">􀄫</span>
-        <label>
-          <span>To</span>
-          <select bind:value={targetLanguage} aria-label="Target language">
-            {#each installedLanguages as language}
-              <option value={language.id}>{languageControlLabel(language)}</option>
-            {/each}
-          </select>
-        </label>
-      </div>
+          <label>
+            <span>Sub</span>
+            <select bind:value={targetLanguage} aria-label="Sub language">
+              {#each installedLanguages as language}
+                <option value={language.id}>{languageControlLabel(language)}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
 
-      <button class="record" class:recording={isRecording} on:click={toggleRecording}>
-        <span></span>{isRecording ? 'Stop' : 'Record'}
-      </button>
+        <button class="record" class:recording={isRecording} on:click={toggleRecording}>
+          <span></span>{isRecording ? 'Stop' : 'Record'}
+        </button>
+      </div>
     </header>
 
     <div class="conversation">
@@ -144,14 +143,14 @@
               <div class="chat-bubble incoming">
                 <span>Speaker</span>
                 <p>The other person’s audio appears here.</p>
-                <small>Original text appears first. Translation is shown below it.</small>
+                <small>Sub language appears underneath in lighter text.</small>
               </div>
             </article>
             <article class="chat-row self-row">
               <div class="chat-bubble outgoing">
                 <span>Mic</span>
                 <p>Your spoken replies appear in the same conversation.</p>
-                <small>Both sources stay visible without switching views.</small>
+                <small>Main language stays as the primary message line.</small>
               </div>
             </article>
           </div>
@@ -233,29 +232,22 @@
   .toolbar {
     display: grid;
     align-items: center;
-    grid-template-columns: 1fr auto auto;
-    gap: 14px;
-    padding: 18px 22px 14px;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    padding: 10px 18px;
     border-bottom: 1px solid rgba(120, 126, 132, 0.13);
     background: rgba(255, 255, 255, 0.38);
   }
 
-  .identity {
-    display: grid;
-    min-width: 0;
+  .toolbar-spacer {
+    min-width: 1px;
   }
 
-  .identity strong {
-    font-size: 15px;
-    letter-spacing: -0.02em;
-  }
-
-  .identity span {
-    overflow: hidden;
-    color: #70757b;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .toolbar-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    justify-self: end;
   }
 
   .language-strip,
@@ -273,8 +265,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    border-radius: 18px;
-    padding: 6px 8px;
+    border-radius: 999px;
+    padding: 5px 10px;
   }
 
   .language-strip label {
@@ -283,21 +275,21 @@
   }
 
   .language-strip label span {
-    padding-left: 6px;
-    color: #8a8f94;
-    font-size: 10px;
-    font-weight: 800;
-    letter-spacing: 0.05em;
+    padding-left: 1px;
+    color: #8b9298;
+    font-size: 9px;
+    font-weight: 850;
+    letter-spacing: 0.06em;
     text-transform: uppercase;
   }
 
   .language-strip select {
-    width: 118px;
+    width: 112px;
     border: 0;
-    border-radius: 10px;
+    border-radius: 999px;
     background: transparent;
     color: #2f3337;
-    font-size: 13px;
+    font-size: 12px;
     font-weight: 750;
   }
 
@@ -309,11 +301,12 @@
   .record {
     display: flex;
     align-items: center;
-    gap: 9px;
+    gap: 7px;
     border-radius: 999px;
-    padding: 11px 16px;
+    padding: 9px 13px;
     border: 0;
     color: #111;
+    font-size: 13px;
     font-weight: 800;
   }
 
@@ -459,7 +452,7 @@
   .chat-bubble p {
     margin: 0;
     font-size: 17px;
-    font-weight: 560;
+    font-weight: 720;
     line-height: 1.42;
     letter-spacing: -0.015em;
   }
@@ -467,8 +460,9 @@
   .chat-bubble small {
     display: block;
     margin-top: 8px;
-    opacity: 0.7;
+    opacity: 0.64;
     font-size: 14px;
+    font-weight: 520;
     line-height: 1.35;
   }
 
@@ -477,9 +471,13 @@
     align-items: center;
     grid-template-columns: auto 1fr auto;
     gap: 14px;
-    margin: 0 22px 18px;
-    border-radius: 22px;
-    padding: 10px 12px 10px 14px;
+    margin: 0 22px;
+    border: 0;
+    border-top: 1px solid rgba(120, 126, 132, 0.16);
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    padding: 10px 0 12px;
   }
 
   .status {
@@ -516,13 +514,21 @@
   }
 
   .actions button {
-    border: 0;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.66);
-    color: #565d64;
-    padding: 8px 12px;
+    border: 1px solid rgba(121, 128, 136, 0.34);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #ffffff, #edf0f2);
+    color: #2f353b;
+    padding: 7px 11px;
     font-size: 12px;
     font-weight: 800;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 1px 2px rgba(34, 42, 50, 0.08);
+  }
+
+  .actions button:active {
+    background: linear-gradient(180deg, #dfe4e7, #f7f8f9);
+    box-shadow: inset 0 1px 2px rgba(34, 42, 50, 0.12);
   }
 
   @media (max-width: 900px) {
@@ -530,7 +536,11 @@
       grid-template-columns: 1fr;
     }
 
-    .identity,
+    .toolbar-actions {
+      display: grid;
+      justify-self: stretch;
+    }
+
     .language-strip,
     .record {
       justify-self: stretch;
