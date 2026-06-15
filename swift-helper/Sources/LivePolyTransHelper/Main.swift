@@ -14,26 +14,55 @@ public struct LivePolyTransHelper {
         throw HelperRuntimeError.unsupportedOperatingSystem
       }
     } catch {
-      fputs("live-poly-trans-helper: \(error)\n", stderr)
+      fputs("live-poly-trans-helper: \(diagnosticDescription(for: error))\n", stderr)
       exit(1)
     }
   }
 
   @available(macOS 26.0, *)
   public static func run(options: CommandLineOptions) async throws {
+    helperDebugLog("command=\(options.command) source=\(options.sourceLanguage ?? "-") target=\(options.targetLanguage ?? "-") languages=\(options.languages.joined(separator: ",")) segmentDirectory=\(options.segmentDirectory ?? "-")")
+
     switch options.command {
     case .detectLanguages:
       let payload = await languageDetectionPayload(
         installed: SpeechTranscriber.installedLocales,
         supported: SpeechTranscriber.supportedLocales
       )
+      helperDebugLog("detect-languages installed=\(payload.installed.count) supported=\(payload.supported.count)")
       print(try jsonLine(for: payload))
       fflush(stdout)
     case let .stream(stream):
-      guard stream == .mic else {
-        throw HelperRuntimeError.unsupportedStream(stream)
-      }
-      try await runMicrophoneTranscription(sourceLanguage: options.sourceLanguage)
+      try await runMicrophoneTranscription(
+        stream: stream,
+        sourceLanguage: options.sourceLanguage,
+        targetLanguage: options.targetLanguage,
+        languages: options.languages,
+        segmentDirectory: options.segmentDirectory
+      )
     }
   }
+}
+
+func diagnosticDescription(for error: Error) -> String {
+  let nsError = error as NSError
+  var parts = [
+    String(describing: error),
+    "domain=\(nsError.domain)",
+    "code=\(nsError.code)"
+  ]
+
+  if !nsError.localizedDescription.isEmpty {
+    parts.append("description=\(nsError.localizedDescription)")
+  }
+
+  if !nsError.userInfo.isEmpty {
+    let userInfo = nsError.userInfo
+      .map { key, value in "\(key)=\(value)" }
+      .sorted()
+      .joined(separator: ", ")
+    parts.append("userInfo={\(userInfo)}")
+  }
+
+  return parts.joined(separator: " | ")
 }

@@ -12,10 +12,18 @@ public struct CommandLineOptions: Equatable, Sendable {
   public let command: HelperCommand
   public let sourceLanguage: String?
   public let targetLanguage: String?
+  public let languages: [String]
+  public let segmentDirectory: String?
 
   public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
     if arguments.contains("--detect-languages") {
-      return CommandLineOptions(command: .detectLanguages, sourceLanguage: nil, targetLanguage: nil)
+      return CommandLineOptions(
+        command: .detectLanguages,
+        sourceLanguage: nil,
+        targetLanguage: nil,
+        languages: [],
+        segmentDirectory: nil
+      )
     }
 
     guard
@@ -28,7 +36,9 @@ public struct CommandLineOptions: Equatable, Sendable {
     return CommandLineOptions(
       command: .stream(stream),
       sourceLanguage: value(after: "--source-language", in: arguments),
-      targetLanguage: value(after: "--target-language", in: arguments)
+      targetLanguage: value(after: "--target-language", in: arguments),
+      languages: values(after: "--language", in: arguments),
+      segmentDirectory: value(after: "--segment-directory", in: arguments)
     )
   }
 }
@@ -48,4 +58,19 @@ public func value(after flag: String, in arguments: [String]) -> String? {
   }
 
   return arguments[valueIndex]
+}
+
+public func values(after flag: String, in arguments: [String]) -> [String] {
+  arguments.indices.compactMap { index in
+    guard arguments[index] == flag else {
+      return nil
+    }
+
+    let valueIndex = arguments.index(after: index)
+    guard valueIndex < arguments.endIndex else {
+      return nil
+    }
+
+    return arguments[valueIndex]
+  }
 }

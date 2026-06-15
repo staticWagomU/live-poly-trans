@@ -5,7 +5,9 @@ struct CommandLineOptionsTests {
   static func main() throws {
     try parsesDetectLanguagesCommand()
     try parsesMicStreamCommandWithLocales()
+    try parsesSpeakerStreamCommandWithSegmentDirectory()
     try readsValueAfterFlag()
+    try readsRepeatedValuesAfterFlag()
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
@@ -32,6 +34,24 @@ struct CommandLineOptionsTests {
     try expectEqual(options.targetLanguage, "ja-JP")
   }
 
+  static func parsesSpeakerStreamCommandWithSegmentDirectory() throws {
+    let options = try CommandLineOptions.parse([
+      "helper",
+      "--stream",
+      "speaker",
+      "--language",
+      "en-US",
+      "--language",
+      "ja-JP",
+      "--segment-directory",
+      "/tmp/live-poly-trans"
+    ])
+
+    try expectEqual(options.command, .stream(.speaker))
+    try expectEqual(options.languages, ["en-US", "ja-JP"])
+    try expectEqual(options.segmentDirectory, "/tmp/live-poly-trans")
+  }
+
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {
     if actual != expected {
       throw TestFailure(message: "Expected \(expected), got \(actual)")
@@ -41,6 +61,13 @@ struct CommandLineOptionsTests {
   static func readsValueAfterFlag() throws {
     try expectEqual(value(after: "--stream", in: ["helper", "--stream", "mic"]), "mic")
     try expectEqual(value(after: "--missing", in: ["helper", "--stream", "mic"]), nil)
+  }
+
+  static func readsRepeatedValuesAfterFlag() throws {
+    try expectEqual(
+      values(after: "--language", in: ["helper", "--language", "en-US", "--language", "ja-JP"]),
+      ["en-US", "ja-JP"]
+    )
   }
 
   static func formatsLanguageInfoWithBcp47Identifier() throws {
@@ -61,7 +88,8 @@ struct CommandLineOptionsTests {
       text: "hello",
       translation: nil,
       isFinal: true,
-      timestamp: Date(timeIntervalSince1970: 0)
+      timestamp: Date(timeIntervalSince1970: 0),
+      segmentId: "0-1000"
     )
 
     try expectEqual(event.type, "transcript")

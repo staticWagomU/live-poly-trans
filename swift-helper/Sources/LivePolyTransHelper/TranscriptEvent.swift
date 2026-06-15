@@ -8,6 +8,7 @@ public struct TranscriptEvent: Codable, Equatable {
   public let trans: String?
   public let isFinal: Bool
   public let timestamp: String
+  public let segmentId: String
 }
 
 public func transcriptEvent(
@@ -16,7 +17,8 @@ public func transcriptEvent(
   text: String,
   translation: String?,
   isFinal: Bool,
-  timestamp: Date
+  timestamp: Date,
+  segmentId: String
 ) -> TranscriptEvent {
   TranscriptEvent(
     type: "transcript",
@@ -25,6 +27,7 @@ public func transcriptEvent(
     text: text,
     trans: translation,
     isFinal: isFinal,
-    timestamp: ISO8601DateFormatter().string(from: timestamp)
+    timestamp: ISO8601DateFormatter().string(from: timestamp),
+    segmentId: segmentId
   )
 }
