@@ -14,7 +14,6 @@
     supported: LanguageInfo[];
   };
 
-  let selectedStream: 'speaker' | 'mic' = 'speaker';
   let sourceLanguage = 'en-US';
   let targetLanguage = 'ja-JP';
   let installedLanguages: LanguageInfo[] = [
@@ -78,7 +77,6 @@
       sourceLanguage,
       targetLanguage
     });
-    selectedStream = 'mic';
     isRecording = true;
     status = 'Listening live';
   }
@@ -97,24 +95,9 @@
 <main class="stage">
   <section class="window" aria-label="LivePolyTrans">
     <header class="toolbar" data-tauri-drag-region>
-      <div class="traffic-lights" aria-hidden="true">
-        <span class="close"></span>
-        <span class="minimize"></span>
-        <span class="zoom"></span>
-      </div>
-
       <div class="identity">
         <strong>LivePolyTrans</strong>
-        <span>{sourceLabel} → {targetLabel}</span>
-      </div>
-
-      <div class="stream-switch" aria-label="Audio stream">
-        <button class:active={selectedStream === 'speaker'} on:click={() => (selectedStream = 'speaker')}>
-          Speaker
-        </button>
-        <button class:active={selectedStream === 'mic'} on:click={() => (selectedStream = 'mic')}>
-          Mic
-        </button>
+        <span>Speaker and mic appear in one conversation</span>
       </div>
 
       <div class="language-strip" aria-label="Translation languages">
@@ -143,54 +126,39 @@
     </header>
 
     <div class="conversation">
-      <aside class="source-rail" aria-label="Audio sources">
-        <button class:active={selectedStream === 'speaker'} on:click={() => (selectedStream = 'speaker')}>
-          <span>􀝎</span>
-          <strong>Speaker</strong>
-          <small>Zoom / system audio</small>
-        </button>
-        <button class:active={selectedStream === 'mic'} on:click={() => (selectedStream = 'mic')}>
-          <span>􀊰</span>
-          <strong>Mic</strong>
-          <small>Your voice</small>
-        </button>
-      </aside>
-
       <section class="thread" aria-label="Translation chat">
         <div class="thread-head">
           <div>
             <span class="date-pill">Today</span>
             <h1>Live translation log</h1>
           </div>
-          <p>{status}</p>
+          <div class="legend" aria-label="Message lanes">
+            <span><i class="speaker-dot"></i>Speaker</span>
+            <span><i class="mic-dot"></i>Mic</span>
+          </div>
         </div>
 
         {#if messages.length === 0}
           <div class="starter" aria-live="polite">
             <article class="chat-row speaker-row">
-              <div class="avatar">􀝎</div>
               <div class="chat-bubble incoming">
                 <span>Speaker</span>
-                <p>Start recording to capture the other person’s audio here.</p>
+                <p>The other person’s audio appears here.</p>
                 <small>Original text appears first. Translation is shown below it.</small>
               </div>
             </article>
             <article class="chat-row self-row">
               <div class="chat-bubble outgoing">
                 <span>Mic</span>
-                <p>Your spoken replies appear on this side.</p>
-                <small>Minimal, message-like transcript history.</small>
+                <p>Your spoken replies appear in the same conversation.</p>
+                <small>Both sources stay visible without switching views.</small>
               </div>
-              <div class="avatar">􀊰</div>
             </article>
           </div>
         {:else}
           <div class="messages" aria-live="polite">
             {#each messages as message (message.id)}
               <article class="chat-row" class:self-row={message.role === 'self'}>
-                {#if message.role !== 'self'}
-                  <div class="avatar">􀝎</div>
-                {/if}
                 <div class="chat-bubble" class:outgoing={message.role === 'self'} class:incoming={message.role !== 'self'}>
                   <span>{message.role === 'self' ? 'Mic' : 'Speaker'} · {message.language}</span>
                   <p>{message.text}</p>
@@ -198,9 +166,6 @@
                     <small>{message.translation}</small>
                   {/if}
                 </div>
-                {#if message.role === 'self'}
-                  <div class="avatar">􀊰</div>
-                {/if}
               </article>
             {/each}
           </div>
@@ -229,10 +194,7 @@
     margin: 0;
     min-height: 100vh;
     overflow: hidden;
-    background:
-      radial-gradient(circle at 28% 14%, rgba(121, 142, 154, 0.44), transparent 30%),
-      radial-gradient(circle at 74% 6%, rgba(255, 255, 255, 0.24), transparent 26%),
-      linear-gradient(135deg, #2f3331 0%, #444844 48%, #2d302e 100%);
+    background: #f2f4f5;
     color: #202124;
     font-family:
       -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
@@ -248,64 +210,34 @@
   }
 
   .stage {
-    display: grid;
     min-height: 100vh;
-    place-items: center;
-    padding: 28px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(235, 239, 242, 0.96)),
+      #eef2f4;
   }
 
   .window {
     display: grid;
-    width: min(1180px, 94vw);
-    height: min(760px, 88vh);
+    width: 100vw;
+    height: 100vh;
     overflow: hidden;
     grid-template-rows: auto 1fr auto;
-    border: 1px solid rgba(255, 255, 255, 0.58);
-    border-radius: 30px;
+    border: 0;
+    border-radius: 0;
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.84), rgba(242, 244, 245, 0.72)),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(242, 245, 247, 0.92)),
       #f4f5f5;
-    box-shadow:
-      0 34px 90px rgba(0, 0, 0, 0.34),
-      inset 0 1px 0 rgba(255, 255, 255, 0.9);
-    backdrop-filter: blur(34px);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
   }
 
   .toolbar {
     display: grid;
     align-items: center;
-    grid-template-columns: 150px 1fr auto auto auto;
+    grid-template-columns: 1fr auto auto;
     gap: 14px;
     padding: 18px 22px 14px;
     border-bottom: 1px solid rgba(120, 126, 132, 0.13);
     background: rgba(255, 255, 255, 0.38);
-  }
-
-  .traffic-lights {
-    display: flex;
-    gap: 10px;
-    padding-left: 6px;
-  }
-
-  .traffic-lights span {
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-  }
-
-  .close {
-    background: #ff5f57;
-    border: 1px solid #d94942;
-  }
-
-  .minimize {
-    background: #febc2e;
-    border: 1px solid #d89a15;
-  }
-
-  .zoom {
-    background: #28c840;
-    border: 1px solid #1faa34;
   }
 
   .identity {
@@ -326,10 +258,8 @@
     white-space: nowrap;
   }
 
-  .stream-switch,
   .language-strip,
   .record,
-  .source-rail,
   .bottom-bar,
   .date-pill {
     border: 1px solid rgba(255, 255, 255, 0.7);
@@ -337,28 +267,6 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.82),
       0 12px 28px rgba(75, 83, 90, 0.12);
-  }
-
-  .stream-switch {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    width: 202px;
-    padding: 3px;
-    border-radius: 999px;
-  }
-
-  .stream-switch button {
-    border: 0;
-    border-radius: 999px;
-    background: transparent;
-    color: #5d6267;
-    padding: 7px 14px;
-    font-weight: 700;
-  }
-
-  .stream-switch button.active {
-    background: rgba(219, 222, 224, 0.9);
-    color: #202124;
   }
 
   .language-strip {
@@ -428,53 +336,7 @@
   .conversation {
     display: grid;
     min-height: 0;
-    grid-template-columns: 206px 1fr;
-    gap: 18px;
     padding: 18px 22px;
-  }
-
-  .source-rail {
-    display: grid;
-    align-content: start;
-    gap: 10px;
-    border-radius: 24px;
-    padding: 10px;
-  }
-
-  .source-rail button {
-    display: grid;
-    grid-template-columns: 34px 1fr;
-    gap: 0 10px;
-    border: 0;
-    border-radius: 18px;
-    background: transparent;
-    padding: 12px;
-    color: #5c6268;
-    text-align: left;
-  }
-
-  .source-rail button.active {
-    background: rgba(230, 235, 239, 0.92);
-    color: #202124;
-  }
-
-  .source-rail button > span {
-    grid-row: span 2;
-    display: grid;
-    width: 32px;
-    height: 32px;
-    place-items: center;
-    border-radius: 11px;
-    background: rgba(255, 255, 255, 0.72);
-  }
-
-  .source-rail strong {
-    font-size: 14px;
-  }
-
-  .source-rail small {
-    color: #899097;
-    font-size: 11px;
   }
 
   .thread {
@@ -483,7 +345,7 @@
     grid-template-rows: auto 1fr;
     overflow: hidden;
     border: 1px solid rgba(183, 190, 196, 0.28);
-    border-radius: 26px;
+    border-radius: 24px;
     background:
       linear-gradient(180deg, rgba(251, 252, 253, 0.88), rgba(238, 244, 248, 0.82)),
       #f7fafb;
@@ -504,11 +366,33 @@
     letter-spacing: -0.04em;
   }
 
-  .thread-head p {
-    margin: 5px 0 0;
-    color: #81878d;
-    font-size: 13px;
-    font-weight: 700;
+  .legend {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    color: #7d8389;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .legend span {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .legend i {
+    width: 9px;
+    height: 9px;
+    border-radius: 999px;
+  }
+
+  .speaker-dot {
+    background: #8a929a;
+  }
+
+  .mic-dot {
+    background: #1d8bff;
   }
 
   .date-pill {
@@ -542,18 +426,6 @@
 
   .self-row {
     justify-content: flex-end;
-  }
-
-  .avatar {
-    display: grid;
-    width: 34px;
-    height: 34px;
-    flex: 0 0 auto;
-    place-items: center;
-    border-radius: 999px;
-    background: rgba(255, 255, 255, 0.9);
-    color: #7a8086;
-    box-shadow: 0 6px 14px rgba(41, 48, 54, 0.08);
   }
 
   .chat-bubble {
@@ -654,40 +526,18 @@
   }
 
   @media (max-width: 900px) {
-    .window {
-      height: 92vh;
-    }
-
     .toolbar {
-      grid-template-columns: auto 1fr;
+      grid-template-columns: 1fr;
     }
 
     .identity,
     .language-strip,
     .record {
-      grid-column: span 2;
       justify-self: stretch;
-    }
-
-    .conversation {
-      grid-template-columns: 1fr;
-    }
-
-    .source-rail {
-      grid-auto-flow: column;
-      grid-template-columns: 1fr 1fr;
     }
   }
 
   @media (max-width: 640px) {
-    .stage {
-      padding: 12px;
-    }
-
-    .source-rail {
-      display: none;
-    }
-
     .bottom-bar {
       grid-template-columns: 1fr;
     }
