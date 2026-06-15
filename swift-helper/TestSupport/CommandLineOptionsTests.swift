@@ -11,6 +11,8 @@ struct CommandLineOptionsTests {
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
+    try configuresScreenCaptureKitSpeakerStream()
+    try configuresScreenCaptureKitSpeakerAudioFormat()
   }
 
   static func parsesDetectLanguagesCommand() throws {
@@ -95,6 +97,27 @@ struct CommandLineOptionsTests {
     try expectEqual(event.type, "transcript")
     try expectEqual(event.stream, "mic")
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+  }
+
+  static func configuresScreenCaptureKitSpeakerStream() throws {
+    if #available(macOS 13.0, *) {
+      let configuration = screenCaptureKitSpeakerStreamConfiguration()
+
+      try expectEqual(configuration.width, 2)
+      try expectEqual(configuration.height, 2)
+      try expectEqual(configuration.capturesAudio, true)
+      try expectEqual(configuration.excludesCurrentProcessAudio, true)
+      try expectEqual(configuration.sampleRate, screenCaptureKitSpeakerSampleRate)
+      try expectEqual(configuration.channelCount, Int(screenCaptureKitSpeakerChannelCount))
+    }
+  }
+
+  static func configuresScreenCaptureKitSpeakerAudioFormat() throws {
+    let format = try screenCaptureKitSpeakerAudioFormat()
+
+    try expectEqual(Int(format.sampleRate), screenCaptureKitSpeakerSampleRate)
+    try expectEqual(format.channelCount, screenCaptureKitSpeakerChannelCount)
+    try expectEqual(format.commonFormat, .pcmFormatFloat32)
   }
 }
 

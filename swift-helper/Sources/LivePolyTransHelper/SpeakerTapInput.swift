@@ -1,128 +1,82 @@
 import AVFAudio
-import CoreAudio
-import Darwin
+import CoreMedia
 import Foundation
+import ScreenCaptureKit
 import Speech
 
 public enum SpeakerTapError: Error, CustomStringConvertible {
-  case missingTap
-  case missingAggregateDevice
+  case missingDisplay
   case missingAudioFormat
-  case missingDefaultOutputDevice
-  case audioHardwareCall(String, OSStatus)
+  case missingAudioBufferListSize
+  case audioBufferList(OSStatus)
+  case addStreamOutput(String)
+  case screenCaptureKit(String)
 
   public var description: String {
     switch self {
-    case .missingTap:
-      "Core Audio did not create a process tap."
-    case .missingAggregateDevice:
-      "Core Audio did not create an aggregate tap device."
+    case .missingDisplay:
+      "ScreenCaptureKit did not provide a display to bind the system audio stream."
     case .missingAudioFormat:
-      "Core Audio did not provide a readable tap audio format."
-    case .missingDefaultOutputDevice:
-      "Core Audio did not provide a default output device."
-    case let .audioHardwareCall(name, status):
-      "\(name) failed with OSStatus \(status)."
+      "ScreenCaptureKit did not provide a readable audio format."
+    case .missingAudioBufferListSize:
+      "ScreenCaptureKit did not provide an audio buffer list size."
+    case let .audioBufferList(status):
+      "CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer failed with OSStatus \(status)."
+    case let .addStreamOutput(message):
+      "ScreenCaptureKit could not add an audio stream output: \(message)"
+    case let .screenCaptureKit(message):
+      "ScreenCaptureKit speaker capture failed: \(message)"
     }
   }
 }
 
-@available(macOS 26.0, *)
+@available(macOS 13.0, *)
 public final class SpeakerTapInput: @unchecked Sendable {
-  private let tap: AudioHardwareTap
-  private let aggregateDevice: AudioHardwareAggregateDevice
+  private let stream: SCStream
+  private let streamOutput = SpeakerStreamOutput()
+  private let sampleQueue = DispatchQueue(label: "com.staticwagomu.live-poly-trans.speaker.screencapturekit")
+  private let stateQueue = DispatchQueue(label: "com.staticwagomu.live-poly-trans.speaker.state")
   private let format: AVAudioFormat
   private let ringBuffer = AudioByteRingBuffer(capacity: 32 * 1024 * 1024)
-  private var ioProcID: AudioDeviceIOProcID?
+  private var isCapturing = false
+  private var isOutputAdded = false
 
-  public init() throws {
-    let outputDevice = try defaultOutputDevice()
-    let outputDeviceUID = try outputDevice.uid
-    let description = CATapDescription(excludingProcesses: [], deviceUID: outputDeviceUID, stream: 0)
-    description.name = "LivePolyTrans Speaker Tap"
-    description.isPrivate = true
-    description.muteBehavior = CATapMuteBehavior.unmuted
+  public init() async throws {
+    let content = try await SCShareableContent.current
+    guard let display = content.displays.first else {
+      throw SpeakerTapError.missingDisplay
+    }
+
+    let filter = SCContentFilter(display: display, excludingWindows: [])
+    let configuration = screenCaptureKitSpeakerStreamConfiguration()
+    self.stream = SCStream(filter: filter, configuration: configuration, delegate: nil)
+    self.format = try screenCaptureKitSpeakerAudioFormat()
+
     helperDebugLog(
-      "speaker-tap-create name=\"\(description.name)\" private=\(description.isPrivate) outputDevice=\(outputDevice.id) outputUID=\(outputDeviceUID) stream=0"
+      "speaker-screencapturekit-create display=\(display.displayID) size=\(display.width)x\(display.height) audioSampleRate=\(configuration.sampleRate) audioChannels=\(configuration.channelCount) excludesCurrentProcessAudio=\(configuration.excludesCurrentProcessAudio)"
     )
-
-    guard let tap = try AudioHardwareSystem.shared.makeProcessTap(description: description) else {
-      throw SpeakerTapError.missingTap
-    }
-
-    self.tap = tap
-    let tapUID = try tap.uid
-    helperDebugLog("speaker-tap-created uid=\(tapUID)")
-
-    let aggregateDescription: [String: Any] = [
-      kAudioAggregateDeviceNameKey: "LivePolyTrans Speaker Capture",
-      kAudioAggregateDeviceUIDKey: "com.staticwagomu.live-poly-trans.speaker.\(UUID().uuidString)",
-      kAudioAggregateDeviceIsPrivateKey: true,
-      kAudioAggregateDeviceTapAutoStartKey: true,
-      kAudioAggregateDeviceTapListKey: [
-        [
-          kAudioSubTapUIDKey: tapUID,
-          kAudioSubTapDriftCompensationKey: true
-        ]
-      ]
-    ]
-
-    guard let aggregateDevice = try AudioHardwareSystem.shared.makeAggregateDevice(description: aggregateDescription) else {
-      try AudioHardwareSystem.shared.destroyProcessTap(tap)
-      throw SpeakerTapError.missingAggregateDevice
-    }
-
-    self.aggregateDevice = aggregateDevice
-    helperDebugLog("speaker-aggregate-created id=\(aggregateDevice.id)")
-
-    var streamDescription = try tap.format
-    guard let format = AVAudioFormat(streamDescription: &streamDescription) else {
-      try AudioHardwareSystem.shared.destroyAggregateDevice(aggregateDevice)
-      try AudioHardwareSystem.shared.destroyProcessTap(tap)
-      throw SpeakerTapError.missingAudioFormat
-    }
-
-    self.format = format
-    helperDebugLog("speaker-tap-format {\(audioFormatDescription(format))}")
+    helperDebugLog("speaker-screencapturekit-format {\(audioFormatDescription(format))}")
   }
 
   deinit {
     stop()
   }
 
-  public func makeInputSequence(analyzerFormat: AVAudioFormat) throws -> AsyncThrowingStream<AnalyzerInput, Error> {
-    AsyncThrowingStream { continuation in
-      do {
-        try start(analyzerFormat: analyzerFormat, continuation: continuation)
-      } catch {
-        continuation.finish(throwing: error)
-      }
+  public func makeInputSequence(analyzerFormat: AVAudioFormat) async throws -> AsyncThrowingStream<AnalyzerInput, Error> {
+    stop()
 
-      continuation.onTermination = { [weak self] _ in
-        self?.stop()
-      }
-    }
-  }
-
-  private func start(
-    analyzerFormat: AVAudioFormat,
-    continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation
-  ) throws {
-    var localIOProcID: AudioDeviceIOProcID?
     let audioFormat = format
     let converter = audioConverter(from: audioFormat, to: analyzerFormat)
     let audioRingBuffer = ringBuffer
     let audioCounter = AudioDebugCounter(label: "speaker")
     let convertedAudioCounter = AudioDebugCounter(label: "speaker-converted")
-    let callbackCounter = AudioCallbackDebugCounter(label: "speaker-callback", format: audioFormat)
-
-    helperDebugLog("speaker-start aggregateDevice=\(aggregateDevice.id) converter=\(converter == nil ? "none" : "enabled")")
-
-    let status = AudioDeviceCreateIOProcIDWithBlock(&localIOProcID, aggregateDevice.id, nil) {
-      _, inputData, _, outputData, _ in
-      callbackCounter.record(inputData: inputData, outputData: outputData)
-      if let buffer = copyAudioBufferList(inputData, format: audioFormat, ringBuffer: audioRingBuffer) {
+    let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
+      streamOutput.setHandler { sampleBuffer in
         do {
+          guard let buffer = try screenCaptureKitAudioBuffer(from: sampleBuffer, ringBuffer: audioRingBuffer) else {
+            return
+          }
+
           audioCounter.record(buffer)
           let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
           convertedAudioCounter.record(analyzerBuffer)
@@ -131,28 +85,66 @@ public final class SpeakerTapInput: @unchecked Sendable {
           continuation.finish(throwing: error)
         }
       }
-    }
-    try throwIfAudioError(status, "AudioDeviceCreateIOProcIDWithBlock")
 
-    guard let localIOProcID else {
-      throw SpeakerTapError.audioHardwareCall("AudioDeviceCreateIOProcIDWithBlock", -1)
+      continuation.onTermination = { [weak self] _ in
+        self?.stop()
+      }
     }
 
-    ioProcID = localIOProcID
-    try throwIfAudioError(AudioDeviceStart(aggregateDevice.id, localIOProcID), "AudioDeviceStart")
-    helperDebugLog("speaker-audio-device-started aggregateDevice=\(aggregateDevice.id)")
+    do {
+      do {
+        try stream.addStreamOutput(streamOutput, type: .audio, sampleHandlerQueue: sampleQueue)
+      } catch {
+        throw SpeakerTapError.addStreamOutput(error.localizedDescription)
+      }
+      stateQueue.sync {
+        isOutputAdded = true
+      }
+
+      helperDebugLog("speaker-screencapturekit-start converter=\(converter == nil ? "none" : "enabled")")
+      try await stream.startCapture()
+
+      stateQueue.sync {
+        isCapturing = true
+      }
+
+      helperDebugLog("speaker-screencapturekit-started")
+      return inputSequence
+    } catch {
+      stop()
+      throw error
+    }
   }
 
   public func stop() {
-    if let ioProcID {
-      helperDebugLog("speaker-stop aggregateDevice=\(aggregateDevice.id)")
-      _ = AudioDeviceStop(aggregateDevice.id, ioProcID)
-      _ = AudioDeviceDestroyIOProcID(aggregateDevice.id, ioProcID)
-      self.ioProcID = nil
+    let state = stateQueue.sync {
+      let wasCapturing = isCapturing
+      let hadOutput = isOutputAdded
+      isCapturing = false
+      isOutputAdded = false
+      return (wasCapturing, hadOutput)
     }
 
-    try? AudioHardwareSystem.shared.destroyAggregateDevice(aggregateDevice)
-    try? AudioHardwareSystem.shared.destroyProcessTap(tap)
+    streamOutput.reset()
+
+    if state.1 {
+      do {
+        try stream.removeStreamOutput(streamOutput, type: .audio)
+      } catch {
+        helperDebugLog("speaker-screencapturekit-remove-output-error error=\(error.localizedDescription)")
+      }
+    }
+
+    guard state.0 else {
+      return
+    }
+
+    helperDebugLog("speaker-screencapturekit-stop")
+    stream.stopCapture { error in
+      if let error {
+        helperDebugLog("speaker-screencapturekit-stop-error error=\(error.localizedDescription)")
+      }
+    }
   }
 
   public var audioFormat: AVAudioFormat {
@@ -160,67 +152,103 @@ public final class SpeakerTapInput: @unchecked Sendable {
   }
 }
 
-private final class AudioCallbackDebugCounter: @unchecked Sendable {
-  private let label: String
-  private let format: AVAudioFormat
-  private let lock = NSLock()
-  private var count = 0
+@available(macOS 13.0, *)
+final class SpeakerStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
+  let lock = NSLock()
+  var handler: ((CMSampleBuffer) -> Void)?
 
-  init(label: String, format: AVAudioFormat) {
-    self.label = label
-    self.format = format
+  func setHandler(_ handler: @escaping (CMSampleBuffer) -> Void) {
+    lock.lock()
+    self.handler = handler
+    lock.unlock()
   }
 
-  func record(inputData: UnsafePointer<AudioBufferList>, outputData: UnsafeMutablePointer<AudioBufferList>) {
+  func reset() {
     lock.lock()
-    count += 1
-    let currentCount = count
+    handler = nil
     lock.unlock()
+  }
 
-    guard currentCount == 1 || currentCount % 100 == 0 else {
+  func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+    guard type == .audio else {
       return
     }
 
-    helperDebugLog(
-      "\(label) count=\(currentCount) input={\(audioLevelDescription(inputData, format: format))} output={\(audioLevelDescription(outputData, format: format))}"
-    )
+    lock.lock()
+    let currentHandler = handler
+    lock.unlock()
+    currentHandler?(sampleBuffer)
   }
 }
 
-@available(macOS 26.0, *)
-private func defaultOutputDevice() throws -> AudioHardwareDevice {
-  var address = AudioObjectPropertyAddress(
-    mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-    mScope: kAudioObjectPropertyScopeGlobal,
-    mElement: kAudioObjectPropertyElementMain
+func screenCaptureKitAudioBuffer(
+  from sampleBuffer: CMSampleBuffer,
+  ringBuffer: AudioByteRingBuffer
+) throws -> AVAudioPCMBuffer? {
+  let format = try screenCaptureKitAudioFormat(from: sampleBuffer)
+  var sizeNeeded = 0
+  var blockBuffer: CMBlockBuffer?
+
+  let sizeStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+    sampleBuffer,
+    bufferListSizeNeededOut: &sizeNeeded,
+    bufferListOut: nil,
+    bufferListSize: 0,
+    blockBufferAllocator: kCFAllocatorDefault,
+    blockBufferMemoryAllocator: kCFAllocatorDefault,
+    flags: 0,
+    blockBufferOut: &blockBuffer
   )
-  var deviceID = AudioObjectID(kAudioObjectUnknown)
-  var dataSize = UInt32(MemoryLayout<AudioObjectID>.size)
+  guard sizeStatus == noErr else {
+    throw SpeakerTapError.audioBufferList(sizeStatus)
+  }
+  guard sizeNeeded > 0 else {
+    throw SpeakerTapError.missingAudioBufferListSize
+  }
 
-  let status = AudioObjectGetPropertyData(
-    AudioObjectID(kAudioObjectSystemObject),
-    &address,
-    0,
-    nil,
-    &dataSize,
-    &deviceID
+  let rawBufferList = UnsafeMutableRawPointer.allocate(
+    byteCount: sizeNeeded,
+    alignment: MemoryLayout<AudioBufferList>.alignment
   )
-  try throwIfAudioError(status, "AudioObjectGetPropertyData(default output)")
-
-  guard deviceID != kAudioObjectUnknown else {
-    throw SpeakerTapError.missingDefaultOutputDevice
+  defer {
+    rawBufferList.deallocate()
   }
 
-  return AudioHardwareDevice(id: deviceID)
-}
-
-private func throwIfAudioError(_ status: OSStatus, _ name: String) throws {
-  guard status == noErr else {
-    throw SpeakerTapError.audioHardwareCall(name, status)
+  let audioBufferList = rawBufferList.bindMemory(to: AudioBufferList.self, capacity: 1)
+  let fillStatus = CMSampleBufferGetAudioBufferListWithRetainedBlockBuffer(
+    sampleBuffer,
+    bufferListSizeNeededOut: nil,
+    bufferListOut: audioBufferList,
+    bufferListSize: sizeNeeded,
+    blockBufferAllocator: kCFAllocatorDefault,
+    blockBufferMemoryAllocator: kCFAllocatorDefault,
+    flags: 0,
+    blockBufferOut: &blockBuffer
+  )
+  guard fillStatus == noErr else {
+    throw SpeakerTapError.audioBufferList(fillStatus)
   }
+
+  return copyAudioBufferList(UnsafePointer(audioBufferList), format: format, ringBuffer: ringBuffer)
 }
 
-private func copyAudioBufferList(
+func screenCaptureKitAudioFormat(from sampleBuffer: CMSampleBuffer) throws -> AVAudioFormat {
+  guard
+    let formatDescription = CMSampleBufferGetFormatDescription(sampleBuffer),
+    let streamDescription = CMAudioFormatDescriptionGetStreamBasicDescription(formatDescription)
+  else {
+    throw SpeakerTapError.missingAudioFormat
+  }
+
+  var description = streamDescription.pointee
+  guard let format = AVAudioFormat(streamDescription: &description) else {
+    throw SpeakerTapError.missingAudioFormat
+  }
+
+  return format
+}
+
+func copyAudioBufferList(
   _ inputData: UnsafePointer<AudioBufferList>,
   format: AVAudioFormat,
   ringBuffer: AudioByteRingBuffer

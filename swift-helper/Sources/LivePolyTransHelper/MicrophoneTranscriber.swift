@@ -158,7 +158,7 @@ private func makeSpeakerInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber]
 ) async throws -> AudioInputSource {
-  let speakerInput = try SpeakerTapInput()
+  let speakerInput = try await SpeakerTapInput()
   let analyzerFormat = try await analyzerAudioFormat(
     compatibleWith: transcribers,
     naturalFormat: speakerInput.audioFormat
@@ -167,7 +167,7 @@ private func makeSpeakerInputSource(
   helperDebugLog("speaker-analyzer-format {\(audioFormatDescription(analyzerFormat))}")
   try await analyzer.prepareToAnalyze(in: analyzerFormat)
   helperDebugLog("speaker-analyzer-prepared")
-  let sequence = try speakerInput.makeInputSequence(analyzerFormat: analyzerFormat)
+  let sequence = try await speakerInput.makeInputSequence(analyzerFormat: analyzerFormat)
 
   return AudioInputSource(sequence: sequence) {
     helperDebugLog("speaker-cleanup")
