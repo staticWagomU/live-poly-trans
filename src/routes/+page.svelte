@@ -9,6 +9,8 @@
   } from '$lib/languages';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
+  type AudioStream = 'mic' | 'speaker';
+
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
     supported: LanguageInfo[];
@@ -21,7 +23,11 @@
     { id: 'ja-JP', label: 'Japanese' }
   ];
   let messages: ChatMessage[] = [];
-  let activeStreams = new Set<'mic' | 'speaker'>();
+  let activeStreams = new Set<AudioStream>();
+  let streamSessionIds: Record<AudioStream, string | null> = {
+    mic: null,
+    speaker: null
+  };
   let status = 'Ready';
   let errorMessage: string | null = null;
   let savedPath: string | null = null;
@@ -37,6 +43,10 @@
 
   onMount(async () => {
     const unlistenTranscript = await listen<TranscriptEvent>('transcript-event', (event) => {
+      if (!isCurrentTranscriptEvent(event.payload)) {
+        return;
+      }
+
       applyTranscriptEvent(event.payload);
       status = event.payload.isFinal ? 'Saved phrase' : 'Listening live';
     });
@@ -114,13 +124,38 @@
     return Number.isFinite(start) ? start : null;
   }
 
+  function isCurrentTranscriptEvent(event: TranscriptEvent) {
+    return streamSessionIds[event.stream] === event.sessionId;
+  }
+
+  function createStreamSessionId(stream: AudioStream) {
+    return `${stream}-${Date.now()}-${crypto.randomUUID()}`;
+  }
+
+  function setStreamSession(stream: AudioStream, sessionId: string | null) {
+    streamSessionIds = {
+      ...streamSessionIds,
+      [stream]: sessionId
+    };
+  }
+
+  function clearStreamSessions(streams: AudioStream[]) {
+    const nextSessionIds = { ...streamSessionIds };
+    for (const stream of streams) {
+      nextSessionIds[stream] = null;
+    }
+    streamSessionIds = nextSessionIds;
+  }
+
   async function toggleRecording() {
     errorMessage = null;
     savedPath = null;
 
     if (isRecording) {
-      await invoke('stop_all_sessions');
+      clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
+      status = 'Stopping';
+      await invoke('stop_all_sessions');
       status = 'Paused';
       return;
     }
@@ -155,15 +190,17 @@
           : 'Speaker is live';
   }
 
-  async function toggleStream(stream: 'mic' | 'speaker') {
+  async function toggleStream(stream: AudioStream) {
     errorMessage = null;
     savedPath = null;
 
     try {
       if (activeStreams.has(stream)) {
-        await invoke('stop_stream_session', { stream });
+        setStreamSession(stream, null);
         activeStreams.delete(stream);
         activeStreams = new Set(activeStreams);
+        status = activeStreams.size > 0 ? 'Listening live' : 'Stopping';
+        await invoke('stop_stream_session', { stream });
         status = activeStreams.size > 0 ? 'Listening live' : 'Paused';
         return;
       }
@@ -180,13 +217,25 @@
     }
   }
 
-  async function startStream(stream: 'mic' | 'speaker') {
-    await invoke('start_stream_session', {
-      stream,
-      sourceLanguage,
-      targetLanguage,
-      languages: selectedTranscriptionLanguages()
-    });
+  async function startStream(stream: AudioStream) {
+    const sessionId = createStreamSessionId(stream);
+    setStreamSession(stream, sessionId);
+
+    try {
+      await invoke('start_stream_session', {
+        stream,
+        sourceLanguage,
+        targetLanguage,
+        languages: selectedTranscriptionLanguages(),
+        sessionId
+      });
+    } catch (error) {
+      if (streamSessionIds[stream] === sessionId) {
+        setStreamSession(stream, null);
+      }
+      throw error;
+    }
+
     activeStreams.add(stream);
     activeStreams = new Set(activeStreams);
   }

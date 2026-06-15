@@ -12,6 +12,7 @@ describe('transcriptEventToMessage', () => {
         trans: 'こんにちは',
         isFinal: true,
         timestamp: '2026-06-15T00:00:00Z',
+        sessionId: 'mic-session-1',
         segmentId: '1200-800'
       })
     ).toEqual({
@@ -35,6 +36,7 @@ describe('transcriptEventToMessage', () => {
       trans: 'Thank you.',
       isFinal: false,
       timestamp: '2026-06-15T00:00:00Z',
+      sessionId: 'mic-session-1',
       segmentId: '21840-3245'
     });
     const update = transcriptEventToMessage({
@@ -45,6 +47,7 @@ describe('transcriptEventToMessage', () => {
       trans: 'Thank you.',
       isFinal: false,
       timestamp: '2026-06-15T00:00:01Z',
+      sessionId: 'mic-session-1',
       segmentId: '21840-4145'
     });
 

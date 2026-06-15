@@ -6,6 +6,7 @@ export type TranscriptEvent = {
   trans: string | null;
   isFinal: boolean;
   timestamp: string;
+  sessionId: string;
   segmentId?: string;
 };
 
