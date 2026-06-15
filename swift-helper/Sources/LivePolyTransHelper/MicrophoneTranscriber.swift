@@ -200,7 +200,12 @@ private func emitResults(
       continue
     }
 
-    let translation = await translator.translate(text)
+    let translation: String?
+    if let translationText = textForFinalTranslation(text, isFinal: result.isFinal) {
+      translation = await translator.translate(translationText)
+    } else {
+      translation = nil
+    }
     let timestamp = Date()
     let event = transcriptEvent(
       stream: stream,

@@ -11,6 +11,7 @@ struct CommandLineOptionsTests {
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
+    try translatesOnlyFinalTranscriptText()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
   }
@@ -97,6 +98,11 @@ struct CommandLineOptionsTests {
     try expectEqual(event.type, "transcript")
     try expectEqual(event.stream, "mic")
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+  }
+
+  static func translatesOnlyFinalTranscriptText() throws {
+    try expectEqual(textForFinalTranslation(" hello ", isFinal: true), "hello")
+    try expectEqual(textForFinalTranslation("hello", isFinal: false), nil)
   }
 
   static func configuresScreenCaptureKitSpeakerStream() throws {
