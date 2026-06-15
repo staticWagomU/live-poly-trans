@@ -56,13 +56,21 @@ pub fn helper_binary_name() -> &'static str {
 pub fn helper_binary_candidates(manifest_dir: &Path, current_exe: &Path) -> Vec<PathBuf> {
     let binary = helper_binary_name();
     let exe_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+    let helper_app_binary = Path::new("LivePolyTransHelper.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("live-poly-trans-helper");
 
     vec![
+        manifest_dir.join("binaries").join(&helper_app_binary),
         manifest_dir.join("binaries").join(binary),
+        exe_dir.join(&helper_app_binary),
         exe_dir.join(binary),
         exe_dir.join("helper"),
+        exe_dir.join("../Resources").join(&helper_app_binary),
         exe_dir.join("../Resources").join(binary),
         exe_dir.join("../Resources").join("helper"),
+        exe_dir.join("../Resources/binaries").join(&helper_app_binary),
         exe_dir.join("../Resources/binaries").join(binary),
     ]
 }
@@ -77,14 +85,20 @@ pub fn resolve_helper_path() -> Result<PathBuf, String> {
         .ok_or_else(|| format!("helper binary was not found: {}", helper_binary_name()))
 }
 
-pub fn read_json_lines(app: AppHandle, stdout: impl std::io::Read + Send + 'static) {
+pub fn read_json_lines(
+    app: AppHandle,
+    stdout: impl std::io::Read + Send + 'static,
+    session_id: String,
+) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
             match serde_json::from_str::<Value>(&line) {
-                Ok(value) => {
+                Ok(mut value) => {
+                    attach_session_id(&mut value, &session_id);
                     eprintln!(
-                        "live-poly-trans tauri: transcript-event stream={} lang={} final={} segment={} text={}",
+                        "live-poly-trans tauri: transcript-event session={} stream={} lang={} final={} segment={} text={}",
+                        value.get("sessionId").and_then(Value::as_str).unwrap_or("-"),
                         value.get("stream").and_then(Value::as_str).unwrap_or("-"),
                         value.get("lang").and_then(Value::as_str).unwrap_or("-"),
                         value.get("isFinal").and_then(Value::as_bool).unwrap_or(false),
@@ -99,6 +113,12 @@ pub fn read_json_lines(app: AppHandle, stdout: impl std::io::Read + Send + 'stat
             }
         }
     });
+}
+
+pub fn attach_session_id(value: &mut Value, session_id: &str) {
+    if let Value::Object(object) = value {
+        object.insert("sessionId".to_string(), Value::String(session_id.to_string()));
+    }
 }
 
 pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) {
@@ -144,6 +164,7 @@ pub mod commands {
         source_language: String,
         target_language: String,
         languages: Vec<String>,
+        session_id: String,
     ) -> Result<(), String> {
         stop_helper_child(&state, &stream)?;
 
@@ -193,7 +214,7 @@ pub mod commands {
         );
 
         if let Some(stdout) = child.stdout.take() {
-            read_json_lines(app.clone(), stdout);
+            read_json_lines(app.clone(), stdout, session_id);
         }
 
         if let Some(stderr) = child.stderr.take() {
@@ -330,6 +351,9 @@ mod tests {
             Path::new("/repo/src-tauri/target/debug/live-poly-trans"),
         );
 
+        assert!(candidates.contains(&PathBuf::from(
+            "/repo/src-tauri/binaries/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
+        )));
         assert!(
             candidates.contains(&PathBuf::from(
                 "/repo/src-tauri/binaries/helper-aarch64-apple-darwin"
@@ -347,7 +371,23 @@ mod tests {
         );
 
         assert!(candidates.contains(&PathBuf::from(
+            "/App/LivePolyTrans.app/Contents/MacOS/../Resources/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
+        )));
+        assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/helper"
         )));
+    }
+
+    #[test]
+    fn attach_session_id_tags_transcript_event_payloads() {
+        let mut value = serde_json::json!({
+            "type": "transcript",
+            "stream": "mic",
+            "text": "hello"
+        });
+
+        attach_session_id(&mut value, "mic-123");
+
+        assert_eq!(value["sessionId"], "mic-123");
     }
 }

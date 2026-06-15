@@ -26,6 +26,35 @@ esac
 
 swift build -c release --package-path "$ROOT_DIR/swift-helper"
 mkdir -p "$ROOT_DIR/src-tauri/binaries"
+HELPER_SOURCE="$ROOT_DIR/swift-helper/.build/release/live-poly-trans-helper"
+RAW_HELPER="$ROOT_DIR/src-tauri/binaries/helper-$TARGET_SUFFIX"
+HELPER_APP="$ROOT_DIR/src-tauri/binaries/LivePolyTransHelper.app"
+HELPER_APP_BINARY="$HELPER_APP/Contents/MacOS/live-poly-trans-helper"
+
 cp \
-  "$ROOT_DIR/swift-helper/.build/release/live-poly-trans-helper" \
-  "$ROOT_DIR/src-tauri/binaries/helper-$TARGET_SUFFIX"
+  "$HELPER_SOURCE" \
+  "$RAW_HELPER"
+
+rm -rf "$HELPER_APP"
+mkdir -p "$HELPER_APP/Contents/MacOS"
+cp "$HELPER_SOURCE" "$HELPER_APP_BINARY"
+cp "$ROOT_DIR/swift-helper/Info.plist" "$HELPER_APP/Contents/Info.plist"
+
+if [[ "$(uname -s)" == "Darwin" && -x /usr/bin/codesign ]]; then
+  /usr/bin/codesign \
+    --force \
+    --sign - \
+    --identifier com.staticwagomu.live-poly-trans.helper \
+    "$RAW_HELPER"
+
+  /usr/bin/codesign \
+    --force \
+    --sign - \
+    --identifier com.staticwagomu.live-poly-trans.helper \
+    "$HELPER_APP"
+
+  LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
+  if [[ -x "$LSREGISTER" ]]; then
+    "$LSREGISTER" -f "$HELPER_APP"
+  fi
+fi

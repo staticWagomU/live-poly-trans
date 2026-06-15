@@ -4,6 +4,16 @@
 <dict>
   <key>CFBundleIdentifier</key>
   <string>com.staticwagomu.live-poly-trans.helper</string>
+  <key>CFBundleExecutable</key>
+  <string>live-poly-trans-helper</string>
+  <key>CFBundleName</key>
+  <string>LivePolyTransHelper</string>
+  <key>CFBundlePackageType</key>
+  <string>APPL</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
   <key>NSAudioCaptureUsageDescription</key>
   <string>LivePolyTrans captures speaker audio so other people's voices can be transcribed and translated.</string>
   <key>NSMicrophoneUsageDescription</key>
