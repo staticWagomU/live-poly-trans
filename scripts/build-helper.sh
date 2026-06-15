@@ -4,6 +4,16 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ARCH="$(uname -m)"
 
+if [[ "$(uname -s)" == "Darwin" && -x /usr/bin/xcrun ]]; then
+  APPLE_DEVELOPER_ROOT="/Library/Developer/CommandLineTools"
+  if [[ -d "$APPLE_DEVELOPER_ROOT/SDKs/MacOSX.sdk" ]]; then
+    export DEVELOPER_DIR="$APPLE_DEVELOPER_ROOT"
+    export SDKROOT="$APPLE_DEVELOPER_ROOT/SDKs/MacOSX.sdk"
+  else
+    export SDKROOT="$(env -u SDKROOT /usr/bin/xcrun --sdk macosx --show-sdk-path)"
+  fi
+fi
+
 case "$ARCH" in
   arm64) TARGET_SUFFIX="aarch64-apple-darwin" ;;
   x86_64) TARGET_SUFFIX="x86_64-apple-darwin" ;;
