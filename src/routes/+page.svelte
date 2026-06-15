@@ -21,18 +21,23 @@
     { id: 'ja-JP', label: 'Japanese' }
   ];
   let messages: ChatMessage[] = [];
-  let isRecording = false;
+  let activeStreams = new Set<'mic' | 'speaker'>();
   let status = 'Ready';
   let errorMessage: string | null = null;
+  let savedPath: string | null = null;
+  let isStarting = false;
 
   $: sourceLabel =
     installedLanguages.find((language) => language.id === sourceLanguage)?.label ?? sourceLanguage;
   $: targetLabel =
     installedLanguages.find((language) => language.id === targetLanguage)?.label ?? targetLanguage;
+  $: isRecording = activeStreams.size > 0;
+  $: isMicRecording = activeStreams.has('mic');
+  $: isSpeakerRecording = activeStreams.has('speaker');
 
   onMount(async () => {
     const unlistenTranscript = await listen<TranscriptEvent>('transcript-event', (event) => {
-      messages = [...messages, transcriptEventToMessage(event.payload)];
+      applyTranscriptEvent(event.payload);
       status = event.payload.isFinal ? 'Saved phrase' : 'Listening live';
     });
 
@@ -63,28 +68,136 @@
     }
   }
 
+  function applyTranscriptEvent(event: TranscriptEvent) {
+    const message = transcriptEventToMessage(event);
+    const existingIndex = messages.findIndex((candidate) => candidate.id === message.id);
+
+    if (existingIndex === -1) {
+      messages = [...messages, message];
+      return;
+    }
+
+    messages = messages.map((candidate, index) =>
+      index === existingIndex
+        ? {
+            ...candidate,
+            ...message,
+            isFinal: candidate.isFinal || message.isFinal
+          }
+        : candidate
+    );
+  }
+
   async function toggleRecording() {
     errorMessage = null;
+    savedPath = null;
 
     if (isRecording) {
-      await invoke('stop_microphone_session');
-      isRecording = false;
+      await invoke('stop_all_sessions');
+      activeStreams = new Set();
       status = 'Paused';
       return;
     }
 
-    await invoke('start_microphone_session', {
+    isStarting = true;
+    status = 'Starting microphone and speaker';
+
+    const failures: string[] = [];
+
+    for (const stream of ['mic', 'speaker'] as const) {
+      try {
+        await startStream(stream);
+      } catch (error) {
+        failures.push(`${stream}: ${String(error)}`);
+      }
+    }
+
+    isStarting = false;
+
+    if (activeStreams.size === 0) {
+      errorMessage = failures.join('\n');
+      status = 'Could not start recording';
+      return;
+    }
+
+    errorMessage = failures.length > 0 ? failures.join('\n') : null;
+    status =
+      activeStreams.size === 2
+        ? 'Listening to mic and speaker'
+        : activeStreams.has('mic')
+          ? 'Mic is live'
+          : 'Speaker is live';
+  }
+
+  async function toggleStream(stream: 'mic' | 'speaker') {
+    errorMessage = null;
+    savedPath = null;
+
+    try {
+      if (activeStreams.has(stream)) {
+        await invoke('stop_stream_session', { stream });
+        activeStreams.delete(stream);
+        activeStreams = new Set(activeStreams);
+        status = activeStreams.size > 0 ? 'Listening live' : 'Paused';
+        return;
+      }
+
+      isStarting = true;
+      status = stream === 'mic' ? 'Starting mic' : 'Starting speaker';
+      await startStream(stream);
+      status = stream === 'mic' ? 'Mic is live' : 'Speaker is live';
+    } catch (error) {
+      errorMessage = String(error);
+      status = `Could not start ${stream}`;
+    } finally {
+      isStarting = false;
+    }
+  }
+
+  async function startStream(stream: 'mic' | 'speaker') {
+    await invoke('start_stream_session', {
+      stream,
       sourceLanguage,
-      targetLanguage
+      targetLanguage,
+      languages: selectedTranscriptionLanguages()
     });
-    isRecording = true;
-    status = 'Listening live';
+    activeStreams.add(stream);
+    activeStreams = new Set(activeStreams);
+  }
+
+  function selectedTranscriptionLanguages() {
+    return [sourceLanguage, targetLanguage].filter(
+      (language, index, languages) => language && languages.indexOf(language) === index
+    );
   }
 
   function clearMessages() {
     messages = [];
     errorMessage = null;
+    savedPath = null;
     status = isRecording ? 'Listening live' : 'Ready';
+  }
+
+  function transcriptText() {
+    return messages
+      .map((message) => {
+        const translation = message.translation ? `\n  => ${message.translation}` : '';
+        return `[${message.timestamp}] ${message.role} / ${message.language}: ${message.text}${translation}`;
+      })
+      .join('\n');
+  }
+
+  async function copyMessages() {
+    await navigator.clipboard.writeText(transcriptText());
+    status = 'Copied transcript';
+  }
+
+  async function saveMessages() {
+    const result = await invoke<{ json_path: string; text_path: string }>('save_transcript', {
+      messages
+    });
+    savedPath = result.text_path;
+    status = 'Saved transcript';
   }
 </script>
 
@@ -118,8 +231,8 @@
           </label>
         </div>
 
-        <button class="record" class:recording={isRecording} on:click={toggleRecording}>
-          <span></span>{isRecording ? 'Stop' : 'Record'}
+        <button class="record" class:recording={isRecording} disabled={isStarting} on:click={toggleRecording}>
+          <span></span>{isStarting ? 'Starting' : isRecording ? 'Stop' : 'Record'}
         </button>
       </div>
     </header>
@@ -137,20 +250,34 @@
           </div>
         </div>
 
-        {#if messages.length === 0}
+        {#if messages.length === 0 && isRecording}
+          <div class="listening-empty" aria-live="polite">
+            <div class="pulse-ring">
+              <span></span>
+            </div>
+            <h2>{isStarting ? 'Preparing audio capture...' : 'Listening for speech'}</h2>
+            <p>
+              Speak normally. The first words can take a few seconds while Apple Speech warms up.
+            </p>
+            <div class="stream-chips" aria-label="Active streams">
+              <span class:active={isSpeakerRecording}>Speaker</span>
+              <span class:active={isMicRecording}>Mic</span>
+            </div>
+          </div>
+        {:else if messages.length === 0}
           <div class="starter" aria-live="polite">
             <article class="chat-row speaker-row">
               <div class="chat-bubble incoming">
-                <span>Speaker</span>
-                <p>The other person’s audio appears here.</p>
-                <small>Sub language appears underneath in lighter text.</small>
+                <span>Preview · Speaker</span>
+                <p>The other person’s audio will appear here.</p>
+                <small>Press Record to start listening.</small>
               </div>
             </article>
             <article class="chat-row self-row">
               <div class="chat-bubble outgoing">
-                <span>Mic</span>
-                <p>Your spoken replies appear in the same conversation.</p>
-                <small>Main language stays as the primary message line.</small>
+                <span>Preview · Mic</span>
+                <p>Your spoken replies will appear in the same conversation.</p>
+                <small>This is a preview, not a captured transcript.</small>
               </div>
             </article>
           </div>
@@ -176,12 +303,19 @@
       <div class="status">
         <span class:live={isRecording}></span>
         <strong>{status}</strong>
+        <em>{sourceLabel} -> {targetLabel}</em>
       </div>
       {#if errorMessage}
         <p class="error">{errorMessage}</p>
+      {:else if savedPath}
+        <p class="saved">{savedPath}</p>
       {/if}
       <div class="actions">
+        <button class:active={isMicRecording} on:click={() => toggleStream('mic')}>Mic</button>
+        <button class:active={isSpeakerRecording} on:click={() => toggleStream('speaker')}>Speaker</button>
         <button on:click={detectLanguages}>Refresh Languages</button>
+        <button disabled={messages.length === 0} on:click={copyMessages}>Copy</button>
+        <button disabled={messages.length === 0} on:click={saveMessages}>Save</button>
         <button on:click={clearMessages}>Clear</button>
       </div>
     </footer>
@@ -326,6 +460,11 @@
     background: #f23b56;
   }
 
+  .record:disabled {
+    cursor: wait;
+    opacity: 0.74;
+  }
+
   .conversation {
     display: grid;
     min-height: 0;
@@ -398,6 +537,7 @@
   }
 
   .starter,
+  .listening-empty,
   .messages {
     display: flex;
     min-height: 0;
@@ -409,6 +549,78 @@
 
   .starter {
     justify-content: center;
+  }
+
+  .listening-empty {
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+
+  .pulse-ring {
+    display: grid;
+    width: 72px;
+    height: 72px;
+    place-items: center;
+    border-radius: 999px;
+    background: rgba(48, 209, 88, 0.10);
+    box-shadow: 0 0 0 16px rgba(48, 209, 88, 0.05);
+  }
+
+  .pulse-ring span {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    background: #30d158;
+    box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.36);
+    animation: listening-pulse 1.4s ease-out infinite;
+  }
+
+  .listening-empty h2 {
+    margin: 22px 0 6px;
+    color: #202124;
+    font-size: 24px;
+    letter-spacing: -0.035em;
+  }
+
+  .listening-empty p {
+    max-width: 430px;
+    margin: 0;
+    color: #737b82;
+    font-size: 14px;
+    font-weight: 650;
+    line-height: 1.5;
+  }
+
+  .stream-chips {
+    display: flex;
+    gap: 8px;
+    margin-top: 18px;
+  }
+
+  .stream-chips span {
+    border: 1px solid rgba(130, 140, 150, 0.22);
+    border-radius: 999px;
+    color: #858d95;
+    padding: 7px 11px;
+    font-size: 12px;
+    font-weight: 850;
+  }
+
+  .stream-chips span.active {
+    border-color: rgba(29, 139, 255, 0.32);
+    background: rgba(29, 139, 255, 0.10);
+    color: #176fcf;
+  }
+
+  @keyframes listening-pulse {
+    0% {
+      box-shadow: 0 0 0 0 rgba(48, 209, 88, 0.36);
+    }
+
+    100% {
+      box-shadow: 0 0 0 18px rgba(48, 209, 88, 0);
+    }
   }
 
   .chat-row {
@@ -500,9 +712,25 @@
     box-shadow: 0 0 0 6px rgba(48, 209, 88, 0.12);
   }
 
+  .status em {
+    color: #8a9198;
+    font-size: 12px;
+    font-style: normal;
+  }
+
   .error {
-    overflow: hidden;
+    max-height: 78px;
+    overflow: auto;
     color: #a2382d;
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .saved {
+    overflow: hidden;
+    color: #4f6d53;
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -529,6 +757,16 @@
   .actions button:active {
     background: linear-gradient(180deg, #dfe4e7, #f7f8f9);
     box-shadow: inset 0 1px 2px rgba(34, 42, 50, 0.12);
+  }
+
+  .actions button.active {
+    border-color: rgba(29, 139, 255, 0.54);
+    color: #075cad;
+  }
+
+  .actions button:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
 
   @media (max-width: 900px) {

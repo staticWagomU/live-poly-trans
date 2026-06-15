@@ -11,16 +11,18 @@ describe('transcriptEventToMessage', () => {
         text: 'hello',
         trans: 'こんにちは',
         isFinal: true,
-        timestamp: '2026-06-15T00:00:00Z'
+        timestamp: '2026-06-15T00:00:00Z',
+        segmentId: '1200-800'
       })
     ).toEqual({
-      id: '2026-06-15T00:00:00Z-mic-en-US-hello',
+      id: 'mic-en-US-1200-800',
       role: 'self',
       language: 'en-US',
       text: 'hello',
       translation: 'こんにちは',
       isFinal: true,
-      timestamp: '2026-06-15T00:00:00Z'
+      timestamp: '2026-06-15T00:00:00Z',
+      segmentId: '1200-800'
     });
   });
 });
