@@ -22,9 +22,10 @@ export type ChatMessage = {
 
 export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
   const segmentId = event.segmentId ?? `${event.timestamp}-${event.text}`;
+  const stableSegmentId = segmentId.split('-')[0] || segmentId;
 
   return {
-    id: `${event.stream}-${event.lang}-${segmentId}`,
+    id: `${event.stream}-${event.lang}-${stableSegmentId}`,
     role: event.stream === 'mic' ? 'self' : 'speaker',
     language: event.lang,
     text: event.text,

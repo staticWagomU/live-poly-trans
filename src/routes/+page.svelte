@@ -70,7 +70,9 @@
 
   function applyTranscriptEvent(event: TranscriptEvent) {
     const message = transcriptEventToMessage(event);
-    const existingIndex = messages.findIndex((candidate) => candidate.id === message.id);
+    const existingIndex = messages.findIndex(
+      (candidate) => candidate.id === message.id || isLikelySameUtterance(candidate, message)
+    );
 
     if (existingIndex === -1) {
       messages = [...messages, message];
@@ -86,6 +88,30 @@
           }
         : candidate
     );
+  }
+
+  function isLikelySameUtterance(candidate: ChatMessage, message: ChatMessage) {
+    if (candidate.role !== message.role || candidate.language !== message.language) {
+      return false;
+    }
+
+    if (candidate.isFinal) {
+      return false;
+    }
+
+    const candidateStart = segmentStart(candidate.segmentId);
+    const messageStart = segmentStart(message.segmentId);
+
+    if (candidateStart === null || messageStart === null) {
+      return false;
+    }
+
+    return Math.abs(candidateStart - messageStart) < 1500;
+  }
+
+  function segmentStart(segmentId: string) {
+    const start = Number(segmentId.split('-')[0]);
+    return Number.isFinite(start) ? start : null;
   }
 
   async function toggleRecording() {

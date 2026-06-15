@@ -15,7 +15,7 @@ describe('transcriptEventToMessage', () => {
         segmentId: '1200-800'
       })
     ).toEqual({
-      id: 'mic-en-US-1200-800',
+      id: 'mic-en-US-1200',
       role: 'self',
       language: 'en-US',
       text: 'hello',
@@ -24,5 +24,30 @@ describe('transcriptEventToMessage', () => {
       timestamp: '2026-06-15T00:00:00Z',
       segmentId: '1200-800'
     });
+  });
+
+  it('keeps volatile updates for the same start time in one chat message', () => {
+    const first = transcriptEventToMessage({
+      type: 'transcript',
+      stream: 'mic',
+      lang: 'ja-JP',
+      text: 'ありがとう',
+      trans: 'Thank you.',
+      isFinal: false,
+      timestamp: '2026-06-15T00:00:00Z',
+      segmentId: '21840-3245'
+    });
+    const update = transcriptEventToMessage({
+      type: 'transcript',
+      stream: 'mic',
+      lang: 'ja-JP',
+      text: 'ありがとうございます。',
+      trans: 'Thank you.',
+      isFinal: false,
+      timestamp: '2026-06-15T00:00:01Z',
+      segmentId: '21840-4145'
+    });
+
+    expect(update.id).toBe(first.id);
   });
 });
