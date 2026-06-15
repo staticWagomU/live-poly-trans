@@ -10,3 +10,5 @@ swift-helper/.build/
 
 references/
 .DS_Store
+
+.direnv
