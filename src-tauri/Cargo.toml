@@ -1,0 +1,18 @@
+[package]
+name = "live-poly-trans"
+version = "0.1.0"
+description = "LivePolyTrans desktop app"
+authors = ["staticWagomU"]
+edition = "2021"
+
+[lib]
+name = "live_poly_trans_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri = { version = "2", features = [] }
