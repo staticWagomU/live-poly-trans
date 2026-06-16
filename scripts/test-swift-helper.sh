@@ -24,6 +24,7 @@ swiftc \
   -parse-as-library \
   "${SDK_ARGS[@]}" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/CommandLineOptions.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ISO8601Timestamp.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/JsonLine.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/LanguageDetection.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/LiveTranslationPolicy.swift" \

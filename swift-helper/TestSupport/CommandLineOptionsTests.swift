@@ -8,6 +8,7 @@ struct CommandLineOptionsTests {
     try parsesSpeakerStreamCommandWithSegmentDirectory()
     try readsValueAfterFlag()
     try readsRepeatedValuesAfterFlag()
+    try formatsIso8601Timestamp()
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
@@ -71,6 +72,10 @@ struct CommandLineOptionsTests {
       values(after: "--language", in: ["helper", "--language", "en-US", "--language", "ja-JP"]),
       ["en-US", "ja-JP"]
     )
+  }
+
+  static func formatsIso8601Timestamp() throws {
+    try expectEqual(iso8601Timestamp(Date(timeIntervalSince1970: 0)), "1970-01-01T00:00:00Z")
   }
 
   static func formatsLanguageInfoWithBcp47Identifier() throws {

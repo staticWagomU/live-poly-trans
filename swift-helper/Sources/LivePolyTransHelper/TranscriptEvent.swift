@@ -27,7 +27,7 @@ public func transcriptEvent(
     text: text,
     trans: translation,
     isFinal: isFinal,
-    timestamp: ISO8601DateFormatter().string(from: timestamp),
+    timestamp: iso8601Timestamp(timestamp),
     segmentId: segmentId
   )
 }

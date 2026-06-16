@@ -4,7 +4,7 @@ import Foundation
 public let helperDebugLogPrefix = "live-poly-trans-helper debug:"
 
 public func helperDebugLog(_ message: @autoclosure () -> String) {
-  let line = "\(helperDebugLogPrefix) \(ISO8601DateFormatter().string(from: Date())) \(message())\n"
+  let line = "\(helperDebugLogPrefix) \(iso8601Timestamp(Date())) \(message())\n"
   fputs(line, stderr)
   fflush(stderr)
 }

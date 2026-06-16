@@ -33,9 +33,7 @@ public final class SegmentWriter: Sendable {
   private func segmentStem(for date: Date) -> String {
     let bucket = floor(date.timeIntervalSince1970 / segmentDuration) * segmentDuration
     let bucketDate = Date(timeIntervalSince1970: bucket)
-    let formatter = ISO8601DateFormatter()
-    formatter.formatOptions = [.withInternetDateTime]
-    return "segment-\(formatter.string(from: bucketDate).replacingOccurrences(of: ":", with: "-"))"
+    return "segment-\(iso8601Timestamp(bucketDate).replacingOccurrences(of: ":", with: "-"))"
   }
 
   private func append(_ string: String, to url: URL) throws {
