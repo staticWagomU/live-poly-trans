@@ -8,3 +8,7 @@ func textForFinalTranslation(_ text: String, isFinal: Bool) -> String? {
   let trimmedText = text.trimmingCharacters(in: .whitespacesAndNewlines)
   return trimmedText.isEmpty ? nil : trimmedText
 }
+
+func shouldLogTranscriptResult(isFinal: Bool) -> Bool {
+  isFinal
+}

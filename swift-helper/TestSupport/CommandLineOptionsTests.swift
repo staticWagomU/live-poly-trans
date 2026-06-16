@@ -13,6 +13,7 @@ struct CommandLineOptionsTests {
     try encodesJsonLine()
     try formatsTranscriptEvent()
     try translatesOnlyFinalTranscriptText()
+    try logsOnlyFinalTranscriptResults()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
   }
@@ -108,6 +109,11 @@ struct CommandLineOptionsTests {
   static func translatesOnlyFinalTranscriptText() throws {
     try expectEqual(textForFinalTranslation(" hello ", isFinal: true), "hello")
     try expectEqual(textForFinalTranslation("hello", isFinal: false), nil)
+  }
+
+  static func logsOnlyFinalTranscriptResults() throws {
+    try expectEqual(shouldLogTranscriptResult(isFinal: true), true)
+    try expectEqual(shouldLogTranscriptResult(isFinal: false), false)
   }
 
   static func configuresScreenCaptureKitSpeakerStream() throws {

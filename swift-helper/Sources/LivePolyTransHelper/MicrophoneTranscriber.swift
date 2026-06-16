@@ -189,14 +189,19 @@ private func emitResults(
   for try await result in transcriber.results {
     let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
     let segmentId = segmentIdentifier(for: result.range)
-    helperDebugLog(
-      "speech-result stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) chars=\(text.count) text=\"\(text)\""
-    )
+    let shouldLogResult = shouldLogTranscriptResult(isFinal: result.isFinal)
+    if shouldLogResult {
+      helperDebugLog(
+        "speech-result stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) chars=\(text.count) text=\"\(text)\""
+      )
+    }
 
     guard isMeaningfulTranscript(text, isFinal: result.isFinal) else {
-      helperDebugLog(
-        "speech-result-dropped stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) reason=too-short-or-punctuation text=\"\(text)\""
-      )
+      if shouldLogResult {
+        helperDebugLog(
+          "speech-result-dropped stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) reason=too-short-or-punctuation text=\"\(text)\""
+        )
+      }
       continue
     }
 
@@ -223,9 +228,11 @@ private func emitResults(
 
     print(try jsonLine(for: event))
     fflush(stdout)
-    helperDebugLog(
-      "transcript-emitted stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) translation=\(translation == nil ? "none" : "present")"
-    )
+    if shouldLogResult {
+      helperDebugLog(
+        "transcript-emitted stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) translation=\(translation == nil ? "none" : "present")"
+      )
+    }
   }
 }
 
