@@ -7,14 +7,24 @@
     languageControlLabel,
     type LanguageInfo
   } from '$lib/languages';
+  import {
+    captureModeFromStreams,
+    streamsForCaptureMode,
+    type AudioStream,
+    type CaptureMode
+  } from '$lib/audioMode';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
-
-  type AudioStream = 'mic' | 'speaker';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
     supported: LanguageInfo[];
   };
+
+  const captureModeOptions: Array<{ mode: CaptureMode; label: string }> = [
+    { mode: 'mic', label: 'Mic' },
+    { mode: 'both', label: 'Both' },
+    { mode: 'speaker', label: 'Speaker' }
+  ];
 
   let sourceLanguage = 'en-US';
   let targetLanguage = 'ja-JP';
@@ -23,23 +33,20 @@
     { id: 'ja-JP', label: 'Japanese' }
   ];
   let messages: ChatMessage[] = [];
+  let captureMode: CaptureMode = 'both';
   let activeStreams = new Set<AudioStream>();
   let streamSessionIds: Record<AudioStream, string | null> = {
     mic: null,
     speaker: null
   };
-  let status = 'Ready';
   let errorMessage: string | null = null;
   let savedPath: string | null = null;
   let isStarting = false;
 
-  $: sourceLabel =
-    installedLanguages.find((language) => language.id === sourceLanguage)?.label ?? sourceLanguage;
-  $: targetLabel =
-    installedLanguages.find((language) => language.id === targetLanguage)?.label ?? targetLanguage;
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
   $: isSpeakerRecording = activeStreams.has('speaker');
+  $: selectedCaptureMode = isRecording ? captureModeFromStreams(activeStreams) : captureMode;
 
   onMount(async () => {
     const unlistenTranscript = await listen<TranscriptEvent>('transcript-event', (event) => {
@@ -48,12 +55,10 @@
       }
 
       applyTranscriptEvent(event.payload);
-      status = event.payload.isFinal ? 'Saved phrase' : 'Listening live';
     });
 
     const unlistenError = await listen<string>('helper-error', (event) => {
       errorMessage = event.payload;
-      status = 'Needs attention';
     });
 
     await detectLanguages();
@@ -71,10 +76,8 @@
       const pair = chooseDefaultLanguagePair(installedLanguages);
       sourceLanguage = pair.source;
       targetLanguage = pair.target;
-      status = 'Languages ready';
     } catch (error) {
       errorMessage = String(error);
-      status = 'Using fallback languages';
     }
   }
 
@@ -154,18 +157,15 @@
     if (isRecording) {
       clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
-      status = 'Stopping';
       await invoke('stop_all_sessions');
-      status = 'Paused';
       return;
     }
 
     isStarting = true;
-    status = 'Starting microphone and speaker';
 
     const failures: string[] = [];
 
-    for (const stream of ['mic', 'speaker'] as const) {
+    for (const stream of streamsForCaptureMode(captureMode)) {
       try {
         await startStream(stream);
       } catch (error) {
@@ -177,41 +177,40 @@
 
     if (activeStreams.size === 0) {
       errorMessage = failures.join('\n');
-      status = 'Could not start recording';
       return;
     }
 
     errorMessage = failures.length > 0 ? failures.join('\n') : null;
-    status =
-      activeStreams.size === 2
-        ? 'Listening to mic and speaker'
-        : activeStreams.has('mic')
-          ? 'Mic is live'
-          : 'Speaker is live';
   }
 
-  async function toggleStream(stream: AudioStream) {
+  async function selectCaptureMode(mode: CaptureMode) {
     errorMessage = null;
     savedPath = null;
+    captureMode = mode;
+
+    if (!isRecording) {
+      return;
+    }
+
+    isStarting = true;
 
     try {
-      if (activeStreams.has(stream)) {
-        setStreamSession(stream, null);
-        activeStreams.delete(stream);
-        activeStreams = new Set(activeStreams);
-        status = activeStreams.size > 0 ? 'Listening live' : 'Stopping';
-        await invoke('stop_stream_session', { stream });
-        status = activeStreams.size > 0 ? 'Listening live' : 'Paused';
-        return;
+      const nextStreams = new Set(streamsForCaptureMode(mode));
+      const currentStreams = new Set(activeStreams);
+
+      for (const stream of nextStreams) {
+        if (!currentStreams.has(stream)) {
+          await startStream(stream);
+        }
       }
 
-      isStarting = true;
-      status = stream === 'mic' ? 'Starting mic' : 'Starting speaker';
-      await startStream(stream);
-      status = stream === 'mic' ? 'Mic is live' : 'Speaker is live';
+      for (const stream of currentStreams) {
+        if (!nextStreams.has(stream)) {
+          await stopStream(stream);
+        }
+      }
     } catch (error) {
       errorMessage = String(error);
-      status = `Could not start ${stream}`;
     } finally {
       isStarting = false;
     }
@@ -240,6 +239,13 @@
     activeStreams = new Set(activeStreams);
   }
 
+  async function stopStream(stream: AudioStream) {
+    setStreamSession(stream, null);
+    activeStreams.delete(stream);
+    activeStreams = new Set(activeStreams);
+    await invoke('stop_stream_session', { stream });
+  }
+
   function selectedTranscriptionLanguages() {
     return [sourceLanguage, targetLanguage].filter(
       (language, index, languages) => language && languages.indexOf(language) === index
@@ -250,7 +256,6 @@
     messages = [];
     errorMessage = null;
     savedPath = null;
-    status = isRecording ? 'Listening live' : 'Ready';
   }
 
   function transcriptText() {
@@ -264,7 +269,6 @@
 
   async function copyMessages() {
     await navigator.clipboard.writeText(transcriptText());
-    status = 'Copied transcript';
   }
 
   async function saveMessages() {
@@ -272,7 +276,6 @@
       messages
     });
     savedPath = result.text_path;
-    status = 'Saved transcript';
   }
 </script>
 
@@ -283,7 +286,19 @@
 <main class="stage">
   <section class="window" aria-label="LivePolyTrans">
     <header class="toolbar" data-tauri-drag-region>
-      <div class="toolbar-spacer"></div>
+      <div class="capture-switch" data-mode={selectedCaptureMode} aria-label="Audio capture mode">
+        {#each captureModeOptions as option}
+          <button
+            type="button"
+            class:active={selectedCaptureMode === option.mode}
+            aria-pressed={selectedCaptureMode === option.mode}
+            disabled={isStarting}
+            on:click={() => selectCaptureMode(option.mode)}
+          >
+            {option.label}
+          </button>
+        {/each}
+      </div>
 
       <div class="toolbar-actions">
         <div class="language-strip" aria-label="Main and sub languages">
@@ -375,19 +390,12 @@
     </div>
 
     <footer class="bottom-bar">
-      <div class="status">
-        <span class:live={isRecording}></span>
-        <strong>{status}</strong>
-        <em>{sourceLabel} -> {targetLabel}</em>
-      </div>
       {#if errorMessage}
         <p class="error">{errorMessage}</p>
       {:else if savedPath}
         <p class="saved">{savedPath}</p>
       {/if}
       <div class="actions">
-        <button class:active={isMicRecording} on:click={() => toggleStream('mic')}>Mic</button>
-        <button class:active={isSpeakerRecording} on:click={() => toggleStream('speaker')}>Speaker</button>
         <button on:click={detectLanguages}>Refresh Languages</button>
         <button disabled={messages.length === 0} on:click={copyMessages}>Copy</button>
         <button disabled={messages.length === 0} on:click={saveMessages}>Save</button>
@@ -441,15 +449,11 @@
   .toolbar {
     display: grid;
     align-items: center;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: auto 1fr;
     gap: 12px;
     padding: 10px 18px;
     border-bottom: 1px solid rgba(120, 126, 132, 0.13);
     background: rgba(255, 255, 255, 0.38);
-  }
-
-  .toolbar-spacer {
-    min-width: 1px;
   }
 
   .toolbar-actions {
@@ -460,6 +464,7 @@
   }
 
   .language-strip,
+  .capture-switch,
   .record,
   .bottom-bar,
   .date-pill {
@@ -468,6 +473,82 @@
     box-shadow:
       inset 0 1px 0 rgba(255, 255, 255, 0.82),
       0 12px 28px rgba(75, 83, 90, 0.12);
+  }
+
+  .capture-switch {
+    position: relative;
+    display: grid;
+    width: 246px;
+    grid-template-columns: repeat(3, 1fr);
+    isolation: isolate;
+    overflow: hidden;
+    border-radius: 999px;
+    padding: 3px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.70), rgba(232, 236, 239, 0.62)),
+      rgba(255, 255, 255, 0.62);
+  }
+
+  .capture-switch::before {
+    position: absolute;
+    z-index: 0;
+    top: 3px;
+    bottom: 3px;
+    left: 3px;
+    width: calc((100% - 6px) / 3);
+    border-radius: 999px;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 250, 0.88)),
+      #ffffff;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.96),
+      0 7px 18px rgba(29, 139, 255, 0.16),
+      0 1px 3px rgba(34, 42, 50, 0.12);
+    content: '';
+    transform: translateX(var(--capture-pill-x, 0%));
+    transition:
+      transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
+      box-shadow 260ms ease,
+      background 260ms ease;
+  }
+
+  .capture-switch[data-mode='both'] {
+    --capture-pill-x: 100%;
+  }
+
+  .capture-switch[data-mode='speaker'] {
+    --capture-pill-x: 200%;
+  }
+
+  .capture-switch button {
+    position: relative;
+    z-index: 1;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: #717980;
+    padding: 7px 11px;
+    font-size: 12px;
+    font-weight: 850;
+    letter-spacing: 0.01em;
+    transition:
+      color 180ms ease,
+      transform 180ms ease,
+      opacity 180ms ease;
+  }
+
+  .capture-switch button:hover:not(:disabled) {
+    color: #30363c;
+    transform: translateY(-1px);
+  }
+
+  .capture-switch button.active {
+    color: #075cad;
+  }
+
+  .capture-switch button:disabled {
+    cursor: wait;
+    opacity: 0.58;
   }
 
   .language-strip {
@@ -756,7 +837,7 @@
   .bottom-bar {
     display: grid;
     align-items: center;
-    grid-template-columns: auto 1fr auto;
+    grid-template-columns: 1fr auto;
     gap: 14px;
     margin: 0 22px;
     border: 0;
@@ -765,32 +846,6 @@
     background: transparent;
     box-shadow: none;
     padding: 10px 0 12px;
-  }
-
-  .status {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    color: #626970;
-    font-size: 13px;
-  }
-
-  .status span {
-    width: 9px;
-    height: 9px;
-    border-radius: 999px;
-    background: #a8adb2;
-  }
-
-  .status span.live {
-    background: #30d158;
-    box-shadow: 0 0 0 6px rgba(48, 209, 88, 0.12);
-  }
-
-  .status em {
-    color: #8a9198;
-    font-size: 12px;
-    font-style: normal;
   }
 
   .error {
@@ -834,11 +889,6 @@
     box-shadow: inset 0 1px 2px rgba(34, 42, 50, 0.12);
   }
 
-  .actions button.active {
-    border-color: rgba(29, 139, 255, 0.54);
-    color: #075cad;
-  }
-
   .actions button:disabled {
     cursor: default;
     opacity: 0.45;
@@ -855,8 +905,13 @@
     }
 
     .language-strip,
+    .capture-switch,
     .record {
       justify-self: stretch;
+    }
+
+    .capture-switch {
+      width: auto;
     }
   }
 
