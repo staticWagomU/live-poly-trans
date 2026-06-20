@@ -33,6 +33,14 @@ pub struct HelperSession {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedTranscriptMessage {
     pub role: String,
+    #[serde(default, rename = "speakerId", skip_serializing_if = "Option::is_none")]
+    pub speaker_id: Option<String>,
+    #[serde(
+        default,
+        rename = "speakerLabel",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub speaker_label: Option<String>,
     pub language: String,
     pub text: String,
     pub translation: Option<String>,
@@ -283,7 +291,10 @@ pub mod commands {
             writeln!(
                 text_file,
                 "[{}] {} / {}: {}",
-                message.timestamp, message.role, message.language, message.text
+                message.timestamp,
+                message.speaker_label.as_deref().unwrap_or(&message.role),
+                message.language,
+                message.text
             )
             .map_err(|error| error.to_string())?;
 
@@ -394,5 +405,22 @@ mod tests {
         attach_session_id(&mut value, "mic-123");
 
         assert_eq!(value["sessionId"], "mic-123");
+    }
+
+    #[test]
+    fn saved_messages_accept_native_speaker_labels() {
+        let message: SavedTranscriptMessage = serde_json::from_value(serde_json::json!({
+            "role": "speaker",
+            "speakerId": "system-audio",
+            "speakerLabel": "Speaker",
+            "language": "en-US",
+            "text": "hello",
+            "translation": null,
+            "timestamp": "2026-06-20T00:00:00Z"
+        }))
+        .unwrap();
+
+        assert_eq!(message.speaker_id.as_deref(), Some("system-audio"));
+        assert_eq!(message.speaker_label.as_deref(), Some("Speaker"));
     }
 }

@@ -7,6 +7,8 @@ describe('transcriptEventToMessage', () => {
       transcriptEventToMessage({
         type: 'transcript',
         stream: 'mic',
+        speakerId: 'self',
+        speakerLabel: 'Mic',
         lang: 'en-US',
         text: 'hello',
         trans: 'こんにちは',
@@ -18,12 +20,34 @@ describe('transcriptEventToMessage', () => {
     ).toEqual({
       id: 'mic-en-US-1200',
       role: 'self',
+      speakerId: 'self',
+      speakerLabel: 'Mic',
       language: 'en-US',
       text: 'hello',
       translation: 'こんにちは',
       isFinal: true,
       timestamp: '2026-06-15T00:00:00Z',
       segmentId: '1200-800'
+    });
+  });
+
+  it('uses native stream labels as speaker fallback for older events', () => {
+    expect(
+      transcriptEventToMessage({
+        type: 'transcript',
+        stream: 'speaker',
+        lang: 'en-US',
+        text: 'remote audio',
+        trans: null,
+        isFinal: true,
+        timestamp: '2026-06-15T00:00:00Z',
+        sessionId: 'speaker-session-1',
+        segmentId: '3200-1000'
+      })
+    ).toMatchObject({
+      role: 'speaker',
+      speakerId: 'system-audio',
+      speakerLabel: 'Speaker'
     });
   });
 

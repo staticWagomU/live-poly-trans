@@ -12,6 +12,7 @@ struct CommandLineOptionsTests {
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
+    try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
     try configuresScreenCaptureKitSpeakerStream()
@@ -103,7 +104,14 @@ struct CommandLineOptionsTests {
 
     try expectEqual(event.type, "transcript")
     try expectEqual(event.stream, "mic")
+    try expectEqual(event.speakerId, "self")
+    try expectEqual(event.speakerLabel, "Mic")
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+  }
+
+  static func labelsSpeakerStreamAsSystemAudioSpeaker() throws {
+    try expectEqual(speakerIdentifier(for: .speaker), "system-audio")
+    try expectEqual(speakerLabel(for: .speaker), "Speaker")
   }
 
   static func translatesOnlyFinalTranscriptText() throws {

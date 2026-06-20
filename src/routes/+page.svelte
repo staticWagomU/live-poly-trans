@@ -257,7 +257,7 @@
     return messages
       .map((message) => {
         const translation = message.translation ? `\n  => ${message.translation}` : '';
-        return `[${message.timestamp}] ${message.role} / ${message.language}: ${message.text}${translation}`;
+        return `[${message.timestamp}] ${message.speakerLabel} / ${message.language}: ${message.text}${translation}`;
       })
       .join('\n');
   }
@@ -361,7 +361,7 @@
             {#each messages as message (message.id)}
               <article class="chat-row" class:self-row={message.role === 'self'}>
                 <div class="chat-bubble" class:outgoing={message.role === 'self'} class:incoming={message.role !== 'self'}>
-                  <span>{message.role === 'self' ? 'Mic' : 'Speaker'} · {message.language}</span>
+                  <span>{message.speakerLabel} · {message.language}</span>
                   <p>{message.text}</p>
                   {#if message.translation}
                     <small>{message.translation}</small>

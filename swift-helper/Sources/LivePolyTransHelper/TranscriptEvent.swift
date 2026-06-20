@@ -3,6 +3,8 @@ import Foundation
 public struct TranscriptEvent: Codable, Equatable {
   public let type: String
   public let stream: String
+  public let speakerId: String
+  public let speakerLabel: String
   public let lang: String
   public let text: String
   public let trans: String?
@@ -23,6 +25,8 @@ public func transcriptEvent(
   TranscriptEvent(
     type: "transcript",
     stream: stream.rawValue,
+    speakerId: speakerIdentifier(for: stream),
+    speakerLabel: speakerLabel(for: stream),
     lang: language,
     text: text,
     trans: translation,
@@ -30,4 +34,22 @@ public func transcriptEvent(
     timestamp: iso8601Timestamp(timestamp),
     segmentId: segmentId
   )
+}
+
+public func speakerIdentifier(for stream: AudioStream) -> String {
+  switch stream {
+  case .mic:
+    "self"
+  case .speaker:
+    "system-audio"
+  }
+}
+
+public func speakerLabel(for stream: AudioStream) -> String {
+  switch stream {
+  case .mic:
+    "Mic"
+  case .speaker:
+    "Speaker"
+  }
 }

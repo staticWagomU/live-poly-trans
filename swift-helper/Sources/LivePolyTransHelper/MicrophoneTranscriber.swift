@@ -316,17 +316,10 @@ func convertBuffer(
     throw HelperRuntimeError.missingConvertedAudioBuffer
   }
 
-  var didProvideInput = false
+  let inputProvider = SingleUseAudioInput(buffer: buffer)
   var conversionError: NSError?
   let status = converter.convert(to: converted, error: &conversionError) { _, outStatus in
-    if didProvideInput {
-      outStatus.pointee = .noDataNow
-      return nil
-    }
-
-    didProvideInput = true
-    outStatus.pointee = .haveData
-    return buffer
+    inputProvider.next(outStatus: outStatus)
   }
 
   switch status {
@@ -336,6 +329,30 @@ func convertBuffer(
     throw HelperRuntimeError.audioConversionFailed(conversionError?.localizedDescription ?? "unknown error")
   @unknown default:
     throw HelperRuntimeError.audioConversionFailed("unknown converter status")
+  }
+}
+
+public final class SingleUseAudioInput: @unchecked Sendable {
+  private let buffer: AVAudioPCMBuffer
+  private let lock = NSLock()
+  private var didProvideInput = false
+
+  public init(buffer: AVAudioPCMBuffer) {
+    self.buffer = buffer
+  }
+
+  public func next(outStatus: UnsafeMutablePointer<AVAudioConverterInputStatus>) -> AVAudioBuffer? {
+    lock.lock()
+    defer { lock.unlock() }
+
+    if didProvideInput {
+      outStatus.pointee = .noDataNow
+      return nil
+    }
+
+    didProvideInput = true
+    outStatus.pointee = .haveData
+    return buffer
   }
 }
 
