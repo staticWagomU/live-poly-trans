@@ -11,6 +11,7 @@
     "test": "vitest run && scripts/test-swift-helper.sh",
     "test:ui": "vitest run",
     "test:swift": "scripts/test-swift-helper.sh",
+    "profile:speaker": "scripts/profile-speaker-helper.sh",
     "tauri": "tauri",
     "build:helper": "scripts/build-helper.sh",
     "build:dist": "scripts/build-distribution.sh"
