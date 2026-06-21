@@ -7,9 +7,19 @@ export type TranscriptEvent = {
   text: string;
   trans: string | null;
   isFinal: boolean;
+  time?: string;
   timestamp: string;
   sessionId: string;
   segmentId?: string;
+  confidence?: number;
+  spans?: TranscriptSpan[];
+};
+
+export type TranscriptSpan = {
+  text: string;
+  confidence?: number;
+  startMs?: number;
+  endMs?: number;
 };
 
 export type ChatMessage = {
@@ -23,13 +33,15 @@ export type ChatMessage = {
   isFinal: boolean;
   timestamp: string;
   segmentId: string;
+  confidence?: number;
+  spans?: TranscriptSpan[];
 };
 
 export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
   const segmentId = event.segmentId ?? `${event.timestamp}-${event.text}`;
   const stableSegmentId = segmentId.split('-')[0] || segmentId;
 
-  return {
+  const message: ChatMessage = {
     id: `${event.stream}-${event.lang}-${stableSegmentId}`,
     role: event.stream === 'mic' ? 'self' : 'speaker',
     speakerId: event.speakerId ?? fallbackSpeakerId(event.stream),
@@ -38,9 +50,19 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
     text: event.text,
     translation: event.trans,
     isFinal: event.isFinal,
-    timestamp: event.timestamp,
+    timestamp: event.time ?? event.timestamp,
     segmentId
   };
+
+  if (event.confidence !== undefined) {
+    message.confidence = event.confidence;
+  }
+
+  if (event.spans !== undefined) {
+    message.spans = event.spans;
+  }
+
+  return message;
 }
 
 export function fallbackSpeakerId(stream: TranscriptEvent['stream']) {

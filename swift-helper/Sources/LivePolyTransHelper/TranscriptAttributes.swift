@@ -3,6 +3,11 @@ import Foundation
 import Speech
 
 @available(macOS 26.0, *)
+public func transcriptAttributeOptions() -> Set<SpeechTranscriber.ResultAttributeOption> {
+  [.transcriptionConfidence, .audioTimeRange]
+}
+
+@available(macOS 26.0, *)
 public func transcriptSpans(from attributedText: AttributedString) -> [TranscriptSpan] {
   attributedText.runs.map { run in
     let text = String(attributedText[run.range].characters)

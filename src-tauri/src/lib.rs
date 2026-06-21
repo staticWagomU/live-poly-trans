@@ -31,6 +31,17 @@ pub struct HelperSession {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedTranscriptSpan {
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, rename = "startMs", skip_serializing_if = "Option::is_none")]
+    pub start_ms: Option<i64>,
+    #[serde(default, rename = "endMs", skip_serializing_if = "Option::is_none")]
+    pub end_ms: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SavedTranscriptMessage {
     pub role: String,
     #[serde(default, rename = "speakerId", skip_serializing_if = "Option::is_none")]
@@ -45,6 +56,10 @@ pub struct SavedTranscriptMessage {
     pub text: String,
     pub translation: Option<String>,
     pub timestamp: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub confidence: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spans: Option<Vec<SavedTranscriptSpan>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -445,11 +460,15 @@ mod tests {
             "language": "en-US",
             "text": "hello",
             "translation": null,
-            "timestamp": "2026-06-20T00:00:00Z"
+            "timestamp": "2026-06-20T00:00:00Z",
+            "confidence": 0.75,
+            "spans": [{ "text": "hello", "confidence": 0.75, "startMs": 100, "endMs": 600 }]
         }))
         .unwrap();
 
         assert_eq!(message.speaker_id.as_deref(), Some("system-audio"));
         assert_eq!(message.speaker_label.as_deref(), Some("Speaker"));
+        assert_eq!(message.confidence, Some(0.75));
+        assert_eq!(message.spans.as_ref().map(Vec::len), Some(1));
     }
 }

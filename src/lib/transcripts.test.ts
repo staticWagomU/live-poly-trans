@@ -77,4 +77,27 @@ describe('transcriptEventToMessage', () => {
 
     expect(update.id).toBe(first.id);
   });
+
+  it('preserves confidence metadata for transcript JSON export', () => {
+    expect(
+      transcriptEventToMessage({
+        type: 'transcript',
+        stream: 'mic',
+        lang: 'en-US',
+        text: 'hello',
+        trans: null,
+        isFinal: true,
+        time: '2026-06-15T00:00:00Z',
+        timestamp: '2026-06-15T00:00:01Z',
+        sessionId: 'mic-session-1',
+        segmentId: '100-500',
+        confidence: 0.75,
+        spans: [{ text: 'hello', confidence: 0.75, startMs: 100, endMs: 600 }]
+      })
+    ).toMatchObject({
+      timestamp: '2026-06-15T00:00:00Z',
+      confidence: 0.75,
+      spans: [{ text: 'hello', confidence: 0.75, startMs: 100, endMs: 600 }]
+    });
+  });
 });

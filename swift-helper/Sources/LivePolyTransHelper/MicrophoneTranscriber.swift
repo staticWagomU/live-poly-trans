@@ -59,7 +59,7 @@ public func runMicrophoneTranscription(
       locale: Locale(identifier: $0),
       transcriptionOptions: [],
       reportingOptions: [.volatileResults, .fastResults],
-      attributeOptions: []
+      attributeOptions: transcriptAttributeOptions()
     )
   }
   try await ensureInstalledLanguages(languages)
@@ -188,6 +188,7 @@ private func emitResults(
 
   for try await result in transcriber.results {
     let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+    let spans = transcriptSpans(from: result.text)
     let segmentId = segmentIdentifier(for: result.range)
     let shouldLogResult = shouldLogTranscriptResult(isFinal: result.isFinal)
     if shouldLogResult {
@@ -219,7 +220,9 @@ private func emitResults(
       translation: translation,
       isFinal: result.isFinal,
       timestamp: timestamp,
-      segmentId: segmentId
+      segmentId: segmentId,
+      confidence: transcriptConfidence(spans: spans),
+      spans: spans
     )
 
     if result.isFinal {

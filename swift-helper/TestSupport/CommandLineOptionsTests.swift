@@ -16,6 +16,7 @@ struct CommandLineOptionsTests {
     try encodesJsonLine()
     try formatsTranscriptEvent()
     try extractsTranscriptSpansFromSpeechAttributes()
+    try requestsTranscriptConfidenceAttributes()
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
@@ -140,6 +141,22 @@ struct CommandLineOptionsTests {
 
     try expectEqual(spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 100, endMs: 600)])
     try expectEqual(transcriptConfidence(spans: spans), 0.75)
+  }
+
+  static func requestsTranscriptConfidenceAttributes() throws {
+    guard #available(macOS 26.0, *) else {
+      return
+    }
+
+    let options = transcriptAttributeOptions()
+
+    if !options.contains(.transcriptionConfidence) {
+      throw TestFailure(message: "Expected transcript attributes to request confidence")
+    }
+
+    if !options.contains(.audioTimeRange) {
+      throw TestFailure(message: "Expected transcript attributes to request audio time ranges")
+    }
   }
 
   static func labelsSpeakerStreamAsSystemAudioSpeaker() throws {
