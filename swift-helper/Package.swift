@@ -8,16 +8,8 @@ let package = Package(
     .executable(name: "live-poly-trans-helper", targets: ["LivePolyTransHelper"])
   ],
   targets: [
-    .target(
-      name: "AudioRingBuffer",
-      publicHeadersPath: "include",
-      cxxSettings: [
-        .unsafeFlags(["-std=c++20"])
-      ]
-    ),
     .executableTarget(
       name: "LivePolyTransHelper",
-      dependencies: ["AudioRingBuffer"],
       linkerSettings: [
         .unsafeFlags([
           "-Xlinker", "-sectcreate",

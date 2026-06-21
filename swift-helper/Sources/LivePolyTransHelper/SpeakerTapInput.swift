@@ -1,4 +1,5 @@
 import AVFAudio
+import CoreGraphics
 import CoreMedia
 import Foundation
 import ScreenCaptureKit
@@ -6,6 +7,7 @@ import Speech
 
 public enum SpeakerTapError: Error, CustomStringConvertible {
   case missingDisplay
+  case screenCapturePermissionDenied
   case missingAudioFormat
   case missingAudioBufferListSize
   case audioBufferList(OSStatus)
@@ -16,6 +18,8 @@ public enum SpeakerTapError: Error, CustomStringConvertible {
     switch self {
     case .missingDisplay:
       "ScreenCaptureKit did not provide a display to bind the system audio stream."
+    case .screenCapturePermissionDenied:
+      "Screen recording permission is required for speaker audio capture."
     case .missingAudioFormat:
       "ScreenCaptureKit did not provide a readable audio format."
     case .missingAudioBufferListSize:
@@ -37,14 +41,19 @@ public final class SpeakerTapInput: @unchecked Sendable {
   private let sampleQueue = DispatchQueue(label: "com.staticwagomu.live-poly-trans.speaker.screencapturekit")
   private let stateQueue = DispatchQueue(label: "com.staticwagomu.live-poly-trans.speaker.state")
   private let format: AVAudioFormat
-  private let ringBuffer = AudioByteRingBuffer(capacity: 32 * 1024 * 1024)
   private var isCapturing = false
   private var isOutputAdded = false
 
   public init() async throws {
-    let content = try await SCShareableContent.current
+    let hasScreenCapturePermission = requestScreenCapturePermission()
+    helperDebugLog("speaker-screen-capture-permission granted=\(hasScreenCapturePermission)")
+    guard hasScreenCapturePermission else {
+      throw SpeakerTapError.screenCapturePermissionDenied
+    }
+
+    let content = try await screenCaptureKitShareableContent()
     guard let display = content.displays.first else {
-      throw SpeakerTapError.missingDisplay
+      throw SpeakerTapError.screenCapturePermissionDenied
     }
 
     let filter = SCContentFilter(display: display, excludingWindows: [])
@@ -67,13 +76,20 @@ public final class SpeakerTapInput: @unchecked Sendable {
 
     let audioFormat = format
     let converter = audioConverter(from: audioFormat, to: analyzerFormat)
-    let audioRingBuffer = ringBuffer
+    let silenceGate = AudioSilenceGate(
+      silenceThresholdRMS: 0.0001,
+      maxTrailingSilentFrames: Int(audioFormat.sampleRate)
+    )
     let audioCounter = AudioDebugCounter(label: "speaker")
     let convertedAudioCounter = AudioDebugCounter(label: "speaker-converted")
     let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
       streamOutput.setHandler { sampleBuffer in
         do {
-          guard let buffer = try screenCaptureKitAudioBuffer(from: sampleBuffer, ringBuffer: audioRingBuffer) else {
+          guard let buffer = try screenCaptureKitAudioBuffer(from: sampleBuffer, format: audioFormat) else {
+            return
+          }
+
+          guard silenceGate.shouldEmit(buffer) else {
             return
           }
 
@@ -152,6 +168,20 @@ public final class SpeakerTapInput: @unchecked Sendable {
   }
 }
 
+public func requestScreenCapturePermission() -> Bool {
+  CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
+}
+
+@available(macOS 13.0, *)
+public func screenCaptureKitShareableContent() async throws -> SCShareableContent {
+  let currentContent = try await SCShareableContent.current
+  if !currentContent.displays.isEmpty {
+    return currentContent
+  }
+
+  return try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false)
+}
+
 @available(macOS 13.0, *)
 final class SpeakerStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
   let lock = NSLock()
@@ -183,9 +213,8 @@ final class SpeakerStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
 
 func screenCaptureKitAudioBuffer(
   from sampleBuffer: CMSampleBuffer,
-  ringBuffer: AudioByteRingBuffer
+  format: AVAudioFormat
 ) throws -> AVAudioPCMBuffer? {
-  let format = try screenCaptureKitAudioFormat(from: sampleBuffer)
   var sizeNeeded = 0
   var blockBuffer: CMBlockBuffer?
 
@@ -229,7 +258,7 @@ func screenCaptureKitAudioBuffer(
     throw SpeakerTapError.audioBufferList(fillStatus)
   }
 
-  return copyAudioBufferList(UnsafePointer(audioBufferList), format: format, ringBuffer: ringBuffer)
+  return copyAudioBufferList(UnsafePointer(audioBufferList), format: format)
 }
 
 func screenCaptureKitAudioFormat(from sampleBuffer: CMSampleBuffer) throws -> AVAudioFormat {
@@ -250,8 +279,7 @@ func screenCaptureKitAudioFormat(from sampleBuffer: CMSampleBuffer) throws -> AV
 
 func copyAudioBufferList(
   _ inputData: UnsafePointer<AudioBufferList>,
-  format: AVAudioFormat,
-  ringBuffer: AudioByteRingBuffer
+  format: AVAudioFormat
 ) -> AVAudioPCMBuffer? {
   let sourceBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
   guard let firstBuffer = sourceBuffers.first else {
@@ -281,7 +309,6 @@ func copyAudioBufferList(
 
     let byteCount = min(sourceBuffers[index].mDataByteSize, destinationBuffers[index].mDataByteSize)
     memcpy(destination, source, Int(byteCount))
-    ringBuffer.write(source, byteCount: Int(byteCount))
     destinationBuffers[index].mDataByteSize = byteCount
   }
 

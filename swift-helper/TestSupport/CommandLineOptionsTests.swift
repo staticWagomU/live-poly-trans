@@ -15,6 +15,8 @@ struct CommandLineOptionsTests {
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
+    try gatesLeadingAndTrailingSilence()
+    try resumesAfterDroppedSilence()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
   }
@@ -122,6 +124,29 @@ struct CommandLineOptionsTests {
   static func logsOnlyFinalTranscriptResults() throws {
     try expectEqual(shouldLogTranscriptResult(isFinal: true), true)
     try expectEqual(shouldLogTranscriptResult(isFinal: false), false)
+  }
+
+  static func gatesLeadingAndTrailingSilence() throws {
+    let gate = AudioSilenceGate(silenceThresholdRMS: 0.0001, maxTrailingSilentFrames: 2_000)
+    let silence = AudioSignalLevel(sampleCount: 960, rms: 0, peak: 0)
+    let speech = AudioSignalLevel(sampleCount: 960, rms: 0.01, peak: 0.05)
+
+    try expectEqual(gate.shouldEmit(level: silence, frameLength: 960), false)
+    try expectEqual(gate.shouldEmit(level: speech, frameLength: 960), true)
+    try expectEqual(gate.shouldEmit(level: silence, frameLength: 1_000), true)
+    try expectEqual(gate.shouldEmit(level: silence, frameLength: 1_000), true)
+    try expectEqual(gate.shouldEmit(level: silence, frameLength: 1), false)
+  }
+
+  static func resumesAfterDroppedSilence() throws {
+    let gate = AudioSilenceGate(silenceThresholdRMS: 0.0001, maxTrailingSilentFrames: 1)
+    let silence = AudioSignalLevel(sampleCount: 960, rms: 0, peak: 0)
+    let speech = AudioSignalLevel(sampleCount: 960, rms: 0.01, peak: 0.05)
+
+    try expectEqual(gate.shouldEmit(level: speech, frameLength: 960), true)
+    try expectEqual(gate.shouldEmit(level: silence, frameLength: 2), false)
+    try expectEqual(gate.shouldEmit(level: speech, frameLength: 960), true)
+    try expectEqual(gate.trailingSilentFrames, 0)
   }
 
   static func configuresScreenCaptureKitSpeakerStream() throws {
