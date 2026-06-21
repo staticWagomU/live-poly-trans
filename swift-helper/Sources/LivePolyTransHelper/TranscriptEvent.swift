@@ -1,5 +1,19 @@
 import Foundation
 
+public struct TranscriptSpan: Codable, Equatable {
+  public let text: String
+  public let confidence: Double?
+  public let startMs: Int64?
+  public let endMs: Int64?
+
+  public init(text: String, confidence: Double?, startMs: Int64?, endMs: Int64?) {
+    self.text = text
+    self.confidence = confidence
+    self.startMs = startMs
+    self.endMs = endMs
+  }
+}
+
 public struct TranscriptEvent: Codable, Equatable {
   public let type: String
   public let stream: String
@@ -9,8 +23,11 @@ public struct TranscriptEvent: Codable, Equatable {
   public let text: String
   public let trans: String?
   public let isFinal: Bool
+  public let time: String
   public let timestamp: String
   public let segmentId: String
+  public let confidence: Double?
+  public let spans: [TranscriptSpan]
 }
 
 public func transcriptEvent(
@@ -20,9 +37,12 @@ public func transcriptEvent(
   translation: String?,
   isFinal: Bool,
   timestamp: Date,
-  segmentId: String
+  segmentId: String,
+  confidence: Double? = nil,
+  spans: [TranscriptSpan] = []
 ) -> TranscriptEvent {
-  TranscriptEvent(
+  let formattedTimestamp = iso8601Timestamp(timestamp)
+  return TranscriptEvent(
     type: "transcript",
     stream: stream.rawValue,
     speakerId: speakerIdentifier(for: stream),
@@ -31,8 +51,11 @@ public func transcriptEvent(
     text: text,
     trans: translation,
     isFinal: isFinal,
-    timestamp: iso8601Timestamp(timestamp),
-    segmentId: segmentId
+    time: formattedTimestamp,
+    timestamp: formattedTimestamp,
+    segmentId: segmentId,
+    confidence: confidence,
+    spans: spans
   )
 }
 

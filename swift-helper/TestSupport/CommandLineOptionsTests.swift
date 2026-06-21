@@ -104,14 +104,21 @@ struct CommandLineOptionsTests {
       translation: nil,
       isFinal: true,
       timestamp: Date(timeIntervalSince1970: 0),
-      segmentId: "0-1000"
+      segmentId: "0-1000",
+      confidence: 0.75,
+      spans: [
+        TranscriptSpan(text: "hello", confidence: 0.75, startMs: 0, endMs: 500)
+      ]
     )
 
     try expectEqual(event.type, "transcript")
     try expectEqual(event.stream, "mic")
     try expectEqual(event.speakerId, "self")
     try expectEqual(event.speakerLabel, "Mic")
+    try expectEqual(event.time, "1970-01-01T00:00:00Z")
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+    try expectEqual(event.confidence, 0.75)
+    try expectEqual(event.spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 0, endMs: 500)])
   }
 
   static func labelsSpeakerStreamAsSystemAudioSpeaker() throws {
