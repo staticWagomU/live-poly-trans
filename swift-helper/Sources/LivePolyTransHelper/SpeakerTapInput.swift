@@ -19,7 +19,7 @@ public enum SpeakerTapError: Error, CustomStringConvertible {
     case .missingDisplay:
       "ScreenCaptureKit did not provide a display to bind the system audio stream."
     case .screenCapturePermissionDenied:
-      "Screen recording permission is required for speaker audio capture."
+      screenCapturePermissionRecoveryMessage
     case .missingAudioFormat:
       "ScreenCaptureKit did not provide a readable audio format."
     case .missingAudioBufferListSize:

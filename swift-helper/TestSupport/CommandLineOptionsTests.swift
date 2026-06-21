@@ -16,6 +16,7 @@ struct CommandLineOptionsTests {
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
+    try describesScreenCapturePermissionRecovery()
     try calculatesAudioFrameLength()
     try gatesLeadingAndTrailingSilence()
     try resumesAfterDroppedSilence()
@@ -126,6 +127,16 @@ struct CommandLineOptionsTests {
   static func logsOnlyFinalTranscriptResults() throws {
     try expectEqual(shouldLogTranscriptResult(isFinal: true), true)
     try expectEqual(shouldLogTranscriptResult(isFinal: false), false)
+  }
+
+  static func describesScreenCapturePermissionRecovery() throws {
+    if !screenCapturePermissionRecoveryMessage.contains("Screen & System Audio Recording") {
+      throw TestFailure(message: "Expected screen capture recovery message to name the settings pane")
+    }
+
+    if !screenCapturePermissionRecoveryMessage.contains("LivePolyTransHelper") {
+      throw TestFailure(message: "Expected screen capture recovery message to name the helper app")
+    }
   }
 
   static func calculatesAudioFrameLength() throws {

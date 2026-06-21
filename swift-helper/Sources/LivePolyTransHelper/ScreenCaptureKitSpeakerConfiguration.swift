@@ -4,6 +4,8 @@ import ScreenCaptureKit
 
 public let screenCaptureKitSpeakerSampleRate = 48_000
 public let screenCaptureKitSpeakerChannelCount: UInt32 = 1
+public let screenCapturePermissionRecoveryMessage =
+  "Screen recording permission is required for speaker audio capture. Open System Settings > Privacy & Security > Screen & System Audio Recording, enable LivePolyTransHelper, then restart capture."
 
 public enum SpeakerAudioConfigurationError: Error, CustomStringConvertible {
   case missingAudioFormat
