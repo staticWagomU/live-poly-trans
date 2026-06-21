@@ -30,6 +30,8 @@ HELPER_SOURCE="$ROOT_DIR/swift-helper/.build/release/live-poly-trans-helper"
 RAW_HELPER="$ROOT_DIR/src-tauri/binaries/helper-$TARGET_SUFFIX"
 HELPER_APP="$ROOT_DIR/src-tauri/binaries/LivePolyTransHelper.app"
 HELPER_APP_BINARY="$HELPER_APP/Contents/MacOS/live-poly-trans-helper"
+CODESIGN_IDENTITY="${LIVE_POLY_TRANS_CODESIGN_IDENTITY:--}"
+CODESIGN_KEYCHAIN="${LIVE_POLY_TRANS_CODESIGN_KEYCHAIN:-}"
 
 cp \
   "$HELPER_SOURCE" \
@@ -41,16 +43,21 @@ cp "$HELPER_SOURCE" "$HELPER_APP_BINARY"
 cp "$ROOT_DIR/swift-helper/Info.plist" "$HELPER_APP/Contents/Info.plist"
 
 if [[ "$(uname -s)" == "Darwin" && -x /usr/bin/codesign ]]; then
-  /usr/bin/codesign \
+  CODESIGN_ARGS=(
     --force \
-    --sign - \
+    --sign "$CODESIGN_IDENTITY" \
     --identifier com.staticwagomu.live-poly-trans.helper \
+  )
+  if [[ -n "$CODESIGN_KEYCHAIN" ]]; then
+    CODESIGN_ARGS+=(--keychain "$CODESIGN_KEYCHAIN")
+  fi
+
+  /usr/bin/codesign \
+    "${CODESIGN_ARGS[@]}" \
     "$RAW_HELPER"
 
   /usr/bin/codesign \
-    --force \
-    --sign - \
-    --identifier com.staticwagomu.live-poly-trans.helper \
+    "${CODESIGN_ARGS[@]}" \
     "$HELPER_APP"
 
   LSREGISTER="/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister"
