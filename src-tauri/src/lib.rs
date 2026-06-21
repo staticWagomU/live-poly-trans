@@ -106,15 +106,16 @@ pub fn read_json_lines(
             match serde_json::from_str::<Value>(&line) {
                 Ok(mut value) => {
                     attach_session_id(&mut value, &session_id);
-                    eprintln!(
-                        "live-poly-trans tauri: transcript-event session={} stream={} lang={} final={} segment={} text={}",
-                        value.get("sessionId").and_then(Value::as_str).unwrap_or("-"),
-                        value.get("stream").and_then(Value::as_str).unwrap_or("-"),
-                        value.get("lang").and_then(Value::as_str).unwrap_or("-"),
-                        value.get("isFinal").and_then(Value::as_bool).unwrap_or(false),
-                        value.get("segmentId").and_then(Value::as_str).unwrap_or("-"),
-                        value.get("text").and_then(Value::as_str).unwrap_or("")
-                    );
+                    if should_log_transcript_event(&value) {
+                        eprintln!(
+                            "live-poly-trans tauri: transcript-event session={} stream={} lang={} final=true segment={} chars={}",
+                            value.get("sessionId").and_then(Value::as_str).unwrap_or("-"),
+                            value.get("stream").and_then(Value::as_str).unwrap_or("-"),
+                            value.get("lang").and_then(Value::as_str).unwrap_or("-"),
+                            value.get("segmentId").and_then(Value::as_str).unwrap_or("-"),
+                            value.get("text").and_then(Value::as_str).map(str::len).unwrap_or(0)
+                        );
+                    }
                     let _ = app.emit("transcript-event", value);
                 }
                 Err(error) => {
@@ -123,6 +124,14 @@ pub fn read_json_lines(
             }
         }
     });
+}
+
+pub fn should_log_transcript_event(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("transcript")
+        && value
+            .get("isFinal")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
 }
 
 pub fn attach_session_id(value: &mut Value, session_id: &str) {
@@ -390,6 +399,9 @@ mod tests {
             "/App/LivePolyTrans.app/Contents/MacOS/../Resources/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
         )));
         assert!(candidates.contains(&PathBuf::from(
+            "/App/LivePolyTrans.app/Contents/MacOS/../Resources/binaries/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
+        )));
+        assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/helper"
         )));
     }
@@ -405,6 +417,23 @@ mod tests {
         attach_session_id(&mut value, "mic-123");
 
         assert_eq!(value["sessionId"], "mic-123");
+    }
+
+    #[test]
+    fn tauri_transcript_logs_only_final_events() {
+        let volatile = serde_json::json!({
+            "type": "transcript",
+            "isFinal": false,
+            "text": "partial"
+        });
+        let final_event = serde_json::json!({
+            "type": "transcript",
+            "isFinal": true,
+            "text": "complete"
+        });
+
+        assert!(!should_log_transcript_event(&volatile));
+        assert!(should_log_transcript_event(&final_event));
     }
 
     #[test]

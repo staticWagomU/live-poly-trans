@@ -31,6 +31,7 @@
     "targets": ["dmg"],
     "icon": ["icons/icon.png"],
     "externalBin": ["binaries/helper"],
+    "resources": ["binaries/LivePolyTransHelper.app"],
     "macOS": {
       "minimumSystemVersion": "26.0",
       "dmg": {
