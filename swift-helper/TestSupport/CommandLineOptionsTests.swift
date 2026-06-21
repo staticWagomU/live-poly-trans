@@ -1,5 +1,7 @@
 import AVFAudio
+import CoreMedia
 import Foundation
+import Speech
 
 @main
 struct CommandLineOptionsTests {
@@ -13,6 +15,7 @@ struct CommandLineOptionsTests {
     try formatsLanguageInfoWithBcp47Identifier()
     try encodesJsonLine()
     try formatsTranscriptEvent()
+    try extractsTranscriptSpansFromSpeechAttributes()
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
@@ -119,6 +122,24 @@ struct CommandLineOptionsTests {
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
     try expectEqual(event.confidence, 0.75)
     try expectEqual(event.spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 0, endMs: 500)])
+  }
+
+  static func extractsTranscriptSpansFromSpeechAttributes() throws {
+    guard #available(macOS 26.0, *) else {
+      return
+    }
+
+    var text = AttributedString("hello")
+    text[text.startIndex..<text.endIndex][AttributeScopes.SpeechAttributes.ConfidenceAttribute.self] = 0.75
+    text[text.startIndex..<text.endIndex][AttributeScopes.SpeechAttributes.TimeRangeAttribute.self] = CMTimeRange(
+      start: CMTime(value: 100, timescale: 1000),
+      duration: CMTime(value: 500, timescale: 1000)
+    )
+
+    let spans = transcriptSpans(from: text)
+
+    try expectEqual(spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 100, endMs: 600)])
+    try expectEqual(transcriptConfidence(spans: spans), 0.75)
   }
 
   static func labelsSpeakerStreamAsSystemAudioSpeaker() throws {
