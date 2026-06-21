@@ -113,3 +113,20 @@ public func audioSignalLevel(
     peak: peak
   )
 }
+
+public func audioFrameLength(
+  _ inputData: UnsafePointer<AudioBufferList>,
+  format: AVAudioFormat
+) -> AVAudioFrameCount {
+  let sourceBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
+  guard let firstBuffer = sourceBuffers.first else {
+    return 0
+  }
+
+  let bytesPerFrame = format.streamDescription.pointee.mBytesPerFrame
+  guard bytesPerFrame > 0 else {
+    return 0
+  }
+
+  return AVAudioFrameCount(firstBuffer.mDataByteSize / bytesPerFrame)
+}

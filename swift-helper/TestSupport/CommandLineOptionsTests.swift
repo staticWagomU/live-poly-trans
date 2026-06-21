@@ -1,3 +1,4 @@
+import AVFAudio
 import Foundation
 
 @main
@@ -15,6 +16,7 @@ struct CommandLineOptionsTests {
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
     try logsOnlyFinalTranscriptResults()
+    try calculatesAudioFrameLength()
     try gatesLeadingAndTrailingSilence()
     try resumesAfterDroppedSilence()
     try configuresScreenCaptureKitSpeakerStream()
@@ -124,6 +126,23 @@ struct CommandLineOptionsTests {
   static func logsOnlyFinalTranscriptResults() throws {
     try expectEqual(shouldLogTranscriptResult(isFinal: true), true)
     try expectEqual(shouldLogTranscriptResult(isFinal: false), false)
+  }
+
+  static func calculatesAudioFrameLength() throws {
+    guard
+      let format = AVAudioFormat(
+        commonFormat: .pcmFormatFloat32,
+        sampleRate: 48_000,
+        channels: 1,
+        interleaved: false
+      ),
+      let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: 960)
+    else {
+      throw TestFailure(message: "Could not create test audio buffer")
+    }
+
+    buffer.frameLength = 960
+    try expectEqual(audioFrameLength(UnsafePointer(buffer.audioBufferList), format: format), 960)
   }
 
   static func gatesLeadingAndTrailingSilence() throws {

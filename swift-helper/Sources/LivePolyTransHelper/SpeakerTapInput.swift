@@ -85,11 +85,11 @@ public final class SpeakerTapInput: @unchecked Sendable {
     let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
       streamOutput.setHandler { sampleBuffer in
         do {
-          guard let buffer = try screenCaptureKitAudioBuffer(from: sampleBuffer, format: audioFormat) else {
-            return
-          }
-
-          guard silenceGate.shouldEmit(buffer) else {
+          guard let buffer = try screenCaptureKitAudioBuffer(
+            from: sampleBuffer,
+            format: audioFormat,
+            silenceGate: silenceGate
+          ) else {
             return
           }
 
@@ -213,8 +213,26 @@ final class SpeakerStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
 
 func screenCaptureKitAudioBuffer(
   from sampleBuffer: CMSampleBuffer,
-  format: AVAudioFormat
+  format: AVAudioFormat,
+  silenceGate: AudioSilenceGate? = nil
 ) throws -> AVAudioPCMBuffer? {
+  try withScreenCaptureKitAudioBufferList(from: sampleBuffer) { audioBufferList in
+    if let silenceGate {
+      let level = audioSignalLevel(bufferList: audioBufferList, format: format)
+      let frameLength = audioFrameLength(audioBufferList, format: format)
+      guard silenceGate.shouldEmit(level: level, frameLength: Int(frameLength)) else {
+        return nil
+      }
+    }
+
+    return copyAudioBufferList(audioBufferList, format: format)
+  }
+}
+
+func withScreenCaptureKitAudioBufferList<T>(
+  from sampleBuffer: CMSampleBuffer,
+  _ body: (UnsafePointer<AudioBufferList>) throws -> T
+) throws -> T {
   var sizeNeeded = 0
   var blockBuffer: CMBlockBuffer?
 
@@ -258,7 +276,7 @@ func screenCaptureKitAudioBuffer(
     throw SpeakerTapError.audioBufferList(fillStatus)
   }
 
-  return copyAudioBufferList(UnsafePointer(audioBufferList), format: format)
+  return try body(UnsafePointer(audioBufferList))
 }
 
 func screenCaptureKitAudioFormat(from sampleBuffer: CMSampleBuffer) throws -> AVAudioFormat {
@@ -282,16 +300,11 @@ func copyAudioBufferList(
   format: AVAudioFormat
 ) -> AVAudioPCMBuffer? {
   let sourceBuffers = UnsafeMutableAudioBufferListPointer(UnsafeMutablePointer(mutating: inputData))
-  guard let firstBuffer = sourceBuffers.first else {
+  let frameLength = audioFrameLength(inputData, format: format)
+  guard frameLength > 0 else {
     return nil
   }
 
-  let bytesPerFrame = format.streamDescription.pointee.mBytesPerFrame
-  guard bytesPerFrame > 0 else {
-    return nil
-  }
-
-  let frameLength = AVAudioFrameCount(firstBuffer.mDataByteSize / bytesPerFrame)
   guard let copy = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: frameLength) else {
     return nil
   }
