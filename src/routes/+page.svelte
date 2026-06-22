@@ -762,8 +762,15 @@
   }
 
   .messages-shell {
+    display: grid;
     position: relative;
     min-height: 0;
+    overflow: hidden;
+  }
+
+  .messages-shell .messages {
+    min-height: 0;
+    height: 100%;
   }
 
   .jump-to-latest {
