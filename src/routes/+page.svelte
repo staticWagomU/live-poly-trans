@@ -14,6 +14,7 @@
     type CaptureMode
   } from '$lib/audioMode';
   import { isScrolledToBottom } from '$lib/scroll';
+  import { isCompetingTranscriptCandidate, mergeTranscriptMessages } from '$lib/transcriptSelection';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
   type LanguageDetectionPayload = {
@@ -96,11 +97,7 @@
     } else {
       messages = messages.map((candidate, index) =>
         index === existingIndex
-          ? {
-              ...candidate,
-              ...message,
-              isFinal: candidate.isFinal || message.isFinal
-            }
+          ? mergeTranscriptMessages(candidate, message)
           : candidate
       );
     }
@@ -116,27 +113,7 @@
   }
 
   function isLikelySameUtterance(candidate: ChatMessage, message: ChatMessage) {
-    if (candidate.role !== message.role || candidate.language !== message.language) {
-      return false;
-    }
-
-    if (candidate.isFinal) {
-      return false;
-    }
-
-    const candidateStart = segmentStart(candidate.segmentId);
-    const messageStart = segmentStart(message.segmentId);
-
-    if (candidateStart === null || messageStart === null) {
-      return false;
-    }
-
-    return Math.abs(candidateStart - messageStart) < 1500;
-  }
-
-  function segmentStart(segmentId: string) {
-    const start = Number(segmentId.split('-')[0]);
-    return Number.isFinite(start) ? start : null;
+    return isCompetingTranscriptCandidate(candidate, message);
   }
 
   function isCurrentTranscriptEvent(event: TranscriptEvent) {
