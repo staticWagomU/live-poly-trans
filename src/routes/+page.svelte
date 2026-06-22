@@ -45,6 +45,7 @@
   let savedPath: string | null = null;
   let isStarting = false;
   let messagesContainer: HTMLDivElement | null = null;
+  let latestMessageAnchor: HTMLDivElement | null = null;
   let showJumpToLatest = false;
 
   $: isRecording = activeStreams.size > 0;
@@ -273,10 +274,18 @@
       return;
     }
 
-    messagesContainer.scrollTo({
-      top: messagesContainer.scrollHeight,
-      behavior
-    });
+    if (latestMessageAnchor) {
+      latestMessageAnchor.scrollIntoView({
+        block: 'end',
+        behavior
+      });
+    } else {
+      messagesContainer.scrollTo({
+        top: messagesContainer.scrollHeight,
+        behavior
+      });
+    }
+
     showJumpToLatest = false;
   }
 
@@ -412,6 +421,7 @@
                   </div>
                 </article>
               {/each}
+              <div class="messages-end-anchor" bind:this={latestMessageAnchor} aria-hidden="true"></div>
             </div>
 
             {#if showJumpToLatest}
@@ -735,7 +745,11 @@
     flex-direction: column;
     gap: 16px;
     overflow: auto;
-    padding: 28px 24px 34px;
+    padding: 28px 24px 52px;
+  }
+
+  .messages {
+    scroll-padding-bottom: 52px;
   }
 
   .messages-shell {
@@ -773,6 +787,10 @@
 
   .jump-to-latest:active {
     transform: translateY(0);
+  }
+
+  .messages-end-anchor {
+    min-height: 1px;
   }
 
   .starter {
