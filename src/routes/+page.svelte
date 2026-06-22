@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     chooseDefaultLanguagePair,
     languageControlLabel,
@@ -13,6 +13,7 @@
     type AudioStream,
     type CaptureMode
   } from '$lib/audioMode';
+  import { isScrolledToBottom } from '$lib/scroll';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
   type LanguageDetectionPayload = {
@@ -42,6 +43,8 @@
   let errorMessage: string | null = null;
   let savedPath: string | null = null;
   let isStarting = false;
+  let messagesContainer: HTMLDivElement | null = null;
+  let showJumpToLatest = false;
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -54,7 +57,7 @@
         return;
       }
 
-      applyTranscriptEvent(event.payload);
+      void applyTranscriptEvent(event.payload);
     });
 
     const unlistenError = await listen<string>('helper-error', (event) => {
@@ -81,7 +84,8 @@
     }
   }
 
-  function applyTranscriptEvent(event: TranscriptEvent) {
+  async function applyTranscriptEvent(event: TranscriptEvent) {
+    const shouldScrollToLatest = shouldStickToLatest();
     const message = transcriptEventToMessage(event);
     const existingIndex = messages.findIndex(
       (candidate) => candidate.id === message.id || isLikelySameUtterance(candidate, message)
@@ -89,18 +93,26 @@
 
     if (existingIndex === -1) {
       messages = [...messages, message];
+    } else {
+      messages = messages.map((candidate, index) =>
+        index === existingIndex
+          ? {
+              ...candidate,
+              ...message,
+              isFinal: candidate.isFinal || message.isFinal
+            }
+          : candidate
+      );
+    }
+
+    await tick();
+
+    if (shouldScrollToLatest) {
+      scrollToLatest('auto');
       return;
     }
 
-    messages = messages.map((candidate, index) =>
-      index === existingIndex
-        ? {
-            ...candidate,
-            ...message,
-            isFinal: candidate.isFinal || message.isFinal
-          }
-        : candidate
-    );
+    syncJumpToLatestButton();
   }
 
   function isLikelySameUtterance(candidate: ChatMessage, message: ChatMessage) {
@@ -256,6 +268,39 @@
     messages = [];
     errorMessage = null;
     savedPath = null;
+    showJumpToLatest = false;
+  }
+
+  function shouldStickToLatest() {
+    if (!messagesContainer) {
+      return true;
+    }
+
+    return isScrolledToBottom({
+      scrollTop: messagesContainer.scrollTop,
+      clientHeight: messagesContainer.clientHeight,
+      scrollHeight: messagesContainer.scrollHeight
+    });
+  }
+
+  function syncJumpToLatestButton() {
+    showJumpToLatest = !!messagesContainer && !shouldStickToLatest();
+  }
+
+  function handleMessagesScroll() {
+    syncJumpToLatestButton();
+  }
+
+  function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
+    if (!messagesContainer) {
+      return;
+    }
+
+    messagesContainer.scrollTo({
+      top: messagesContainer.scrollHeight,
+      behavior
+    });
+    showJumpToLatest = false;
   }
 
   function transcriptText() {
@@ -372,18 +417,31 @@
             </article>
           </div>
         {:else}
-          <div class="messages" aria-live="polite">
-            {#each messages as message (message.id)}
-              <article class="chat-row" class:self-row={message.role === 'self'}>
-                <div class="chat-bubble" class:outgoing={message.role === 'self'} class:incoming={message.role !== 'self'}>
-                  <span>{message.speakerLabel} · {message.language}</span>
-                  <p>{message.text}</p>
-                  {#if message.translation}
-                    <small>{message.translation}</small>
-                  {/if}
-                </div>
-              </article>
-            {/each}
+          <div class="messages-shell">
+            <div
+              class="messages"
+              bind:this={messagesContainer}
+              aria-live="polite"
+              on:scroll={handleMessagesScroll}
+            >
+              {#each messages as message (message.id)}
+                <article class="chat-row" class:self-row={message.role === 'self'}>
+                  <div class="chat-bubble" class:outgoing={message.role === 'self'} class:incoming={message.role !== 'self'}>
+                    <span>{message.speakerLabel} · {message.language}</span>
+                    <p>{message.text}</p>
+                    {#if message.translation}
+                      <small>{message.translation}</small>
+                    {/if}
+                  </div>
+                </article>
+              {/each}
+            </div>
+
+            {#if showJumpToLatest}
+              <button type="button" class="jump-to-latest" on:click={scrollToLatest}>
+                Jump to latest
+              </button>
+            {/if}
           </div>
         {/if}
       </section>
@@ -701,6 +759,36 @@
     gap: 16px;
     overflow: auto;
     padding: 28px 24px 34px;
+  }
+
+  .messages-shell {
+    position: relative;
+    min-height: 0;
+  }
+
+  .jump-to-latest {
+    position: absolute;
+    right: 24px;
+    bottom: 20px;
+    border: 1px solid rgba(29, 139, 255, 0.2);
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.94);
+    color: #075cad;
+    padding: 10px 14px;
+    font-size: 12px;
+    font-weight: 850;
+    box-shadow:
+      0 12px 24px rgba(52, 62, 70, 0.16),
+      inset 0 1px 0 rgba(255, 255, 255, 0.92);
+    backdrop-filter: blur(14px);
+  }
+
+  .jump-to-latest:hover {
+    transform: translateY(-1px);
+  }
+
+  .jump-to-latest:active {
+    transform: translateY(0);
   }
 
   .starter {
