@@ -5,7 +5,7 @@
   import {
     chooseDefaultLanguagePair,
     languageControlLabel,
-    transcriptionLanguagesForStream,
+    transcriptionCandidateLanguages,
     type LanguageInfo
   } from '$lib/languages';
   import {
@@ -15,6 +15,7 @@
     type CaptureMode
   } from '$lib/audioMode';
   import { isScrolledToBottom } from '$lib/scroll';
+  import { displayTranscriptMessage } from '$lib/transcriptDisplay';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
@@ -29,8 +30,8 @@
     { mode: 'speaker', label: 'Speaker' }
   ];
 
-  let sourceLanguage = 'en-US';
-  let targetLanguage = 'ja-JP';
+  let mainLanguage = 'en-US';
+  let subLanguage = 'ja-JP';
   let installedLanguages: LanguageInfo[] = [
     { id: 'en-US', label: 'English' },
     { id: 'ja-JP', label: 'Japanese' }
@@ -92,8 +93,8 @@
       const payload = await invoke<LanguageDetectionPayload>('detect_languages');
       installedLanguages = payload.installed.length > 0 ? payload.installed : installedLanguages;
       const pair = chooseDefaultLanguagePair(installedLanguages);
-      sourceLanguage = pair.source;
-      targetLanguage = pair.target;
+      mainLanguage = pair.source;
+      subLanguage = pair.target;
     } catch (error) {
       aiError = String(error);
     }
@@ -217,9 +218,9 @@
     try {
       await invoke('start_stream_session', {
         stream,
-        sourceLanguage,
-        targetLanguage,
-        languages: selectedTranscriptionLanguages(stream),
+        sourceLanguage: mainLanguage,
+        targetLanguage: subLanguage,
+        languages: selectedTranscriptionLanguages(),
         sessionId
       });
     } catch (error) {
@@ -240,8 +241,8 @@
     await invoke('stop_stream_session', { stream });
   }
 
-  function selectedTranscriptionLanguages(stream: AudioStream) {
-    return transcriptionLanguagesForStream(stream, sourceLanguage, targetLanguage);
+  function selectedTranscriptionLanguages() {
+    return transcriptionCandidateLanguages(mainLanguage, subLanguage);
   }
 
   function shouldStickToLatest() {
@@ -303,7 +304,7 @@
     aiError = null;
 
     try {
-      aiSummary = await invoke<string>('ai_generate_summary', { messages, sourceLanguage });
+      aiSummary = await invoke<string>('ai_generate_summary', { messages, sourceLanguage: mainLanguage });
     } catch (error) {
       if (!automatic) {
         aiError = String(error);
@@ -356,7 +357,7 @@
         <div class="language-strip" aria-label="Main and sub languages">
           <label>
             <span>Main</span>
-            <select bind:value={sourceLanguage} aria-label="Main language">
+            <select bind:value={mainLanguage} aria-label="Main language">
               {#each installedLanguages as language}
                 <option value={language.id}>{languageControlLabel(language)}</option>
               {/each}
@@ -365,7 +366,7 @@
           <span class="arrow">􀄫</span>
           <label>
             <span>Sub</span>
-            <select bind:value={targetLanguage} aria-label="Sub language">
+            <select bind:value={subLanguage} aria-label="Sub language">
               {#each installedLanguages as language}
                 <option value={language.id}>{languageControlLabel(language)}</option>
               {/each}
@@ -432,6 +433,7 @@
               on:scroll={handleMessagesScroll}
             >
               {#each visibleMessages as message (message.id)}
+                {@const transcriptDisplay = displayTranscriptMessage(message, mainLanguage, subLanguage)}
                 <article class="chat-row" class:self-row={message.role === 'self'}>
                   <div
                     class="chat-bubble"
@@ -439,10 +441,10 @@
                     class:incoming={message.role !== 'self'}
                     class:pending={!message.isFinal}
                   >
-                    <span>{message.speakerLabel} · {message.language}</span>
-                    <p>{message.text}</p>
-                    {#if message.translation}
-                      <small>{message.translation}</small>
+                    <span>{message.speakerLabel} · {transcriptDisplay.primaryLanguage}</span>
+                    <p>{transcriptDisplay.primaryText}</p>
+                    {#if transcriptDisplay.secondaryText}
+                      <small>{transcriptDisplay.secondaryText}</small>
                     {/if}
                   </div>
                 </article>

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { chooseDefaultLanguagePair, languageControlLabel, transcriptionLanguagesForStream } from './languages';
+import { chooseDefaultLanguagePair, languageControlLabel, transcriptionCandidateLanguages } from './languages';
 
 describe('chooseDefaultLanguagePair', () => {
   it('prefers Japanese and English when both installed', () => {
@@ -20,12 +20,12 @@ describe('languageControlLabel', () => {
   });
 });
 
-describe('transcriptionLanguagesForStream', () => {
-  it('uses only the fixed mic language for mic and both languages for speaker', () => {
-    expect(transcriptionLanguagesForStream('mic', 'en-US', 'ja-JP')).toEqual(['ja-JP']);
-    expect(transcriptionLanguagesForStream('speaker', 'en-US', 'ja-JP')).toEqual([
-      'en-US',
-      'ja-JP'
-    ]);
+describe('transcriptionCandidateLanguages', () => {
+  it('uses both display languages as transcription candidates', () => {
+    expect(transcriptionCandidateLanguages('en-US', 'ja-JP')).toEqual(['en-US', 'ja-JP']);
+  });
+
+  it('deduplicates matching main and sub languages', () => {
+    expect(transcriptionCandidateLanguages('ja-JP', 'ja-JP')).toEqual(['ja-JP']);
   });
 });
