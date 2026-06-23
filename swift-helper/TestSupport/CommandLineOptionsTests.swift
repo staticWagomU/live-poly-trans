@@ -179,17 +179,25 @@ struct CommandLineOptionsTests {
   static func buildsMeetingAiPrompts() throws {
     let transcript = "[2026-06-23T10:00:00Z] Speaker A / ja-JP: 次のリリースを決めます"
 
-    let englishSummaryPrompt = meetingSummaryPrompt(
+    let japaneseSummaryPrompt = meetingSummaryPrompt(
       transcript: transcript,
-      responseLanguage: "en-US"
+      responseLanguage: "ja-JP"
     )
 
-    if !englishSummaryPrompt.contains("Speaker A") {
+    if !japaneseSummaryPrompt.contains("Speaker A") {
       throw TestFailure(message: "Expected summary prompt to include transcript context")
     }
 
-    if !englishSummaryPrompt.contains("en-US") {
-      throw TestFailure(message: "Expected summary prompt to request the selected main language")
+    if !japaneseSummaryPrompt.contains("Write the entire response in Japanese (ja-JP).") {
+      throw TestFailure(message: "Expected summary prompt to require Japanese for Japanese main language")
+    }
+
+    if !japaneseSummaryPrompt.contains("Do not write the summary in English.") {
+      throw TestFailure(message: "Expected summary prompt to forbid English when main language is Japanese")
+    }
+
+    if !japaneseSummaryPrompt.contains("概要") {
+      throw TestFailure(message: "Expected Japanese section labels for Japanese main language")
     }
 
     if !suggestedQuestionsPrompt(transcript: transcript).contains("質問") {

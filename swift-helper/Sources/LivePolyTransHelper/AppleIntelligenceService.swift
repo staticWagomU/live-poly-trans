@@ -136,29 +136,92 @@ public func readStandardInputText() -> String {
 
 public func meetingSummaryPrompt(transcript: String, responseLanguage: String?) -> String {
   let language = responseLanguageInstruction(responseLanguage)
+  let languageGuard = responseLanguageGuard(responseLanguage)
+  let sections = meetingSummarySections(responseLanguage: responseLanguage)
 
   return """
   You are helping summarize a live meeting transcript.
-  Produce the meeting overview in \(language).
-  Include:
-  - one paragraph overview
-  - decisions
-  - action items
-  - open questions
+  Write the entire response in \(language).
+  \(languageGuard)
+  Structure it with these sections:
+  \(sections)
 
   Transcript:
   \(transcript)
   """
 }
 
+public func meetingSummarySections(responseLanguage: String?) -> String {
+  if responseLanguagePrimaryCode(responseLanguage) == "ja" {
+    return """
+    - 概要
+    - 決定事項
+    - アクション項目
+    - 未解決の質問
+    """
+  }
+
+  return """
+  - Overview
+  - Decisions
+  - Action items
+  - Open questions
+  """
+}
+
 public func responseLanguageInstruction(_ responseLanguage: String?) -> String {
   let trimmed = responseLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-  return trimmed.isEmpty ? "the user's main language" : "the user's main language (\(trimmed))"
+  guard !trimmed.isEmpty else {
+    return "the user's main language"
+  }
+
+  return "\(summaryLanguageName(for: trimmed)) (\(trimmed))"
+}
+
+public func responseLanguageGuard(_ responseLanguage: String?) -> String {
+  let primaryLanguage = responseLanguagePrimaryCode(responseLanguage)
+  if primaryLanguage == "ja" {
+    return "Do not write the summary in English."
+  }
+
+  return "Do not switch to another language unless quoting exact transcript text."
+}
+
+public func summaryLanguageName(for responseLanguage: String) -> String {
+  switch responseLanguagePrimaryCode(responseLanguage) {
+  case "ja":
+    return "Japanese"
+  case "en":
+    return "English"
+  case "fr":
+    return "French"
+  case "de":
+    return "German"
+  case "es":
+    return "Spanish"
+  case "it":
+    return "Italian"
+  case "pt":
+    return "Portuguese"
+  case "ko":
+    return "Korean"
+  case "zh":
+    return "Chinese"
+  default:
+    return responseLanguage
+  }
+}
+
+public func responseLanguagePrimaryCode(_ responseLanguage: String?) -> String {
+  let trimmed = responseLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  return trimmed
+    .split(separator: "-", maxSplits: 1)
+    .first?
+    .lowercased() ?? ""
 }
 
 public func emptyTranscriptSummaryResponse(responseLanguage: String?) -> String {
-  let normalized = responseLanguage?.lowercased() ?? ""
-  if normalized.hasPrefix("ja") {
+  if responseLanguagePrimaryCode(responseLanguage) == "ja" {
     return "まだ確定済みの文字起こしがありません。"
   }
 
