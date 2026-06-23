@@ -186,7 +186,10 @@ pub fn record_final_transcript_event(entries: &mut Vec<AiTranscriptEntry>, value
         return;
     }
 
-    let stream = value.get("stream").and_then(Value::as_str).unwrap_or("speaker");
+    let stream = value
+        .get("stream")
+        .and_then(Value::as_str)
+        .unwrap_or("speaker");
     let speaker_id = value
         .get("speakerId")
         .and_then(Value::as_str)
@@ -195,7 +198,11 @@ pub fn record_final_transcript_event(entries: &mut Vec<AiTranscriptEntry>, value
     let speaker_label = value
         .get("speakerLabel")
         .and_then(Value::as_str)
-        .unwrap_or(if stream == "mic" { "Speaker A" } else { "Speaker B" })
+        .unwrap_or(if stream == "mic" {
+            "Speaker A"
+        } else {
+            "Speaker B"
+        })
         .to_string();
     let language = value
         .get("lang")
@@ -268,7 +275,9 @@ pub fn run_helper_ai_command(args: &[String], transcript: &str) -> Result<String
             .map_err(|error| error.to_string())?;
     }
 
-    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    let output = child
+        .wait_with_output()
+        .map_err(|error| error.to_string())?;
     if !output.status.success() {
         return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
     }
