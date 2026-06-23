@@ -25,6 +25,7 @@ swiftc \
   "${SDK_ARGS[@]}" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSignalLevel.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSilenceGate.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AppleIntelligenceService.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/CommandLineOptions.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ISO8601Timestamp.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/JsonLine.swift" \

@@ -17,6 +17,7 @@ struct CommandLineOptionsTests {
     try encodesJsonLine()
     try formatsTranscriptEvent()
     try extractsTranscriptSpansFromSpeechAttributes()
+    try buildsMeetingAiPrompts()
     try requestsTranscriptConfidenceAttributes()
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try translatesOnlyFinalTranscriptText()
@@ -157,6 +158,23 @@ struct CommandLineOptionsTests {
 
     try expectEqual(spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 100, endMs: 600)])
     try expectEqual(transcriptConfidence(spans: spans), 0.75)
+  }
+
+  static func buildsMeetingAiPrompts() throws {
+    let transcript = "[2026-06-23T10:00:00Z] Speaker A / ja-JP: 次のリリースを決めます"
+
+    if !meetingSummaryPrompt(transcript: transcript).contains("Speaker A") {
+      throw TestFailure(message: "Expected summary prompt to include transcript context")
+    }
+
+    if !suggestedQuestionsPrompt(transcript: transcript).contains("質問") {
+      throw TestFailure(message: "Expected questions prompt to request questions")
+    }
+
+    let answerPrompt = meetingQuestionPrompt(question: "決定事項は?", transcript: transcript)
+    if !answerPrompt.contains("決定事項は?") || !answerPrompt.contains(transcript) {
+      throw TestFailure(message: "Expected answer prompt to include the question and transcript")
+    }
   }
 
   static func requestsTranscriptConfidenceAttributes() throws {
