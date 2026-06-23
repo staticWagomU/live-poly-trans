@@ -47,12 +47,10 @@
   let latestMessageAnchor: HTMLDivElement | null = null;
   let showJumpToLatest = false;
   let aiSummary = '';
-  let aiQuestions = '';
   let aiQuestion = '';
   let aiAnswer = '';
   let aiError: string | null = null;
   let isSummaryLoading = false;
-  let isQuestionsLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -326,19 +324,6 @@
     }
   }
 
-  async function suggestQuestions() {
-    isQuestionsLoading = true;
-    aiError = null;
-
-    try {
-      aiQuestions = await invoke<string>('ai_suggest_questions', { messages });
-    } catch (error) {
-      aiError = String(error);
-    } finally {
-      isQuestionsLoading = false;
-    }
-  }
-
   async function askMeetingQuestion() {
     if (!aiQuestion.trim()) {
       return;
@@ -509,16 +494,6 @@
             <h3>Summary</h3>
           </div>
           <pre>{aiSummary || 'No summary yet.'}</pre>
-        </section>
-
-        <section class="ai-section">
-          <div class="ai-section-head">
-            <h3>Questions</h3>
-            <button type="button" disabled={isQuestionsLoading} on:click={suggestQuestions}>
-              {isQuestionsLoading ? 'Updating' : 'Suggest'}
-            </button>
-          </div>
-          <pre>{aiQuestions || 'No questions yet.'}</pre>
         </section>
 
         <section class="ai-section ask-section">
