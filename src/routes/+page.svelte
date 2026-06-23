@@ -47,6 +47,17 @@
   let messagesContainer: HTMLDivElement | null = null;
   let latestMessageAnchor: HTMLDivElement | null = null;
   let showJumpToLatest = false;
+  let aiSummary = '';
+  let aiQuestions = '';
+  let aiQuestion = '';
+  let aiAnswer = '';
+  let aiError: string | null = null;
+  let isSummaryLoading = false;
+  let isQuestionsLoading = false;
+  let isAnswerLoading = false;
+  let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const summaryRefreshDelayMs = 6000;
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -71,6 +82,9 @@
     return () => {
       unlistenTranscript();
       unlistenError();
+      if (summaryRefreshTimer) {
+        clearTimeout(summaryRefreshTimer);
+      }
     };
   });
 
@@ -107,10 +121,16 @@
 
     if (shouldScrollToLatest) {
       scrollToLatest('auto');
+      if (event.isFinal) {
+        scheduleSummaryRefresh();
+      }
       return;
     }
 
     syncJumpToLatestButton();
+    if (event.isFinal) {
+      scheduleSummaryRefresh();
+    }
   }
 
   function isLikelySameUtterance(candidate: ChatMessage, message: ChatMessage) {
@@ -247,6 +267,18 @@
     errorMessage = null;
     savedPath = null;
     showJumpToLatest = false;
+    aiSummary = '';
+    aiQuestions = '';
+    aiQuestion = '';
+    aiAnswer = '';
+    aiError = null;
+    if (summaryRefreshTimer) {
+      clearTimeout(summaryRefreshTimer);
+      summaryRefreshTimer = null;
+    }
+    void invoke('clear_meeting_ai_context').catch((error) => {
+      aiError = String(error);
+    });
   }
 
   function shouldStickToLatest() {
@@ -308,6 +340,65 @@
     });
     savedPath = result.text_path;
   }
+
+  function scheduleSummaryRefresh() {
+    if (summaryRefreshTimer) {
+      clearTimeout(summaryRefreshTimer);
+    }
+
+    summaryRefreshTimer = setTimeout(() => {
+      void generateMeetingSummary(true);
+    }, summaryRefreshDelayMs);
+  }
+
+  async function generateMeetingSummary(automatic = false) {
+    if (isSummaryLoading || (automatic && messages.length === 0)) {
+      return;
+    }
+
+    isSummaryLoading = true;
+    aiError = null;
+
+    try {
+      aiSummary = await invoke<string>('ai_generate_summary');
+    } catch (error) {
+      if (!automatic) {
+        aiError = String(error);
+      }
+    } finally {
+      isSummaryLoading = false;
+    }
+  }
+
+  async function suggestQuestions() {
+    isQuestionsLoading = true;
+    aiError = null;
+
+    try {
+      aiQuestions = await invoke<string>('ai_suggest_questions');
+    } catch (error) {
+      aiError = String(error);
+    } finally {
+      isQuestionsLoading = false;
+    }
+  }
+
+  async function askMeetingQuestion() {
+    if (!aiQuestion.trim()) {
+      return;
+    }
+
+    isAnswerLoading = true;
+    aiError = null;
+
+    try {
+      aiAnswer = await invoke<string>('ai_ask', { question: aiQuestion });
+    } catch (error) {
+      aiError = String(error);
+    } finally {
+      isAnswerLoading = false;
+    }
+  }
 </script>
 
 <svelte:head>
@@ -366,8 +457,8 @@
             <h1>Live translation log</h1>
           </div>
           <div class="legend" aria-label="Message lanes">
-            <span><i class="speaker-dot"></i>Speaker</span>
-            <span><i class="mic-dot"></i>Mic</span>
+            <span><i class="mic-dot"></i>Speaker A</span>
+            <span><i class="speaker-dot"></i>Speaker B</span>
           </div>
         </div>
 
@@ -389,14 +480,14 @@
           <div class="starter" aria-live="polite">
             <article class="chat-row speaker-row">
               <div class="chat-bubble incoming">
-                <span>Preview · Speaker</span>
+                <span>Preview · Speaker B</span>
                 <p>The other person’s audio will appear here.</p>
                 <small>Press Record to start listening.</small>
               </div>
             </article>
             <article class="chat-row self-row">
               <div class="chat-bubble outgoing">
-                <span>Preview · Mic</span>
+                <span>Preview · Speaker A</span>
                 <p>Your spoken replies will appear in the same conversation.</p>
                 <small>This is a preview, not a captured transcript.</small>
               </div>
@@ -432,6 +523,54 @@
           </div>
         {/if}
       </section>
+
+      <aside class="meeting-ai" aria-label="Meeting AI">
+        <div class="ai-head">
+          <div>
+            <span class="date-pill">AI</span>
+            <h2>Meeting</h2>
+          </div>
+          <button
+            type="button"
+            disabled={isSummaryLoading}
+            on:click={() => generateMeetingSummary(false)}
+          >
+            {isSummaryLoading ? 'Updating' : 'Refresh'}
+          </button>
+        </div>
+
+        {#if aiError}
+          <p class="ai-error">{aiError}</p>
+        {/if}
+
+        <section class="ai-section">
+          <div class="ai-section-head">
+            <h3>Summary</h3>
+          </div>
+          <pre>{aiSummary || 'No summary yet.'}</pre>
+        </section>
+
+        <section class="ai-section">
+          <div class="ai-section-head">
+            <h3>Questions</h3>
+            <button type="button" disabled={isQuestionsLoading} on:click={suggestQuestions}>
+              {isQuestionsLoading ? 'Updating' : 'Suggest'}
+            </button>
+          </div>
+          <pre>{aiQuestions || 'No questions yet.'}</pre>
+        </section>
+
+        <section class="ai-section ask-section">
+          <div class="ai-section-head">
+            <h3>Ask</h3>
+            <button type="button" disabled={isAnswerLoading || !aiQuestion.trim()} on:click={askMeetingQuestion}>
+              {isAnswerLoading ? 'Asking' : 'Ask'}
+            </button>
+          </div>
+          <textarea bind:value={aiQuestion} rows="3" aria-label="Meeting question"></textarea>
+          <pre>{aiAnswer || 'No answer yet.'}</pre>
+        </section>
+      </aside>
     </div>
 
     <footer class="bottom-bar">
@@ -668,6 +807,8 @@
 
   .conversation {
     display: grid;
+    grid-template-columns: minmax(0, 1fr) 340px;
+    gap: 16px;
     min-height: 0;
     padding: 18px 22px;
   }
@@ -682,6 +823,118 @@
     background:
       linear-gradient(180deg, rgba(251, 252, 253, 0.88), rgba(238, 244, 248, 0.82)),
       #f7fafb;
+  }
+
+  .meeting-ai {
+    display: grid;
+    min-width: 0;
+    min-height: 0;
+    grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+    gap: 12px;
+    overflow: hidden;
+    border: 1px solid rgba(183, 190, 196, 0.28);
+    border-radius: 24px;
+    background:
+      linear-gradient(180deg, rgba(251, 252, 253, 0.90), rgba(238, 244, 248, 0.84)),
+      #f7fafb;
+    padding: 16px;
+  }
+
+  .ai-head,
+  .ai-section-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+  }
+
+  .ai-head h2 {
+    margin: 7px 0 0;
+    color: #202124;
+    font-size: 20px;
+    letter-spacing: 0;
+  }
+
+  .ai-head button,
+  .ai-section-head button {
+    border: 1px solid rgba(121, 128, 136, 0.34);
+    border-radius: 8px;
+    background: linear-gradient(180deg, #ffffff, #edf0f2);
+    color: #2f353b;
+    padding: 7px 10px;
+    font-size: 12px;
+    font-weight: 800;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.9),
+      0 1px 2px rgba(34, 42, 50, 0.08);
+  }
+
+  .ai-head button:disabled,
+  .ai-section-head button:disabled {
+    cursor: wait;
+    opacity: 0.56;
+  }
+
+  .ai-error {
+    max-height: 58px;
+    overflow: auto;
+    margin: 0;
+    color: #a2382d;
+    font-size: 12px;
+    line-height: 1.35;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ai-section {
+    display: grid;
+    min-height: 0;
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 8px;
+    overflow: hidden;
+    border-top: 1px solid rgba(120, 126, 132, 0.14);
+    padding-top: 12px;
+  }
+
+  .ai-section h3 {
+    margin: 0;
+    color: #4b535a;
+    font-size: 12px;
+    font-weight: 850;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+  }
+
+  .ai-section pre {
+    min-height: 0;
+    overflow: auto;
+    margin: 0;
+    color: #283038;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 620;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .ask-section {
+    grid-template-rows: auto auto minmax(0, 1fr);
+  }
+
+  .ask-section textarea {
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    resize: none;
+    border: 1px solid rgba(121, 128, 136, 0.28);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.82);
+    color: #202124;
+    padding: 9px 10px;
+    font: inherit;
+    font-size: 13px;
+    line-height: 1.35;
   }
 
   .thread-head {
@@ -936,6 +1189,13 @@
     background: transparent;
     box-shadow: none;
     padding: 10px 0 12px;
+  }
+
+  @media (max-width: 980px) {
+    .conversation {
+      grid-template-columns: minmax(0, 1fr);
+      grid-template-rows: minmax(0, 1fr) minmax(280px, 38vh);
+    }
   }
 
   .error {
