@@ -70,5 +70,5 @@ export function fallbackSpeakerId(stream: TranscriptEvent['stream']) {
 }
 
 export function fallbackSpeakerLabel(stream: TranscriptEvent['stream']) {
-  return stream === 'mic' ? 'Mic' : 'Speaker';
+  return stream === 'mic' ? 'Speaker A' : 'Speaker B';
 }

@@ -8,7 +8,7 @@ describe('transcriptEventToMessage', () => {
         type: 'transcript',
         stream: 'mic',
         speakerId: 'self',
-        speakerLabel: 'Mic',
+        speakerLabel: 'Speaker A',
         lang: 'en-US',
         text: 'hello',
         trans: 'こんにちは',
@@ -21,7 +21,7 @@ describe('transcriptEventToMessage', () => {
       id: 'mic-en-US-1200',
       role: 'self',
       speakerId: 'self',
-      speakerLabel: 'Mic',
+      speakerLabel: 'Speaker A',
       language: 'en-US',
       text: 'hello',
       translation: 'こんにちは',
@@ -31,7 +31,7 @@ describe('transcriptEventToMessage', () => {
     });
   });
 
-  it('uses native stream labels as speaker fallback for older events', () => {
+  it('uses speaker letters as fallback for older events', () => {
     expect(
       transcriptEventToMessage({
         type: 'transcript',
@@ -47,7 +47,7 @@ describe('transcriptEventToMessage', () => {
     ).toMatchObject({
       role: 'speaker',
       speakerId: 'system-audio',
-      speakerLabel: 'Speaker'
+      speakerLabel: 'Speaker B'
     });
   });
 

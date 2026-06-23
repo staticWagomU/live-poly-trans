@@ -71,8 +71,8 @@ public func speakerIdentifier(for stream: AudioStream) -> String {
 public func speakerLabel(for stream: AudioStream) -> String {
   switch stream {
   case .mic:
-    "Mic"
+    "Speaker A"
   case .speaker:
-    "Speaker"
+    "Speaker B"
   }
 }
