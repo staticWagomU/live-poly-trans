@@ -7,7 +7,7 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, Command, Stdio},
-    sync::Mutex,
+    sync::{Arc, Mutex},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -28,6 +28,7 @@ pub struct LanguageDetectionPayload {
 #[derive(Default)]
 pub struct HelperSession {
     pub children: Mutex<HashMap<String, Child>>,
+    pub meeting_transcript: Arc<Mutex<Vec<AiTranscriptEntry>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -124,6 +125,7 @@ pub fn read_json_lines(
     app: AppHandle,
     stdout: impl std::io::Read + Send + 'static,
     session_id: String,
+    meeting_transcript: Arc<Mutex<Vec<AiTranscriptEntry>>>,
 ) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -140,6 +142,9 @@ pub fn read_json_lines(
                             value.get("segmentId").and_then(Value::as_str).unwrap_or("-"),
                             value.get("text").and_then(Value::as_str).map(str::len).unwrap_or(0)
                         );
+                    }
+                    if let Ok(mut entries) = meeting_transcript.lock() {
+                        record_final_transcript_event(&mut entries, &value);
                     }
                     let _ = app.emit("transcript-event", value);
                 }
@@ -238,6 +243,39 @@ pub fn build_ai_transcript_context(entries: &[AiTranscriptEntry]) -> String {
         .join("\n")
 }
 
+pub fn helper_ai_args(command: &str, question: Option<&str>) -> Vec<String> {
+    let mut args = vec![command.to_string()];
+    if let Some(question) = question {
+        args.push(question.to_string());
+    }
+
+    args
+}
+
+pub fn run_helper_ai_command(args: &[String], transcript: &str) -> Result<String, String> {
+    let helper_path = resolve_helper_path()?;
+    let mut child = Command::new(helper_path)
+        .args(args)
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| error.to_string())?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        stdin
+            .write_all(transcript.as_bytes())
+            .map_err(|error| error.to_string())?;
+    }
+
+    let output = child.wait_with_output().map_err(|error| error.to_string())?;
+    if !output.status.success() {
+        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
+}
+
 pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stderr);
@@ -331,7 +369,12 @@ pub mod commands {
         );
 
         if let Some(stdout) = child.stdout.take() {
-            read_json_lines(app.clone(), stdout, session_id);
+            read_json_lines(
+                app.clone(),
+                stdout,
+                session_id,
+                state.meeting_transcript.clone(),
+            );
         }
 
         if let Some(stderr) = child.stderr.take() {
@@ -413,6 +456,47 @@ pub mod commands {
         })
     }
 
+    #[tauri::command]
+    pub fn ai_generate_summary(state: State<'_, HelperSession>) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-generate-summary", None)
+    }
+
+    #[tauri::command]
+    pub fn ai_suggest_questions(state: State<'_, HelperSession>) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-suggest-questions", None)
+    }
+
+    #[tauri::command]
+    pub fn ai_ask(state: State<'_, HelperSession>, question: String) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-ask", Some(&question))
+    }
+
+    #[tauri::command]
+    pub fn clear_meeting_ai_context(state: State<'_, HelperSession>) -> Result<(), String> {
+        state
+            .meeting_transcript
+            .lock()
+            .map_err(|error| error.to_string())?
+            .clear();
+        Ok(())
+    }
+
+    pub fn run_meeting_ai_command(
+        state: &State<'_, HelperSession>,
+        command: &str,
+        question: Option<&str>,
+    ) -> Result<String, String> {
+        let transcript = {
+            let entries = state
+                .meeting_transcript
+                .lock()
+                .map_err(|error| error.to_string())?;
+            build_ai_transcript_context(&entries)
+        };
+        let args = helper_ai_args(command, question);
+        run_helper_ai_command(&args, &transcript)
+    }
+
     pub fn stop_helper_child(state: &State<'_, HelperSession>, stream: &str) -> Result<(), String> {
         if let Some(mut child) = state
             .children
@@ -450,7 +534,11 @@ pub fn run() {
             commands::start_stream_session,
             commands::stop_stream_session,
             commands::stop_all_sessions,
-            commands::save_transcript
+            commands::save_transcript,
+            commands::ai_generate_summary,
+            commands::ai_suggest_questions,
+            commands::ai_ask,
+            commands::clear_meeting_ai_context
         ])
         .setup(|app| {
             let _ = app.get_webview_window("main");
@@ -573,6 +661,18 @@ mod tests {
         assert_eq!(
             build_ai_transcript_context(&entries),
             "[2026-06-23T10:00:00Z] Speaker B / en-US: we should ship the summary panel\n  => 概要パネルを出しましょう"
+        );
+    }
+
+    #[test]
+    fn builds_helper_ai_args_for_questions() {
+        assert_eq!(
+            helper_ai_args("--ai-ask", Some("What changed?")),
+            vec!["--ai-ask".to_string(), "What changed?".to_string()]
+        );
+        assert_eq!(
+            helper_ai_args("--ai-generate-summary", None),
+            vec!["--ai-generate-summary".to_string()]
         );
     }
 }
