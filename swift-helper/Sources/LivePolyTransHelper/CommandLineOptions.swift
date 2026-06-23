@@ -32,7 +32,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     if arguments.contains("--ai-generate-summary") {
       return CommandLineOptions(
         command: .aiGenerateSummary,
-        sourceLanguage: nil,
+        sourceLanguage: value(after: "--source-language", in: arguments),
         targetLanguage: nil,
         languages: [],
         segmentDirectory: nil
@@ -42,7 +42,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     if arguments.contains("--ai-suggest-questions") {
       return CommandLineOptions(
         command: .aiSuggestQuestions,
-        sourceLanguage: nil,
+        sourceLanguage: value(after: "--source-language", in: arguments),
         targetLanguage: nil,
         languages: [],
         segmentDirectory: nil
@@ -52,7 +52,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     if let question = value(after: "--ai-ask", in: arguments) {
       return CommandLineOptions(
         command: .aiAsk(question: question),
-        sourceLanguage: nil,
+        sourceLanguage: value(after: "--source-language", in: arguments),
         targetLanguage: nil,
         languages: [],
         segmentDirectory: nil

@@ -42,6 +42,15 @@ struct CommandLineOptionsTests {
       .aiGenerateSummary
     )
     try expectEqual(
+      try CommandLineOptions.parse([
+        "helper",
+        "--ai-generate-summary",
+        "--source-language",
+        "en-US"
+      ]).sourceLanguage,
+      "en-US"
+    )
+    try expectEqual(
       try CommandLineOptions.parse(["helper", "--ai-suggest-questions"]).command,
       .aiSuggestQuestions
     )
@@ -170,8 +179,17 @@ struct CommandLineOptionsTests {
   static func buildsMeetingAiPrompts() throws {
     let transcript = "[2026-06-23T10:00:00Z] Speaker A / ja-JP: 次のリリースを決めます"
 
-    if !meetingSummaryPrompt(transcript: transcript).contains("Speaker A") {
+    let englishSummaryPrompt = meetingSummaryPrompt(
+      transcript: transcript,
+      responseLanguage: "en-US"
+    )
+
+    if !englishSummaryPrompt.contains("Speaker A") {
       throw TestFailure(message: "Expected summary prompt to include transcript context")
+    }
+
+    if !englishSummaryPrompt.contains("en-US") {
+      throw TestFailure(message: "Expected summary prompt to request the selected main language")
     }
 
     if !suggestedQuestionsPrompt(transcript: transcript).contains("質問") {

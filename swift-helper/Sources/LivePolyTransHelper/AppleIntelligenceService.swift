@@ -57,10 +57,10 @@ public actor AppleIntelligenceService {
       .joined(separator: "\n")
   }
 
-  public func generateSummary(transcript: String) async throws -> String {
+  public func generateSummary(transcript: String, responseLanguage: String?) async throws -> String {
     try await meetingAiResponse(
-      prompt: meetingSummaryPrompt(transcript: transcript),
-      emptyTranscriptResponse: "まだ確定済みの文字起こしがありません。"
+      prompt: meetingSummaryPrompt(transcript: transcript, responseLanguage: responseLanguage),
+      emptyTranscriptResponse: emptyTranscriptSummaryResponse(responseLanguage: responseLanguage)
     )
   }
 
@@ -134,10 +134,13 @@ public func readStandardInputText() -> String {
   return String(decoding: data, as: UTF8.self)
 }
 
-public func meetingSummaryPrompt(transcript: String) -> String {
-  """
+public func meetingSummaryPrompt(transcript: String, responseLanguage: String?) -> String {
+  let language = responseLanguageInstruction(responseLanguage)
+
+  return """
   You are helping summarize a live meeting transcript.
-  Produce a concise Japanese meeting overview with:
+  Produce the meeting overview in \(language).
+  Include:
   - one paragraph overview
   - decisions
   - action items
@@ -146,6 +149,20 @@ public func meetingSummaryPrompt(transcript: String) -> String {
   Transcript:
   \(transcript)
   """
+}
+
+public func responseLanguageInstruction(_ responseLanguage: String?) -> String {
+  let trimmed = responseLanguage?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+  return trimmed.isEmpty ? "the user's main language" : "the user's main language (\(trimmed))"
+}
+
+public func emptyTranscriptSummaryResponse(responseLanguage: String?) -> String {
+  let normalized = responseLanguage?.lowercased() ?? ""
+  if normalized.hasPrefix("ja") {
+    return "まだ確定済みの文字起こしがありません。"
+  }
+
+  return "There is no finalized transcript yet."
 }
 
 public func suggestedQuestionsPrompt(transcript: String) -> String {

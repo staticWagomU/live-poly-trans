@@ -282,10 +282,20 @@ pub fn meeting_ai_context(
     build_ai_context_from_saved_messages(selected_messages)
 }
 
-pub fn helper_ai_args(command: &str, question: Option<&str>) -> Vec<String> {
+pub fn helper_ai_args(
+    command: &str,
+    question: Option<&str>,
+    source_language: Option<&str>,
+) -> Vec<String> {
     let mut args = vec![command.to_string()];
     if let Some(question) = question {
         args.push(question.to_string());
+    }
+    if let Some(source_language) = source_language {
+        if !source_language.trim().is_empty() {
+            args.push("--source-language".to_string());
+            args.push(source_language.to_string());
+        }
     }
 
     args
@@ -501,8 +511,15 @@ pub mod commands {
     pub fn ai_generate_summary(
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
+        source_language: String,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-generate-summary", None, &messages)
+        run_meeting_ai_command(
+            &state,
+            "--ai-generate-summary",
+            None,
+            Some(&source_language),
+            &messages,
+        )
     }
 
     #[tauri::command]
@@ -510,7 +527,7 @@ pub mod commands {
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-suggest-questions", None, &messages)
+        run_meeting_ai_command(&state, "--ai-suggest-questions", None, None, &messages)
     }
 
     #[tauri::command]
@@ -519,7 +536,7 @@ pub mod commands {
         question: String,
         messages: Vec<SavedTranscriptMessage>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-ask", Some(&question), &messages)
+        run_meeting_ai_command(&state, "--ai-ask", Some(&question), None, &messages)
     }
 
     #[tauri::command]
@@ -536,6 +553,7 @@ pub mod commands {
         state: &State<'_, HelperSession>,
         command: &str,
         question: Option<&str>,
+        source_language: Option<&str>,
         messages: &[SavedTranscriptMessage],
     ) -> Result<String, String> {
         let transcript = {
@@ -545,7 +563,7 @@ pub mod commands {
                 .map_err(|error| error.to_string())?;
             meeting_ai_context(messages, &entries)
         };
-        let args = helper_ai_args(command, question);
+        let args = helper_ai_args(command, question, source_language);
         run_helper_ai_command(&args, &transcript)
     }
 
@@ -719,12 +737,16 @@ mod tests {
     #[test]
     fn builds_helper_ai_args_for_questions() {
         assert_eq!(
-            helper_ai_args("--ai-ask", Some("What changed?")),
+            helper_ai_args("--ai-ask", Some("What changed?"), None),
             vec!["--ai-ask".to_string(), "What changed?".to_string()]
         );
         assert_eq!(
-            helper_ai_args("--ai-generate-summary", None),
-            vec!["--ai-generate-summary".to_string()]
+            helper_ai_args("--ai-generate-summary", None, Some("en-US")),
+            vec![
+                "--ai-generate-summary".to_string(),
+                "--source-language".to_string(),
+                "en-US".to_string()
+            ]
         );
     }
 

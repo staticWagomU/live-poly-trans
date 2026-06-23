@@ -42,8 +42,6 @@
     mic: null,
     speaker: null
   };
-  let errorMessage: string | null = null;
-  let savedPath: string | null = null;
   let isStarting = false;
   let messagesContainer: HTMLDivElement | null = null;
   let latestMessageAnchor: HTMLDivElement | null = null;
@@ -75,7 +73,7 @@
     });
 
     const unlistenError = await listen<string>('helper-error', (event) => {
-      errorMessage = event.payload;
+      aiError = event.payload;
     });
 
     await detectLanguages();
@@ -97,7 +95,7 @@
       sourceLanguage = pair.source;
       targetLanguage = pair.target;
     } catch (error) {
-      errorMessage = String(error);
+      aiError = String(error);
     }
   }
 
@@ -162,8 +160,7 @@
   }
 
   async function toggleRecording() {
-    errorMessage = null;
-    savedPath = null;
+    aiError = null;
 
     if (isRecording) {
       clearStreamSessions([...activeStreams]);
@@ -187,16 +184,15 @@
     isStarting = false;
 
     if (activeStreams.size === 0) {
-      errorMessage = failures.join('\n');
+      aiError = failures.join('\n');
       return;
     }
 
-    errorMessage = failures.length > 0 ? failures.join('\n') : null;
+    aiError = failures.length > 0 ? failures.join('\n') : null;
   }
 
   async function selectCaptureMode(mode: CaptureMode) {
-    errorMessage = null;
-    savedPath = null;
+    aiError = null;
     captureMode = mode;
 
     if (!isRecording) {
@@ -221,7 +217,7 @@
         }
       }
     } catch (error) {
-      errorMessage = String(error);
+      aiError = String(error);
     } finally {
       isStarting = false;
     }
@@ -259,25 +255,6 @@
 
   function selectedTranscriptionLanguages(stream: AudioStream) {
     return transcriptionLanguagesForStream(stream, sourceLanguage, targetLanguage);
-  }
-
-  function clearMessages() {
-    messages = [];
-    errorMessage = null;
-    savedPath = null;
-    showJumpToLatest = false;
-    aiSummary = '';
-    aiQuestions = '';
-    aiQuestion = '';
-    aiAnswer = '';
-    aiError = null;
-    if (summaryRefreshTimer) {
-      clearTimeout(summaryRefreshTimer);
-      summaryRefreshTimer = null;
-    }
-    void invoke('clear_meeting_ai_context').catch((error) => {
-      aiError = String(error);
-    });
   }
 
   function shouldStickToLatest() {
@@ -320,26 +297,6 @@
     showJumpToLatest = false;
   }
 
-  function transcriptText() {
-    return messages
-      .map((message) => {
-        const translation = message.translation ? `\n  => ${message.translation}` : '';
-        return `[${message.timestamp}] ${message.speakerLabel} / ${message.language}: ${message.text}${translation}`;
-      })
-      .join('\n');
-  }
-
-  async function copyMessages() {
-    await navigator.clipboard.writeText(transcriptText());
-  }
-
-  async function saveMessages() {
-    const result = await invoke<{ json_path: string; text_path: string }>('save_transcript', {
-      messages
-    });
-    savedPath = result.text_path;
-  }
-
   function scheduleSummaryRefresh() {
     if (summaryRefreshTimer) {
       clearTimeout(summaryRefreshTimer);
@@ -359,7 +316,7 @@
     aiError = null;
 
     try {
-      aiSummary = await invoke<string>('ai_generate_summary', { messages });
+      aiSummary = await invoke<string>('ai_generate_summary', { messages, sourceLanguage });
     } catch (error) {
       if (!automatic) {
         aiError = String(error);
@@ -577,19 +534,6 @@
       </aside>
     </div>
 
-    <footer class="bottom-bar">
-      {#if errorMessage}
-        <p class="error">{errorMessage}</p>
-      {:else if savedPath}
-        <p class="saved">{savedPath}</p>
-      {/if}
-      <div class="actions">
-        <button on:click={detectLanguages}>Refresh Languages</button>
-        <button disabled={messages.length === 0} on:click={copyMessages}>Copy</button>
-        <button disabled={messages.length === 0} on:click={saveMessages}>Save</button>
-        <button on:click={clearMessages}>Clear</button>
-      </div>
-    </footer>
   </section>
 </main>
 
@@ -650,7 +594,7 @@
     width: 100vw;
     height: 100vh;
     overflow: hidden;
-    grid-template-rows: auto 1fr auto;
+    grid-template-rows: auto 1fr;
     border: 0;
     border-radius: 0;
     background: var(--canvas);
@@ -678,7 +622,6 @@
   .language-strip,
   .capture-switch,
   .record,
-  .bottom-bar,
   .date-pill {
     border: 1px solid var(--hairline);
     background: var(--canvas);
@@ -842,12 +785,12 @@
   }
 
   .meeting-ai {
-    display: grid;
+    display: flex;
     min-width: 0;
     min-height: 0;
-    grid-template-rows: auto auto minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1.15fr);
+    flex-direction: column;
     gap: 12px;
-    overflow: hidden;
+    overflow: auto;
     background: var(--canvas-parchment);
     padding: 16px;
   }
@@ -903,11 +846,11 @@
   }
 
   .ai-section {
-    display: grid;
+    display: flex;
+    flex: 0 0 auto;
     min-height: 0;
-    grid-template-rows: auto minmax(0, 1fr);
+    flex-direction: column;
     gap: 8px;
-    overflow: hidden;
     border-top: 1px solid var(--hairline);
     padding-top: 12px;
   }
@@ -922,6 +865,7 @@
 
   .ai-section pre {
     min-height: 0;
+    max-height: 240px;
     overflow: auto;
     margin: 0;
     color: var(--ink);
@@ -934,7 +878,7 @@
   }
 
   .ask-section {
-    grid-template-rows: auto auto minmax(0, 1fr);
+    padding-bottom: 12px;
   }
 
   .ask-section textarea {
@@ -1204,21 +1148,6 @@
     opacity: 0.42;
   }
 
-  .bottom-bar {
-    display: grid;
-    align-items: center;
-    grid-template-columns: 1fr auto;
-    gap: 14px;
-    min-height: 48px;
-    margin: 0;
-    border: 0;
-    border-top: 1px solid var(--hairline);
-    border-radius: 0;
-    background: var(--canvas-parchment);
-    box-shadow: none;
-    padding: 8px 16px;
-  }
-
   @media (max-width: 980px) {
     .conversation {
       grid-template-columns: minmax(0, 1fr);
@@ -1229,54 +1158,6 @@
       border-right: 0;
       border-bottom: 1px solid var(--hairline);
     }
-  }
-
-  .error {
-    max-height: 78px;
-    overflow: auto;
-    color: #b3261e;
-    font-size: 12px;
-    line-height: 1.35;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .saved {
-    overflow: hidden;
-    color: #2f6f3e;
-    font-size: 12px;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .actions {
-    display: flex;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .actions button {
-    border: 1px solid var(--hairline);
-    border-radius: 8px;
-    background: var(--canvas);
-    color: var(--ink);
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .actions button:hover:not(:disabled) {
-    background: var(--surface-pearl);
-  }
-
-  .actions button:active {
-    background: #e9e9ed;
-  }
-
-  .actions button:disabled {
-    cursor: default;
-    opacity: 0.45;
   }
 
   @media (max-width: 900px) {
@@ -1308,7 +1189,6 @@
     }
 
     .meeting-ai {
-      display: block;
       overflow: auto;
     }
 
@@ -1318,10 +1198,6 @@
 
     .ask-section textarea {
       min-height: 72px;
-    }
-
-    .bottom-bar {
-      grid-template-columns: 1fr;
     }
 
     .toolbar-actions {
@@ -1367,8 +1243,5 @@
       padding: 14px 24px 28px;
     }
 
-    .actions {
-      justify-content: flex-start;
-    }
   }
 </style>

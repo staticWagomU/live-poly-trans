@@ -34,7 +34,8 @@ public struct LivePolyTransHelper {
       fflush(stdout)
     case .aiGenerateSummary:
       let response = try await AppleIntelligenceService.shared.generateSummary(
-        transcript: readStandardInputText()
+        transcript: readStandardInputText(),
+        responseLanguage: options.sourceLanguage
       )
       print(response)
       fflush(stdout)
