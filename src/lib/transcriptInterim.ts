@@ -1,4 +1,42 @@
 import type { ChatMessage } from './transcripts';
+import { isCompetingTranscriptCandidate, mergeTranscriptMessages } from './transcriptSelection';
+
+export type TranscriptMessageState = {
+  messages: ChatMessage[];
+  interimMessages: ChatMessage[];
+};
+
+export function applyTranscriptMessage(
+  state: TranscriptMessageState,
+  incoming: ChatMessage
+): TranscriptMessageState {
+  if (!incoming.isFinal) {
+    return {
+      messages: state.messages,
+      interimMessages: upsertInterimMessage(state.interimMessages, incoming)
+    };
+  }
+
+  return {
+    messages: upsertFinalMessage(state.messages, incoming),
+    interimMessages: removeInterimMessagesForFinal(state.interimMessages, incoming)
+  };
+}
+
+export function upsertFinalMessage(messages: ChatMessage[], incoming: ChatMessage) {
+  const existingIndex = messages.findIndex(
+    (message) =>
+      message.id === incoming.id || isCompetingTranscriptCandidate(message, incoming)
+  );
+
+  if (existingIndex === -1) {
+    return [...messages, incoming];
+  }
+
+  return messages.map((message, index) =>
+    index === existingIndex ? mergeTranscriptMessages(message, incoming) : message
+  );
+}
 
 export function upsertInterimMessage(
   interimMessages: ChatMessage[],

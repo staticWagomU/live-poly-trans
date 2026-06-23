@@ -15,8 +15,7 @@
     type CaptureMode
   } from '$lib/audioMode';
   import { isScrolledToBottom } from '$lib/scroll';
-  import { isCompetingTranscriptCandidate, mergeTranscriptMessages } from '$lib/transcriptSelection';
-  import { removeInterimMessagesForFinal, upsertInterimMessage } from '$lib/transcriptInterim';
+  import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
   type LanguageDetectionPayload = {
@@ -103,34 +102,9 @@
   async function applyTranscriptEvent(event: TranscriptEvent) {
     const shouldScrollToLatest = shouldStickToLatest();
     const message = transcriptEventToMessage(event);
-
-    if (!message.isFinal) {
-      interimMessages = upsertInterimMessage(interimMessages, message);
-      await tick();
-
-      if (shouldScrollToLatest) {
-        scrollToLatest('auto');
-        return;
-      }
-
-      syncJumpToLatestButton();
-      return;
-    }
-
-    interimMessages = removeInterimMessagesForFinal(interimMessages, message);
-    const existingIndex = messages.findIndex(
-      (candidate) => candidate.id === message.id || isLikelySameUtterance(candidate, message)
-    );
-
-    if (existingIndex === -1) {
-      messages = [...messages, message];
-    } else {
-      messages = messages.map((candidate, index) =>
-        index === existingIndex
-          ? mergeTranscriptMessages(candidate, message)
-          : candidate
-      );
-    }
+    const nextState = applyTranscriptMessage({ messages, interimMessages }, message);
+    messages = nextState.messages;
+    interimMessages = nextState.interimMessages;
 
     await tick();
 
@@ -146,10 +120,6 @@
     if (event.isFinal) {
       scheduleSummaryRefresh();
     }
-  }
-
-  function isLikelySameUtterance(candidate: ChatMessage, message: ChatMessage) {
-    return isCompetingTranscriptCandidate(candidate, message);
   }
 
   function isCurrentTranscriptEvent(event: TranscriptEvent) {

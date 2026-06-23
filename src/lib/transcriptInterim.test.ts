@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  applyTranscriptMessage,
   removeInterimMessagesForFinal,
   upsertInterimMessage
 } from './transcriptInterim';
@@ -79,5 +80,60 @@ describe('removeInterimMessagesForFinal', () => {
     const speakerFinal = message({ isFinal: true });
 
     expect(removeInterimMessagesForFinal([mic], speakerFinal)).toEqual([mic]);
+  });
+});
+
+describe('applyTranscriptMessage', () => {
+  it('stores interim messages outside finalized history', () => {
+    const incoming = message({ text: '途中です', isFinal: false });
+
+    expect(applyTranscriptMessage({ messages: [], interimMessages: [] }, incoming)).toEqual({
+      messages: [],
+      interimMessages: [incoming]
+    });
+  });
+
+  it('moves final messages into history and clears matching interim messages', () => {
+    const interim = message({ text: '途中です', isFinal: false });
+    const finalMessage = message({
+      id: 'speaker-ja-JP-1200',
+      text: '確定しました。',
+      isFinal: true,
+      segmentId: '1200-1600'
+    });
+
+    expect(
+      applyTranscriptMessage(
+        { messages: [], interimMessages: [interim] },
+        finalMessage
+      )
+    ).toEqual({
+      messages: [finalMessage],
+      interimMessages: []
+    });
+  });
+
+  it('merges final updates into existing finalized history', () => {
+    const current = message({
+      id: 'speaker-ja-JP-1000',
+      text: '確定しま',
+      isFinal: true
+    });
+    const incoming = message({
+      id: 'speaker-ja-JP-1000',
+      text: '確定しました。',
+      isFinal: true,
+      segmentId: '1000-1800'
+    });
+
+    expect(
+      applyTranscriptMessage(
+        { messages: [current], interimMessages: [] },
+        incoming
+      )
+    ).toMatchObject({
+      messages: [{ text: '確定しました。', isFinal: true }],
+      interimMessages: []
+    });
   });
 });
