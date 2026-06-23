@@ -27,6 +27,8 @@ public struct TranscriptEvent: Codable, Equatable {
   public let timestamp: String
   public let segmentId: String
   public let confidence: Double?
+  public let detectedLang: String?
+  public let detectedLangConfidence: Double?
   public let spans: [TranscriptSpan]
 }
 
@@ -42,6 +44,7 @@ public func transcriptEvent(
   spans: [TranscriptSpan] = []
 ) -> TranscriptEvent {
   let formattedTimestamp = iso8601Timestamp(timestamp)
+  let languageDetection = detectedTranscriptLanguage(text)
   return TranscriptEvent(
     type: "transcript",
     stream: stream.rawValue,
@@ -55,6 +58,8 @@ public func transcriptEvent(
     timestamp: formattedTimestamp,
     segmentId: segmentId,
     confidence: confidence,
+    detectedLang: languageDetection?.language,
+    detectedLangConfidence: languageDetection?.confidence,
     spans: spans
   )
 }

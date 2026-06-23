@@ -92,11 +92,15 @@ describe('transcriptEventToMessage', () => {
         sessionId: 'mic-session-1',
         segmentId: '100-500',
         confidence: 0.75,
+        detectedLang: 'en',
+        detectedLangConfidence: 0.92,
         spans: [{ text: 'hello', confidence: 0.75, startMs: 100, endMs: 600 }]
       })
     ).toMatchObject({
       timestamp: '2026-06-15T00:00:00Z',
       confidence: 0.75,
+      detectedLanguage: 'en',
+      detectedLanguageConfidence: 0.92,
       spans: [{ text: 'hello', confidence: 0.75, startMs: 100, endMs: 600 }]
     });
   });

@@ -43,6 +43,12 @@ export function compareTranscriptCandidates(left: ChatMessage, right: ChatMessag
     return confidenceGap;
   }
 
+  const detectionGap = detectedLanguageAgreement(left) - detectedLanguageAgreement(right);
+
+  if (Math.abs(detectionGap) >= 0.5) {
+    return detectionGap;
+  }
+
   const leftFitness = languageFitness(left.text, left.language);
   const rightFitness = languageFitness(right.text, right.language);
   const fitnessGap = leftFitness - rightFitness;
@@ -96,6 +102,18 @@ export function transcriptDensityPenalty(message: ChatMessage) {
   }
 
   return Math.min(1, (charactersPerSecond - DENSITY_PENALTY_THRESHOLD) / DENSITY_PENALTY_THRESHOLD);
+}
+
+export function detectedLanguageAgreement(message: ChatMessage) {
+  const detectedLanguage = message.detectedLanguage?.split('-')[0]?.toLowerCase();
+  const expectedLanguage = message.language.split('-')[0]?.toLowerCase();
+  const confidence = message.detectedLanguageConfidence ?? 0;
+
+  if (!detectedLanguage || !expectedLanguage || confidence < 0.6) {
+    return 0;
+  }
+
+  return detectedLanguage === expectedLanguage ? 1 : -1;
 }
 
 export function languageFitness(text: string, language: string) {

@@ -17,6 +17,7 @@ struct CommandLineOptionsTests {
     try encodesJsonLine()
     try formatsTranscriptEvent()
     try extractsTranscriptSpansFromSpeechAttributes()
+    try detectsTranscriptLanguage()
     try buildsMeetingAiPrompts()
     try requestsTranscriptConfidenceAttributes()
     try labelsSpeakerStreamAsSystemAudioSpeaker()
@@ -139,6 +140,7 @@ struct CommandLineOptionsTests {
     try expectEqual(event.time, "1970-01-01T00:00:00Z")
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
     try expectEqual(event.confidence, 0.75)
+    try expectEqual(event.detectedLang, "en")
     try expectEqual(event.spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 0, endMs: 500)])
   }
 
@@ -158,6 +160,11 @@ struct CommandLineOptionsTests {
 
     try expectEqual(spans, [TranscriptSpan(text: "hello", confidence: 0.75, startMs: 100, endMs: 600)])
     try expectEqual(transcriptConfidence(spans: spans), 0.75)
+  }
+
+  static func detectsTranscriptLanguage() throws {
+    let detection = detectedTranscriptLanguage("今日はよろしくお願いします")
+    try expectEqual(detection?.language, "ja")
   }
 
   static func buildsMeetingAiPrompts() throws {

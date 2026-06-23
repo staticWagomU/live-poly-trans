@@ -106,4 +106,34 @@ describe('mergeTranscriptMessages', () => {
       translation: 'はい'
     });
   });
+
+  it('prefers the candidate whose language matches NaturalLanguage detection', () => {
+    const current = message({
+      id: 'speaker-ja-JP-1000',
+      language: 'ja-JP',
+      text: '今日は金曜日です',
+      translation: 'Today is Friday.',
+      isFinal: true,
+      confidence: 0.76,
+      detectedLanguage: 'en',
+      detectedLanguageConfidence: 0.95,
+      segmentId: '1000-1500'
+    });
+    const incoming = message({
+      id: 'speaker-en-US-1000',
+      language: 'en-US',
+      text: 'it is Friday today',
+      translation: '今日は金曜日です',
+      isFinal: true,
+      confidence: 0.75,
+      detectedLanguage: 'en',
+      detectedLanguageConfidence: 0.95,
+      segmentId: '1000-1500'
+    });
+
+    expect(mergeTranscriptMessages(current, incoming)).toMatchObject({
+      id: 'speaker-en-US-1000',
+      language: 'en-US'
+    });
+  });
 });

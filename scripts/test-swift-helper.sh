@@ -35,6 +35,7 @@ swiftc \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/SegmentWriter.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptAttributes.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptEvent.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptLanguageDetection.swift" \
   "$ROOT_DIR/swift-helper/TestSupport/CommandLineOptionsTests.swift" \
   -o "$TMP_DIR/command-line-options-tests"
 

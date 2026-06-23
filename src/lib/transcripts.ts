@@ -12,6 +12,8 @@ export type TranscriptEvent = {
   sessionId: string;
   segmentId?: string;
   confidence?: number;
+  detectedLang?: string;
+  detectedLangConfidence?: number;
   spans?: TranscriptSpan[];
 };
 
@@ -34,6 +36,8 @@ export type ChatMessage = {
   timestamp: string;
   segmentId: string;
   confidence?: number;
+  detectedLanguage?: string;
+  detectedLanguageConfidence?: number;
   spans?: TranscriptSpan[];
 };
 
@@ -56,6 +60,14 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
 
   if (event.confidence !== undefined) {
     message.confidence = event.confidence;
+  }
+
+  if (event.detectedLang !== undefined) {
+    message.detectedLanguage = event.detectedLang;
+  }
+
+  if (event.detectedLangConfidence !== undefined) {
+    message.detectedLanguageConfidence = event.detectedLangConfidence;
   }
 
   if (event.spans !== undefined) {
