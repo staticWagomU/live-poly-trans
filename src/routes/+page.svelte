@@ -502,7 +502,12 @@
             >
               {#each messages as message (message.id)}
                 <article class="chat-row" class:self-row={message.role === 'self'}>
-                  <div class="chat-bubble" class:outgoing={message.role === 'self'} class:incoming={message.role !== 'self'}>
+                  <div
+                    class="chat-bubble"
+                    class:outgoing={message.role === 'self'}
+                    class:incoming={message.role !== 'self'}
+                    class:pending={!message.isFinal}
+                  >
                     <span>{message.speakerLabel} · {message.language}</span>
                     <p>{message.text}</p>
                     {#if message.translation}
@@ -1188,6 +1193,15 @@
     font-size: 14px;
     font-weight: 400;
     line-height: 1.35;
+  }
+
+  .chat-bubble.pending p,
+  .chat-bubble.pending small {
+    opacity: 0.45;
+  }
+
+  .chat-bubble.pending span {
+    opacity: 0.42;
   }
 
   .bottom-bar {
