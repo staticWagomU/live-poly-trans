@@ -271,6 +271,17 @@ pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage])
         .join("\n")
 }
 
+pub fn meeting_ai_context(
+    selected_messages: &[SavedTranscriptMessage],
+    fallback_entries: &[AiTranscriptEntry],
+) -> String {
+    if selected_messages.is_empty() {
+        return build_ai_transcript_context(fallback_entries);
+    }
+
+    build_ai_context_from_saved_messages(selected_messages)
+}
+
 pub fn helper_ai_args(command: &str, question: Option<&str>) -> Vec<String> {
     let mut args = vec![command.to_string()];
     if let Some(question) = question {
@@ -487,18 +498,28 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn ai_generate_summary(state: State<'_, HelperSession>) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-generate-summary", None)
+    pub fn ai_generate_summary(
+        state: State<'_, HelperSession>,
+        messages: Vec<SavedTranscriptMessage>,
+    ) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-generate-summary", None, &messages)
     }
 
     #[tauri::command]
-    pub fn ai_suggest_questions(state: State<'_, HelperSession>) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-suggest-questions", None)
+    pub fn ai_suggest_questions(
+        state: State<'_, HelperSession>,
+        messages: Vec<SavedTranscriptMessage>,
+    ) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-suggest-questions", None, &messages)
     }
 
     #[tauri::command]
-    pub fn ai_ask(state: State<'_, HelperSession>, question: String) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-ask", Some(&question))
+    pub fn ai_ask(
+        state: State<'_, HelperSession>,
+        question: String,
+        messages: Vec<SavedTranscriptMessage>,
+    ) -> Result<String, String> {
+        run_meeting_ai_command(&state, "--ai-ask", Some(&question), &messages)
     }
 
     #[tauri::command]
@@ -515,13 +536,14 @@ pub mod commands {
         state: &State<'_, HelperSession>,
         command: &str,
         question: Option<&str>,
+        messages: &[SavedTranscriptMessage],
     ) -> Result<String, String> {
         let transcript = {
             let entries = state
                 .meeting_transcript
                 .lock()
                 .map_err(|error| error.to_string())?;
-            build_ai_transcript_context(&entries)
+            meeting_ai_context(messages, &entries)
         };
         let args = helper_ai_args(command, question);
         run_helper_ai_command(&args, &transcript)
@@ -723,6 +745,34 @@ mod tests {
         assert_eq!(
             build_ai_context_from_saved_messages(&messages),
             "[2026-06-23T10:00:00Z] Speaker B / ja-JP: 次のリリースは金曜日です\n  => The next release is Friday."
+        );
+    }
+
+    #[test]
+    fn meeting_ai_context_prefers_selected_messages_over_raw_entries() {
+        let selected = vec![SavedTranscriptMessage {
+            role: "speaker".to_string(),
+            speaker_id: Some("system-audio".to_string()),
+            speaker_label: Some("Speaker B".to_string()),
+            language: "ja-JP".to_string(),
+            text: "選ばれた日本語候補".to_string(),
+            translation: None,
+            timestamp: "2026-06-23T10:00:00Z".to_string(),
+            confidence: Some(0.88),
+            spans: None,
+        }];
+        let raw = vec![AiTranscriptEntry {
+            speaker_id: "system-audio".to_string(),
+            speaker_label: "Speaker B".to_string(),
+            language: "en-US".to_string(),
+            text: "wrong raw candidate".to_string(),
+            translation: None,
+            timestamp: "2026-06-23T10:00:00Z".to_string(),
+        }];
+
+        assert_eq!(
+            meeting_ai_context(&selected, &raw),
+            "[2026-06-23T10:00:00Z] Speaker B / ja-JP: 選ばれた日本語候補"
         );
     }
 }

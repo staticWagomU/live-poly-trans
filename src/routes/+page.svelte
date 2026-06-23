@@ -5,6 +5,7 @@
   import {
     chooseDefaultLanguagePair,
     languageControlLabel,
+    transcriptionLanguagesForStream,
     type LanguageInfo
   } from '$lib/languages';
   import {
@@ -235,7 +236,7 @@
         stream,
         sourceLanguage,
         targetLanguage,
-        languages: selectedTranscriptionLanguages(),
+        languages: selectedTranscriptionLanguages(stream),
         sessionId
       });
     } catch (error) {
@@ -256,10 +257,8 @@
     await invoke('stop_stream_session', { stream });
   }
 
-  function selectedTranscriptionLanguages() {
-    return [sourceLanguage, targetLanguage].filter(
-      (language, index, languages) => language && languages.indexOf(language) === index
-    );
+  function selectedTranscriptionLanguages(stream: AudioStream) {
+    return transcriptionLanguagesForStream(stream, sourceLanguage, targetLanguage);
   }
 
   function clearMessages() {
@@ -360,7 +359,7 @@
     aiError = null;
 
     try {
-      aiSummary = await invoke<string>('ai_generate_summary');
+      aiSummary = await invoke<string>('ai_generate_summary', { messages });
     } catch (error) {
       if (!automatic) {
         aiError = String(error);
@@ -375,7 +374,7 @@
     aiError = null;
 
     try {
-      aiQuestions = await invoke<string>('ai_suggest_questions');
+      aiQuestions = await invoke<string>('ai_suggest_questions', { messages });
     } catch (error) {
       aiError = String(error);
     } finally {
@@ -392,7 +391,7 @@
     aiError = null;
 
     try {
-      aiAnswer = await invoke<string>('ai_ask', { question: aiQuestion });
+      aiAnswer = await invoke<string>('ai_ask', { question: aiQuestion, messages });
     } catch (error) {
       aiError = String(error);
     } finally {

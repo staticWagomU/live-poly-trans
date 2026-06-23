@@ -8,6 +8,8 @@ export type LanguagePair = {
   target: string;
 };
 
+export type TranscriptionStream = 'mic' | 'speaker';
+
 export function chooseDefaultLanguagePair(languages: LanguageInfo[]): LanguagePair {
   const english = languages.find((language) => language.id.toLowerCase().startsWith('en'));
   const japanese = languages.find((language) => language.id.toLowerCase().startsWith('ja'));
@@ -27,4 +29,18 @@ export function languageControlLabel(language: LanguageInfo): string {
   const region = language.id.split('-')[1];
 
   return region ? `${baseName} ${region.toUpperCase()}` : baseName;
+}
+
+export function transcriptionLanguagesForStream(
+  stream: TranscriptionStream,
+  sourceLanguage: string,
+  targetLanguage: string
+) {
+  if (stream === 'mic') {
+    return targetLanguage ? [targetLanguage] : [];
+  }
+
+  return [sourceLanguage, targetLanguage].filter(
+    (language, index, languages) => language && languages.indexOf(language) === index
+  );
 }
