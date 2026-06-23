@@ -250,6 +250,27 @@ pub fn build_ai_transcript_context(entries: &[AiTranscriptEntry]) -> String {
         .join("\n")
 }
 
+pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage]) -> String {
+    messages
+        .iter()
+        .map(|message| {
+            let translation = message
+                .translation
+                .as_ref()
+                .filter(|translation| !translation.trim().is_empty())
+                .map(|translation| format!("\n  => {translation}"))
+                .unwrap_or_default();
+            let speaker = message.speaker_label.as_deref().unwrap_or(&message.role);
+
+            format!(
+                "[{}] {} / {}: {}{}",
+                message.timestamp, speaker, message.language, message.text, translation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn helper_ai_args(command: &str, question: Option<&str>) -> Vec<String> {
     let mut args = vec![command.to_string()];
     if let Some(question) = question {
@@ -682,6 +703,26 @@ mod tests {
         assert_eq!(
             helper_ai_args("--ai-generate-summary", None),
             vec!["--ai-generate-summary".to_string()]
+        );
+    }
+
+    #[test]
+    fn builds_ai_context_from_selected_saved_messages() {
+        let messages = vec![SavedTranscriptMessage {
+            role: "speaker".to_string(),
+            speaker_id: Some("system-audio".to_string()),
+            speaker_label: Some("Speaker B".to_string()),
+            language: "ja-JP".to_string(),
+            text: "次のリリースは金曜日です".to_string(),
+            translation: Some("The next release is Friday.".to_string()),
+            timestamp: "2026-06-23T10:00:00Z".to_string(),
+            confidence: Some(0.88),
+            spans: None,
+        }];
+
+        assert_eq!(
+            build_ai_context_from_saved_messages(&messages),
+            "[2026-06-23T10:00:00Z] Speaker B / ja-JP: 次のリリースは金曜日です\n  => The next release is Friday."
         );
     }
 }
