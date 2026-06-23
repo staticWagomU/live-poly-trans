@@ -1,5 +1,8 @@
 public enum HelperCommand: Equatable, Sendable {
   case detectLanguages
+  case aiGenerateSummary
+  case aiSuggestQuestions
+  case aiAsk(question: String)
   case stream(AudioStream)
 }
 
@@ -19,6 +22,36 @@ public struct CommandLineOptions: Equatable, Sendable {
     if arguments.contains("--detect-languages") {
       return CommandLineOptions(
         command: .detectLanguages,
+        sourceLanguage: nil,
+        targetLanguage: nil,
+        languages: [],
+        segmentDirectory: nil
+      )
+    }
+
+    if arguments.contains("--ai-generate-summary") {
+      return CommandLineOptions(
+        command: .aiGenerateSummary,
+        sourceLanguage: nil,
+        targetLanguage: nil,
+        languages: [],
+        segmentDirectory: nil
+      )
+    }
+
+    if arguments.contains("--ai-suggest-questions") {
+      return CommandLineOptions(
+        command: .aiSuggestQuestions,
+        sourceLanguage: nil,
+        targetLanguage: nil,
+        languages: [],
+        segmentDirectory: nil
+      )
+    }
+
+    if let question = value(after: "--ai-ask", in: arguments) {
+      return CommandLineOptions(
+        command: .aiAsk(question: question),
         sourceLanguage: nil,
         targetLanguage: nil,
         languages: [],

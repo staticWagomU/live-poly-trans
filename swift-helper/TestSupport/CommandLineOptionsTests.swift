@@ -7,6 +7,7 @@ import Speech
 struct CommandLineOptionsTests {
   static func main() throws {
     try parsesDetectLanguagesCommand()
+    try parsesMeetingAiCommands()
     try parsesMicStreamCommandWithLocales()
     try parsesSpeakerStreamCommandWithSegmentDirectory()
     try readsValueAfterFlag()
@@ -31,6 +32,21 @@ struct CommandLineOptionsTests {
   static func parsesDetectLanguagesCommand() throws {
     let options = try CommandLineOptions.parse(["helper", "--detect-languages"])
     try expectEqual(options.command, .detectLanguages)
+  }
+
+  static func parsesMeetingAiCommands() throws {
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--ai-generate-summary"]).command,
+      .aiGenerateSummary
+    )
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--ai-suggest-questions"]).command,
+      .aiSuggestQuestions
+    )
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--ai-ask", "What did we decide?"]).command,
+      .aiAsk(question: "What did we decide?")
+    )
   }
 
   static func parsesMicStreamCommandWithLocales() throws {
