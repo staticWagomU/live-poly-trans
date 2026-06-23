@@ -68,6 +68,16 @@ pub struct SaveTranscriptResult {
     pub text_path: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AiTranscriptEntry {
+    pub speaker_id: String,
+    pub speaker_label: String,
+    pub language: String,
+    pub text: String,
+    pub translation: Option<String>,
+    pub timestamp: String,
+}
+
 pub fn helper_binary_name() -> &'static str {
     if cfg!(target_arch = "aarch64") {
         "helper-aarch64-apple-darwin"
@@ -156,6 +166,76 @@ pub fn attach_session_id(value: &mut Value, session_id: &str) {
             Value::String(session_id.to_string()),
         );
     }
+}
+
+pub fn record_final_transcript_event(entries: &mut Vec<AiTranscriptEntry>, value: &Value) {
+    if !should_log_transcript_event(value) {
+        return;
+    }
+
+    let Some(text) = value.get("text").and_then(Value::as_str) else {
+        return;
+    };
+
+    if text.trim().is_empty() {
+        return;
+    }
+
+    let stream = value.get("stream").and_then(Value::as_str).unwrap_or("speaker");
+    let speaker_id = value
+        .get("speakerId")
+        .and_then(Value::as_str)
+        .unwrap_or(stream)
+        .to_string();
+    let speaker_label = value
+        .get("speakerLabel")
+        .and_then(Value::as_str)
+        .unwrap_or(if stream == "mic" { "Speaker A" } else { "Speaker B" })
+        .to_string();
+    let language = value
+        .get("lang")
+        .and_then(Value::as_str)
+        .unwrap_or("und")
+        .to_string();
+    let timestamp = value
+        .get("time")
+        .or_else(|| value.get("timestamp"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+    let translation = value
+        .get("trans")
+        .and_then(Value::as_str)
+        .filter(|translation| !translation.trim().is_empty())
+        .map(ToString::to_string);
+
+    entries.push(AiTranscriptEntry {
+        speaker_id,
+        speaker_label,
+        language,
+        text: text.to_string(),
+        translation,
+        timestamp,
+    });
+}
+
+pub fn build_ai_transcript_context(entries: &[AiTranscriptEntry]) -> String {
+    entries
+        .iter()
+        .map(|entry| {
+            let translation = entry
+                .translation
+                .as_ref()
+                .map(|translation| format!("\n  => {translation}"))
+                .unwrap_or_default();
+
+            format!(
+                "[{}] {} / {}: {}{}",
+                entry.timestamp, entry.speaker_label, entry.language, entry.text, translation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) {
@@ -470,5 +550,29 @@ mod tests {
         assert_eq!(message.speaker_label.as_deref(), Some("Speaker"));
         assert_eq!(message.confidence, Some(0.75));
         assert_eq!(message.spans.as_ref().map(Vec::len), Some(1));
+    }
+
+    #[test]
+    fn records_final_transcript_events_for_ai_context() {
+        let mut entries = Vec::new();
+        let event = serde_json::json!({
+            "type": "transcript",
+            "isFinal": true,
+            "speakerId": "system-audio",
+            "speakerLabel": "Speaker B",
+            "lang": "en-US",
+            "text": "we should ship the summary panel",
+            "trans": "概要パネルを出しましょう",
+            "timestamp": "2026-06-23T10:00:00Z"
+        });
+
+        record_final_transcript_event(&mut entries, &event);
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].speaker_label, "Speaker B");
+        assert_eq!(
+            build_ai_transcript_context(&entries),
+            "[2026-06-23T10:00:00Z] Speaker B / en-US: we should ship the summary panel\n  => 概要パネルを出しましょう"
+        );
     }
 }
