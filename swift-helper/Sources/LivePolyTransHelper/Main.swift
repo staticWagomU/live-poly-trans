@@ -32,6 +32,25 @@ public struct LivePolyTransHelper {
       helperDebugLog("detect-languages installed=\(payload.installed.count) supported=\(payload.supported.count)")
       print(try jsonLine(for: payload))
       fflush(stdout)
+    case .aiGenerateSummary:
+      let response = try await AppleIntelligenceService.shared.generateSummary(
+        transcript: readStandardInputText()
+      )
+      print(response)
+      fflush(stdout)
+    case .aiSuggestQuestions:
+      let response = try await AppleIntelligenceService.shared.suggestQuestions(
+        transcript: readStandardInputText()
+      )
+      print(response)
+      fflush(stdout)
+    case let .aiAsk(question):
+      let response = try await AppleIntelligenceService.shared.ask(
+        question,
+        transcript: readStandardInputText()
+      )
+      print(response)
+      fflush(stdout)
     case let .stream(stream):
       try await runMicrophoneTranscription(
         stream: stream,

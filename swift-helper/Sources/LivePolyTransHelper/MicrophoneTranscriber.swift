@@ -226,6 +226,11 @@ private func emitResults(
     )
 
     if result.isFinal {
+      await AppleIntelligenceService.shared.appendFinalTranscript(
+        text,
+        speakerId: event.speakerId,
+        speakerLabel: event.speakerLabel
+      )
       try? segmentWriter?.write(event, at: timestamp)
     }
 
