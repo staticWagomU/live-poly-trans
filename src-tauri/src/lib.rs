@@ -508,7 +508,7 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn ai_generate_summary(
+    pub async fn ai_generate_summary(
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
         source_language: String,
@@ -520,23 +520,24 @@ pub mod commands {
             Some(&source_language),
             &messages,
         )
+        .await
     }
 
     #[tauri::command]
-    pub fn ai_suggest_questions(
+    pub async fn ai_suggest_questions(
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-suggest-questions", None, None, &messages)
+        run_meeting_ai_command(&state, "--ai-suggest-questions", None, None, &messages).await
     }
 
     #[tauri::command]
-    pub fn ai_ask(
+    pub async fn ai_ask(
         state: State<'_, HelperSession>,
         question: String,
         messages: Vec<SavedTranscriptMessage>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-ask", Some(&question), None, &messages)
+        run_meeting_ai_command(&state, "--ai-ask", Some(&question), None, &messages).await
     }
 
     #[tauri::command]
@@ -549,7 +550,7 @@ pub mod commands {
         Ok(())
     }
 
-    pub fn run_meeting_ai_command(
+    pub async fn run_meeting_ai_command(
         state: &State<'_, HelperSession>,
         command: &str,
         question: Option<&str>,
@@ -564,7 +565,9 @@ pub mod commands {
             meeting_ai_context(messages, &entries)
         };
         let args = helper_ai_args(command, question, source_language);
-        run_helper_ai_command(&args, &transcript)
+        tauri::async_runtime::spawn_blocking(move || run_helper_ai_command(&args, &transcript))
+            .await
+            .map_err(|error| error.to_string())?
     }
 
     pub fn stop_helper_child(state: &State<'_, HelperSession>, stream: &str) -> Result<(), String> {
