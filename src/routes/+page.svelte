@@ -16,6 +16,7 @@
   } from '$lib/audioMode';
   import { isScrolledToBottom } from '$lib/scroll';
   import { isCompetingTranscriptCandidate, mergeTranscriptMessages } from '$lib/transcriptSelection';
+  import { removeInterimMessagesForFinal, upsertInterimMessage } from '$lib/transcriptInterim';
   import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
 
   type LanguageDetectionPayload = {
@@ -36,6 +37,7 @@
     { id: 'ja-JP', label: 'Japanese' }
   ];
   let messages: ChatMessage[] = [];
+  let interimMessages: ChatMessage[] = [];
   let captureMode: CaptureMode = 'both';
   let activeStreams = new Set<AudioStream>();
   let streamSessionIds: Record<AudioStream, string | null> = {
@@ -60,6 +62,7 @@
   $: isMicRecording = activeStreams.has('mic');
   $: isSpeakerRecording = activeStreams.has('speaker');
   $: selectedCaptureMode = isRecording ? captureModeFromStreams(activeStreams) : captureMode;
+  $: visibleMessages = [...messages, ...interimMessages];
 
   onMount(async () => {
     const unlistenTranscript = await listen<TranscriptEvent>('transcript-event', (event) => {
@@ -100,6 +103,21 @@
   async function applyTranscriptEvent(event: TranscriptEvent) {
     const shouldScrollToLatest = shouldStickToLatest();
     const message = transcriptEventToMessage(event);
+
+    if (!message.isFinal) {
+      interimMessages = upsertInterimMessage(interimMessages, message);
+      await tick();
+
+      if (shouldScrollToLatest) {
+        scrollToLatest('auto');
+        return;
+      }
+
+      syncJumpToLatestButton();
+      return;
+    }
+
+    interimMessages = removeInterimMessagesForFinal(interimMessages, message);
     const existingIndex = messages.findIndex(
       (candidate) => candidate.id === message.id || isLikelySameUtterance(candidate, message)
     );
@@ -163,6 +181,7 @@
     if (isRecording) {
       clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
+      interimMessages = [];
       await invoke('stop_all_sessions');
       return;
     }
@@ -403,7 +422,7 @@
           </div>
         </div>
 
-        {#if messages.length === 0 && isRecording}
+        {#if visibleMessages.length === 0 && isRecording}
           <div class="listening-empty" aria-live="polite">
             <div class="pulse-ring">
               <span></span>
@@ -417,7 +436,7 @@
               <span class:active={isMicRecording}>Mic</span>
             </div>
           </div>
-        {:else if messages.length === 0}
+        {:else if visibleMessages.length === 0}
           <div class="starter" aria-live="polite">
             <article class="chat-row speaker-row">
               <div class="chat-bubble incoming">
@@ -442,7 +461,7 @@
               aria-live="polite"
               on:scroll={handleMessagesScroll}
             >
-              {#each messages as message (message.id)}
+              {#each visibleMessages as message (message.id)}
                 <article class="chat-row" class:self-row={message.role === 'self'}>
                   <div
                     class="chat-bubble"
