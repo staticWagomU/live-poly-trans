@@ -139,51 +139,14 @@ private func emitArbitratedOutput(
     )
     await emitter.emitInterim(event)
   case let .final(candidate):
-    let timestamp = Date()
-    let event = transcriptEvent(
+    await emitFinalTranscript(
+      candidate,
       stream: stream,
-      language: candidate.language,
-      text: candidate.text,
-      translation: nil,
-      isFinal: true,
-      timestamp: timestamp,
-      segmentId: candidate.segmentId,
-      confidence: candidate.confidence,
-      spans: candidate.spans
+      sourceLanguage: sourceLanguage,
+      targetLanguage: targetLanguage,
+      translators: translators,
+      emitter: emitter
     )
-    await emitter.emitFinal(event, at: timestamp)
-    helperDebugLog(
-      "transcript-final stream=\(stream.rawValue) language=\(candidate.language) segment=\(candidate.segmentId) chars=\(candidate.text.count)"
-    )
-
-    // Translation runs detached so its latency never delays the next
-    // recognition result; the UI patches the bubble when this lands.
-    guard
-      let translationTarget = oppositeLanguage(
-        for: candidate.language,
-        sourceLanguage: sourceLanguage,
-        targetLanguage: targetLanguage
-      ),
-      let translator = translators[candidate.language]
-    else {
-      return
-    }
-
-    Task {
-      guard let translated = await translator.translate(candidate.text) else {
-        return
-      }
-
-      await emitter.emitTranslation(
-        translationEvent(
-          stream: stream,
-          segmentId: candidate.segmentId,
-          language: candidate.language,
-          targetLanguage: translationTarget,
-          translation: translated
-        )
-      )
-    }
   }
 }
 
