@@ -54,6 +54,7 @@ struct CommandLineOptionsTests {
     try keepsMeaningfulTranscriptRules()
     try buildsTranscriptCandidateFromWhisperResult()
     try dropsNonSpeechWhisperResult()
+    try writesInt16MonoWavReadableByAVAudioFile()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
     try overlapsCandidatesSharingMostOfTheirRange()
@@ -523,6 +524,20 @@ struct CommandLineOptionsTests {
     )
 
     try expectEqual(candidate, nil)
+  }
+
+  static func writesInt16MonoWavReadableByAVAudioFile() throws {
+    let url = FileManager.default.temporaryDirectory
+      .appendingPathComponent("lpt-wav-test-\(UUID().uuidString).wav")
+    defer { try? FileManager.default.removeItem(at: url) }
+
+    let samples = (0..<16_000).map { Float(sin(Double($0) * 0.1)) * 0.5 }
+    try writeInt16MonoWav(samples: samples, sampleRate: 16_000, to: url)
+
+    let file = try AVAudioFile(forReading: url)
+    try expectEqual(file.length, 16_000)
+    try expectEqual(file.fileFormat.sampleRate, 16_000)
+    try expectEqual(file.fileFormat.channelCount, 1)
   }
 
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {

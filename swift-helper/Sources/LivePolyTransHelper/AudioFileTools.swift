@@ -18,6 +18,58 @@ public enum AudioFileToolsError: Error, CustomStringConvertible {
   }
 }
 
+/// Writes float samples as a 16-bit mono WAV, the input whisper-cli decodes
+/// without resampling when the sample rate is already 16 kHz.
+public func writeInt16MonoWav(samples: [Float], sampleRate: Double, to url: URL) throws {
+  guard
+    let bufferFormat = AVAudioFormat(
+      commonFormat: .pcmFormatFloat32,
+      sampleRate: sampleRate,
+      channels: 1,
+      interleaved: false
+    )
+  else {
+    throw AudioFileToolsError.missingTargetFormat
+  }
+
+  let settings: [String: Any] = [
+    AVFormatIDKey: kAudioFormatLinearPCM,
+    AVSampleRateKey: sampleRate,
+    AVNumberOfChannelsKey: 1,
+    AVLinearPCMBitDepthKey: 16,
+    AVLinearPCMIsFloatKey: false,
+    AVLinearPCMIsBigEndianKey: false,
+    AVLinearPCMIsNonInterleaved: false,
+  ]
+  let file = try AVAudioFile(
+    forWriting: url,
+    settings: settings,
+    commonFormat: .pcmFormatFloat32,
+    interleaved: false
+  )
+
+  guard
+    let buffer = AVAudioPCMBuffer(
+      pcmFormat: bufferFormat,
+      frameCapacity: AVAudioFrameCount(samples.count)
+    ),
+    let channelData = buffer.floatChannelData
+  else {
+    throw AudioFileToolsError.unreadableChannelData(url.path)
+  }
+
+  buffer.frameLength = AVAudioFrameCount(samples.count)
+  samples.withUnsafeBufferPointer { pointer in
+    guard let baseAddress = pointer.baseAddress else {
+      return
+    }
+
+    channelData[0].update(from: baseAddress, count: samples.count)
+  }
+
+  try file.write(from: buffer)
+}
+
 public struct WaveformData: Codable, Equatable {
   public let durationMs: Int64
   public let peaks: [Double]
