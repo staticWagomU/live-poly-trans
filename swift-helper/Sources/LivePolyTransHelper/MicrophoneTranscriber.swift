@@ -3,32 +3,6 @@ import Foundation
 import Speech
 import CoreMedia
 
-public enum HelperRuntimeError: Error, CustomStringConvertible {
-  case microphonePermissionDenied
-  case unsupportedOperatingSystem
-  case missingAnalyzerAudioFormat
-  case missingConvertedAudioBuffer
-  case audioConversionFailed(String)
-  case speechLanguageNotInstalled(String)
-
-  public var description: String {
-    switch self {
-    case .microphonePermissionDenied:
-      "Microphone permission was denied."
-    case .unsupportedOperatingSystem:
-      "LivePolyTrans requires macOS 26 or later."
-    case .missingAnalyzerAudioFormat:
-      "SpeechAnalyzer did not provide a compatible audio format."
-    case .missingConvertedAudioBuffer:
-      "Could not allocate a converted audio buffer."
-    case let .audioConversionFailed(message):
-      "Audio conversion failed: \(message)"
-    case let .speechLanguageNotInstalled(language):
-      "Speech language is not installed: \(language). Open Refresh Languages and select an installed language."
-    }
-  }
-}
-
 @available(macOS 14.0, *)
 public func requestMicrophonePermission() async -> Bool {
   await withCheckedContinuation { continuation in
@@ -44,7 +18,9 @@ public func runMicrophoneTranscription(
   sourceLanguage: String?,
   targetLanguage: String?,
   languages requestedLanguages: [String],
-  segmentDirectory: String?
+  segmentDirectory: String?,
+  recordFile: String? = nil,
+  transcriptFile: String? = nil
 ) async throws {
   let languages = transcriptionLanguages(
     requestedLanguages: requestedLanguages,
@@ -52,7 +28,7 @@ public func runMicrophoneTranscription(
     targetLanguage: targetLanguage
   )
   helperDebugLog(
-    "stream-start stream=\(stream.rawValue) source=\(sourceLanguage ?? "-") target=\(targetLanguage ?? "-") languages=\(languages.joined(separator: ","))"
+    "stream-start stream=\(stream.rawValue) source=\(sourceLanguage ?? "-") target=\(targetLanguage ?? "-") languages=\(languages.joined(separator: ",")) record=\(recordFile ?? "-")"
   )
   let transcribers = languages.map {
     SpeechTranscriber(
@@ -62,22 +38,62 @@ public func runMicrophoneTranscription(
       attributeOptions: transcriptAttributeOptions()
     )
   }
-  try await ensureInstalledLanguages(languages)
+  let emitter = HelperEventEmitter(
+    segmentWriter: SegmentWriter(directoryPath: segmentDirectory),
+    transcriptWriter: JsonlFileWriter(path: transcriptFile)
+  )
+  try await ensureInstalledLanguages(
+    languages,
+    transcribers: transcribers,
+    stream: stream,
+    emitter: emitter
+  )
   helperDebugLog("installed-language-check-ok languages=\(languages.joined(separator: ","))")
+
   let analyzer = SpeechAnalyzer(modules: transcribers)
-  let segmentWriter = SegmentWriter(directoryPath: segmentDirectory)
-  let inputSource = try await makeInputSource(stream: stream, analyzer: analyzer, transcribers: transcribers)
+  let inputSource = try await makeInputSource(
+    stream: stream,
+    analyzer: analyzer,
+    transcribers: transcribers,
+    recordFile: recordFile
+  )
+
+  let translators = Dictionary(uniqueKeysWithValues: languages.map { language in
+    (
+      language,
+      LiveTranslator(
+        sourceLanguage: language,
+        targetLanguage: oppositeLanguage(
+          for: language,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage
+        )
+      )
+    )
+  })
+  let arbiter = TranscriptArbiter(languageCount: languages.count) { output in
+    await emitArbitratedOutput(
+      output,
+      stream: stream,
+      sourceLanguage: sourceLanguage,
+      targetLanguage: targetLanguage,
+      translators: translators,
+      emitter: emitter
+    )
+  }
+
   let resultTasks = zip(languages, transcribers).map { language, transcriber in
     Task {
-      try await emitResults(
+      try await consumeResults(
         stream: stream,
         language: language,
-        oppositeLanguage: oppositeLanguage(for: language, sourceLanguage: sourceLanguage, targetLanguage: targetLanguage),
         transcriber: transcriber,
-        segmentWriter: segmentWriter
+        arbiter: arbiter
       )
     }
   }
+
+  installShutdownHandlers(stream: stream, analyzer: analyzer, inputSource: inputSource)
 
   do {
     helperDebugLog("speech-analyzer-start stream=\(stream.rawValue)")
@@ -85,166 +101,135 @@ public func runMicrophoneTranscription(
     for task in resultTasks {
       try await task.value
     }
+    await arbiter.flushAll()
+    inputSource.recorder?.finalize()
+    helperDebugLog("stream-finished stream=\(stream.rawValue)")
   } catch {
     helperDebugLog("stream-error stream=\(stream.rawValue) error=\(diagnosticDescription(for: error))")
     resultTasks.forEach { $0.cancel() }
     inputSource.cleanup()
+    inputSource.recorder?.finalize()
     throw error
   }
 }
 
+// MARK: - Arbitrated event emission
+
 @available(macOS 26.0, *)
-private func makeInputSource(
+private func emitArbitratedOutput(
+  _ output: TranscriptArbiter.Output,
   stream: AudioStream,
-  analyzer: SpeechAnalyzer,
-  transcribers: [SpeechTranscriber]
-) async throws -> AudioInputSource {
-  switch stream {
-  case .mic:
-    return try await makeMicrophoneInputSource(analyzer: analyzer, transcribers: transcribers)
-  case .speaker:
-    return try await makeSpeakerInputSource(analyzer: analyzer, transcribers: transcribers)
-  }
-}
-
-@available(macOS 26.0, *)
-private func makeMicrophoneInputSource(
-  analyzer: SpeechAnalyzer,
-  transcribers: [SpeechTranscriber]
-) async throws -> AudioInputSource {
-  guard await requestMicrophonePermission() else {
-    throw HelperRuntimeError.microphonePermissionDenied
-  }
-
-  helperDebugLog("microphone-permission granted=true")
-  let engine = AVAudioEngine()
-  let input = engine.inputNode
-  let inputFormat = input.outputFormat(forBus: 0)
-  let analyzerFormat = try await analyzerAudioFormat(compatibleWith: transcribers, naturalFormat: inputFormat)
-  let converter = audioConverter(from: inputFormat, to: analyzerFormat)
-  let audioCounter = AudioDebugCounter(label: "mic")
-  let convertedAudioCounter = AudioDebugCounter(label: "mic-converted")
-
-  helperDebugLog("mic-input-format {\(audioFormatDescription(inputFormat))}")
-  helperDebugLog("mic-analyzer-format {\(audioFormatDescription(analyzerFormat))} converter=\(converter == nil ? "none" : "enabled")")
-
-  try await analyzer.prepareToAnalyze(in: analyzerFormat)
-  helperDebugLog("mic-analyzer-prepared")
-
-  let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
-    input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
-      do {
-        audioCounter.record(buffer)
-        let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
-        convertedAudioCounter.record(analyzerBuffer)
-        continuation.yield(AnalyzerInput(buffer: analyzerBuffer))
-      } catch {
-        continuation.finish(throwing: error)
-      }
-    }
-  }
-
-  try engine.start()
-  helperDebugLog("mic-engine-started")
-  return AudioInputSource(sequence: inputSequence) {
-    helperDebugLog("mic-cleanup")
-    engine.stop()
-    input.removeTap(onBus: 0)
-  }
-}
-
-@available(macOS 26.0, *)
-private func makeSpeakerInputSource(
-  analyzer: SpeechAnalyzer,
-  transcribers: [SpeechTranscriber]
-) async throws -> AudioInputSource {
-  let speakerInput = try await SpeakerTapInput()
-  let analyzerFormat = try await analyzerAudioFormat(
-    compatibleWith: transcribers,
-    naturalFormat: speakerInput.audioFormat
-  )
-  helperDebugLog("speaker-input-format {\(audioFormatDescription(speakerInput.audioFormat))}")
-  helperDebugLog("speaker-analyzer-format {\(audioFormatDescription(analyzerFormat))}")
-  try await analyzer.prepareToAnalyze(in: analyzerFormat)
-  helperDebugLog("speaker-analyzer-prepared")
-  let sequence = try await speakerInput.makeInputSequence(analyzerFormat: analyzerFormat)
-
-  return AudioInputSource(sequence: sequence) {
-    helperDebugLog("speaker-cleanup")
-    speakerInput.stop()
-  }
-}
-
-@available(macOS 26.0, *)
-private func emitResults(
-  stream: AudioStream,
-  language: String,
-  oppositeLanguage: String?,
-  transcriber: SpeechTranscriber,
-  segmentWriter: SegmentWriter?
-) async throws {
-  let translator = LiveTranslator(sourceLanguage: language, targetLanguage: oppositeLanguage)
-  helperDebugLog("result-listener-start stream=\(stream.rawValue) language=\(language) target=\(oppositeLanguage ?? "-")")
-
-  for try await result in transcriber.results {
-    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
-    let spans = transcriptSpans(from: result.text)
-    let segmentId = segmentIdentifier(for: result.range)
-    let shouldLogResult = shouldLogTranscriptResult(isFinal: result.isFinal)
-    if shouldLogResult {
-      helperDebugLog(
-        "speech-result stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) chars=\(text.count) text=\"\(text)\""
-      )
-    }
-
-    guard isMeaningfulTranscript(text, isFinal: result.isFinal) else {
-      if shouldLogResult {
-        helperDebugLog(
-          "speech-result-dropped stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) reason=too-short-or-punctuation text=\"\(text)\""
-        )
-      }
-      continue
-    }
-
-    let translation: String?
-    if let translationText = textForFinalTranslation(text, isFinal: result.isFinal) {
-      translation = await translator.translate(translationText)
-    } else {
-      translation = nil
-    }
+  sourceLanguage: String?,
+  targetLanguage: String?,
+  translators: [String: LiveTranslator],
+  emitter: HelperEventEmitter
+) async {
+  switch output {
+  case let .interim(candidate):
+    let event = transcriptEvent(
+      stream: stream,
+      language: candidate.language,
+      text: candidate.text,
+      translation: nil,
+      isFinal: false,
+      timestamp: Date(),
+      segmentId: candidate.segmentId,
+      confidence: candidate.confidence,
+      spans: candidate.spans
+    )
+    await emitter.emitInterim(event)
+  case let .final(candidate):
     let timestamp = Date()
     let event = transcriptEvent(
       stream: stream,
+      language: candidate.language,
+      text: candidate.text,
+      translation: nil,
+      isFinal: true,
+      timestamp: timestamp,
+      segmentId: candidate.segmentId,
+      confidence: candidate.confidence,
+      spans: candidate.spans
+    )
+    await emitter.emitFinal(event, at: timestamp)
+    helperDebugLog(
+      "transcript-final stream=\(stream.rawValue) language=\(candidate.language) segment=\(candidate.segmentId) chars=\(candidate.text.count)"
+    )
+
+    // Translation runs detached so its latency never delays the next
+    // recognition result; the UI patches the bubble when this lands.
+    guard
+      let translationTarget = oppositeLanguage(
+        for: candidate.language,
+        sourceLanguage: sourceLanguage,
+        targetLanguage: targetLanguage
+      ),
+      let translator = translators[candidate.language]
+    else {
+      return
+    }
+
+    Task {
+      guard let translated = await translator.translate(candidate.text) else {
+        return
+      }
+
+      await emitter.emitTranslation(
+        translationEvent(
+          stream: stream,
+          segmentId: candidate.segmentId,
+          language: candidate.language,
+          targetLanguage: translationTarget,
+          translation: translated
+        )
+      )
+    }
+  }
+}
+
+@available(macOS 26.0, *)
+private func consumeResults(
+  stream: AudioStream,
+  language: String,
+  transcriber: SpeechTranscriber,
+  arbiter: TranscriptArbiter
+) async throws {
+  helperDebugLog("result-listener-start stream=\(stream.rawValue) language=\(language)")
+
+  for try await result in transcriber.results {
+    let text = String(result.text.characters).trimmingCharacters(in: .whitespacesAndNewlines)
+
+    guard isMeaningfulTranscript(text, isFinal: result.isFinal) else {
+      continue
+    }
+
+    let spans = transcriptSpans(from: result.text)
+    let detection = detectedTranscriptLanguage(text)
+    let candidate = TranscriptCandidate(
       language: language,
       text: text,
-      translation: translation,
       isFinal: result.isFinal,
-      timestamp: timestamp,
-      segmentId: segmentId,
+      startMs: milliseconds(from: result.range.start) ?? 0,
+      durationMs: milliseconds(from: result.range.duration) ?? 0,
       confidence: transcriptConfidence(spans: spans),
+      detectedLanguage: detection?.language,
+      detectedLanguageConfidence: detection?.confidence,
       spans: spans
     )
 
     if result.isFinal {
-      await AppleIntelligenceService.shared.appendFinalTranscript(
-        text,
-        speakerId: event.speakerId,
-        speakerLabel: event.speakerLabel
+      helperDebugLog(
+        "speech-result stream=\(stream.rawValue) language=\(language) segment=\(candidate.segmentId) chars=\(text.count) text=\"\(text)\""
       )
-      try? segmentWriter?.write(event, at: timestamp)
     }
 
-    print(try jsonLine(for: event))
-    fflush(stdout)
-    if shouldLogResult {
-      helperDebugLog(
-        "transcript-emitted stream=\(stream.rawValue) language=\(language) final=\(result.isFinal) segment=\(segmentId) translation=\(translation == nil ? "none" : "present")"
-      )
-    }
+    await arbiter.receive(candidate)
   }
+
+  helperDebugLog("result-listener-end stream=\(stream.rawValue) language=\(language)")
 }
 
-private func isMeaningfulTranscript(_ text: String, isFinal: Bool) -> Bool {
+func isMeaningfulTranscript(_ text: String, isFinal: Bool) -> Bool {
   let hasSpeechLikeContent = text.contains { character in
     character.isLetter || character.isNumber
   }
@@ -257,19 +242,212 @@ private func isMeaningfulTranscript(_ text: String, isFinal: Bool) -> Bool {
   return text.count >= minimumLength
 }
 
-private func segmentIdentifier(for range: CMTimeRange) -> String {
-  let start = Int64((range.start.seconds * 1000).rounded())
-  let duration = Int64((range.duration.seconds * 1000).rounded())
-  return "\(start)-\(duration)"
-}
+// MARK: - Graceful shutdown
 
-private struct AudioInputSource {
-  let sequence: AsyncThrowingStream<AnalyzerInput, Error>
-  let cleanup: () -> Void
+/// Triggered by stdin EOF (Rust drops the pipe on stop) or SIGTERM. Ending
+/// the input sequence lets the analyzer flush pending finals and lets the
+/// recorder finalize the m4a container instead of being SIGKILLed mid-write.
+private let shutdownOnce = ShutdownOnce()
+private nonisolated(unsafe) var shutdownSignalSource: DispatchSourceSignal?
+
+final class ShutdownOnce: @unchecked Sendable {
+  private let lock = NSLock()
+  private var executed = false
+
+  func run(_ work: () -> Void) {
+    lock.lock()
+    let shouldRun = !executed
+    executed = true
+    lock.unlock()
+
+    if shouldRun {
+      work()
+    }
+  }
 }
 
 @available(macOS 26.0, *)
-private func ensureInstalledLanguages(_ languages: [String]) async throws {
+private func installShutdownHandlers(
+  stream: AudioStream,
+  analyzer: SpeechAnalyzer,
+  inputSource: AudioInputSource
+) {
+  let trigger: @Sendable () -> Void = {
+    shutdownOnce.run {
+      helperDebugLog("shutdown-begin stream=\(stream.rawValue)")
+      inputSource.cleanup()
+      Task {
+        try? await analyzer.finalizeAndFinishThroughEndOfInput()
+      }
+      DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
+        helperDebugLog("shutdown-timeout stream=\(stream.rawValue)")
+        inputSource.recorder?.finalize()
+        exit(0)
+      }
+    }
+  }
+
+  DispatchQueue.global().async {
+    while readLine(strippingNewline: false) != nil {}
+    trigger()
+  }
+
+  signal(SIGTERM, SIG_IGN)
+  let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+  source.setEventHandler(handler: trigger)
+  source.resume()
+  shutdownSignalSource = source
+}
+
+// MARK: - Input sources
+
+@available(macOS 26.0, *)
+private func makeInputSource(
+  stream: AudioStream,
+  analyzer: SpeechAnalyzer,
+  transcribers: [SpeechTranscriber],
+  recordFile: String?
+) async throws -> AudioInputSource {
+  switch stream {
+  case .mic:
+    return try await makeMicrophoneInputSource(
+      analyzer: analyzer,
+      transcribers: transcribers,
+      recordFile: recordFile
+    )
+  case .speaker:
+    return try await makeSpeakerInputSource(
+      analyzer: analyzer,
+      transcribers: transcribers,
+      recordFile: recordFile
+    )
+  }
+}
+
+@available(macOS 26.0, *)
+private func makeMicrophoneInputSource(
+  analyzer: SpeechAnalyzer,
+  transcribers: [SpeechTranscriber],
+  recordFile: String?
+) async throws -> AudioInputSource {
+  guard await requestMicrophonePermission() else {
+    throw HelperRuntimeError.microphonePermissionDenied
+  }
+
+  helperDebugLog("microphone-permission granted=true")
+  let engine = AVAudioEngine()
+  let input = engine.inputNode
+  let inputFormat = input.outputFormat(forBus: 0)
+  let analyzerFormat = try await analyzerAudioFormat(compatibleWith: transcribers, naturalFormat: inputFormat)
+  let converter = audioConverter(from: inputFormat, to: analyzerFormat)
+  let recorder = try AudioRecorder(path: recordFile, sourceFormat: inputFormat)
+  let audioCounter = AudioDebugCounter(label: "mic")
+
+  helperDebugLog("mic-input-format {\(audioFormatDescription(inputFormat))}")
+  helperDebugLog("mic-analyzer-format {\(audioFormatDescription(analyzerFormat))} converter=\(converter == nil ? "none" : "enabled")")
+
+  try await analyzer.prepareToAnalyze(in: analyzerFormat)
+  helperDebugLog("mic-analyzer-prepared")
+
+  let continuationBox = ContinuationBox()
+  let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
+    continuationBox.store(continuation)
+    input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
+      do {
+        audioCounter.record(buffer)
+        recorder?.write(buffer)
+        let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
+        continuation.yield(AnalyzerInput(buffer: analyzerBuffer))
+      } catch {
+        continuation.finish(throwing: error)
+      }
+    }
+  }
+
+  try engine.start()
+  helperDebugLog("mic-engine-started")
+  return AudioInputSource(
+    sequence: inputSequence,
+    recorder: recorder
+  ) {
+    helperDebugLog("mic-cleanup")
+    engine.stop()
+    input.removeTap(onBus: 0)
+    continuationBox.finish()
+  }
+}
+
+@available(macOS 26.0, *)
+private func makeSpeakerInputSource(
+  analyzer: SpeechAnalyzer,
+  transcribers: [SpeechTranscriber],
+  recordFile: String?
+) async throws -> AudioInputSource {
+  let speakerInput = try await SpeakerTapInput()
+  let analyzerFormat = try await analyzerAudioFormat(
+    compatibleWith: transcribers,
+    naturalFormat: speakerInput.audioFormat
+  )
+  helperDebugLog("speaker-input-format {\(audioFormatDescription(speakerInput.audioFormat))}")
+  helperDebugLog("speaker-analyzer-format {\(audioFormatDescription(analyzerFormat))}")
+  try await analyzer.prepareToAnalyze(in: analyzerFormat)
+  helperDebugLog("speaker-analyzer-prepared")
+  let recorder = try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
+  let sequence = try await speakerInput.makeInputSequence(
+    analyzerFormat: analyzerFormat,
+    recorder: recorder
+  )
+
+  return AudioInputSource(sequence: sequence, recorder: recorder) {
+    helperDebugLog("speaker-cleanup")
+    speakerInput.stop()
+  }
+}
+
+final class ContinuationBox: @unchecked Sendable {
+  private let lock = NSLock()
+  private var continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
+
+  func store(_ continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation) {
+    lock.lock()
+    self.continuation = continuation
+    lock.unlock()
+  }
+
+  func finish() {
+    lock.lock()
+    let current = continuation
+    continuation = nil
+    lock.unlock()
+    current?.finish()
+  }
+}
+
+struct AudioInputSource: @unchecked Sendable {
+  let sequence: AsyncThrowingStream<AnalyzerInput, Error>
+  let recorder: AudioRecorder?
+  let cleanup: @Sendable () -> Void
+
+  init(
+    sequence: AsyncThrowingStream<AnalyzerInput, Error>,
+    recorder: AudioRecorder? = nil,
+    cleanup: @escaping @Sendable () -> Void
+  ) {
+    self.sequence = sequence
+    self.recorder = recorder
+    self.cleanup = cleanup
+  }
+}
+
+// MARK: - Languages
+
+@available(macOS 26.0, *)
+private func ensureInstalledLanguages(
+  _ languages: [String],
+  transcribers: [SpeechTranscriber],
+  stream: AudioStream,
+  emitter: HelperEventEmitter
+) async throws {
   let installedIdentifiers = await Set(
     SpeechTranscriber.installedLocales.map {
       $0.identifier(.bcp47)
@@ -279,8 +457,36 @@ private func ensureInstalledLanguages(_ languages: [String]) async throws {
     "installed-languages available=\(installedIdentifiers.sorted().joined(separator: ",")) requested=\(languages.joined(separator: ","))"
   )
 
-  for language in languages where !installedIdentifiers.contains(language) {
-    throw HelperRuntimeError.speechLanguageNotInstalled(language)
+  let missing = zip(languages, transcribers).filter { !installedIdentifiers.contains($0.0) }
+  guard !missing.isEmpty else {
+    return
+  }
+
+  let supportedIdentifiers = await Set(
+    SpeechTranscriber.supportedLocales.map {
+      $0.identifier(.bcp47)
+    }
+  )
+
+  for (language, transcriber) in missing {
+    guard supportedIdentifiers.contains(language) else {
+      throw HelperRuntimeError.speechLanguageNotInstalled(language)
+    }
+
+    await emitter.emitStatus(StatusEvent(stream: stream, state: "downloading-language", lang: language))
+    helperDebugLog("language-download-start language=\(language)")
+
+    do {
+      if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
+        try await request.downloadAndInstall()
+      }
+    } catch {
+      helperDebugLog("language-download-failed language=\(language) error=\(diagnosticDescription(for: error))")
+      throw HelperRuntimeError.speechLanguageNotInstalled(language)
+    }
+
+    await emitter.emitStatus(StatusEvent(stream: stream, state: "language-ready", lang: language))
+    helperDebugLog("language-download-done language=\(language)")
   }
 }
 
@@ -301,70 +507,7 @@ private func analyzerAudioFormat(
   return format
 }
 
-func audioConverter(from sourceFormat: AVAudioFormat, to targetFormat: AVAudioFormat) -> AVAudioConverter? {
-  if sourceFormat == targetFormat {
-    return nil
-  }
-
-  return AVAudioConverter(from: sourceFormat, to: targetFormat)
-}
-
-func convertBuffer(
-  _ buffer: AVAudioPCMBuffer,
-  to targetFormat: AVAudioFormat,
-  using converter: AVAudioConverter?
-) throws -> AVAudioPCMBuffer {
-  guard let converter else {
-    return buffer
-  }
-
-  let ratio = targetFormat.sampleRate / buffer.format.sampleRate
-  let frameCapacity = AVAudioFrameCount(max(1, ceil(Double(buffer.frameLength) * ratio)))
-  guard let converted = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: frameCapacity) else {
-    throw HelperRuntimeError.missingConvertedAudioBuffer
-  }
-
-  let inputProvider = SingleUseAudioInput(buffer: buffer)
-  var conversionError: NSError?
-  let status = converter.convert(to: converted, error: &conversionError) { _, outStatus in
-    inputProvider.next(outStatus: outStatus)
-  }
-
-  switch status {
-  case .haveData, .inputRanDry, .endOfStream:
-    return converted
-  case .error:
-    throw HelperRuntimeError.audioConversionFailed(conversionError?.localizedDescription ?? "unknown error")
-  @unknown default:
-    throw HelperRuntimeError.audioConversionFailed("unknown converter status")
-  }
-}
-
-public final class SingleUseAudioInput: @unchecked Sendable {
-  private let buffer: AVAudioPCMBuffer
-  private let lock = NSLock()
-  private var didProvideInput = false
-
-  public init(buffer: AVAudioPCMBuffer) {
-    self.buffer = buffer
-  }
-
-  public func next(outStatus: UnsafeMutablePointer<AVAudioConverterInputStatus>) -> AVAudioBuffer? {
-    lock.lock()
-    defer { lock.unlock() }
-
-    if didProvideInput {
-      outStatus.pointee = .noDataNow
-      return nil
-    }
-
-    didProvideInput = true
-    outStatus.pointee = .haveData
-    return buffer
-  }
-}
-
-private func transcriptionLanguages(
+func transcriptionLanguages(
   requestedLanguages: [String],
   sourceLanguage: String?,
   targetLanguage: String?
@@ -383,7 +526,7 @@ private func transcriptionLanguages(
   return languages.isEmpty ? ["en-US"] : languages
 }
 
-private func oppositeLanguage(for language: String, sourceLanguage: String?, targetLanguage: String?) -> String? {
+func oppositeLanguage(for language: String, sourceLanguage: String?, targetLanguage: String?) -> String? {
   if language == sourceLanguage {
     return targetLanguage
   }

@@ -2,7 +2,7 @@ import Foundation
 import Translation
 
 @available(macOS 26.0, *)
-public final class LiveTranslator {
+public final class LiveTranslator: @unchecked Sendable {
   private let session: TranslationSession?
 
   public init(sourceLanguage: String?, targetLanguage: String?) {
@@ -29,7 +29,7 @@ public final class LiveTranslator {
     do {
       return try await session.translate(text).targetText
     } catch {
-      fputs("translation skipped: \(error)\n", stderr)
+      helperDebugLog("translation-skipped error=\(error)")
       return nil
     }
   }

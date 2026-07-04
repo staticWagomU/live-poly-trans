@@ -32,25 +32,15 @@ public struct LivePolyTransHelper {
       helperDebugLog("detect-languages installed=\(payload.installed.count) supported=\(payload.supported.count)")
       print(try jsonLine(for: payload))
       fflush(stdout)
-    case .aiGenerateSummary:
-      let response = try await AppleIntelligenceService.shared.generateSummary(
-        transcript: readStandardInputText(),
-        responseLanguage: options.sourceLanguage
-      )
-      print(response)
+    case .aiServer:
+      await runAiServer()
+    case let .waveform(path, buckets):
+      let waveform = try computeWaveform(path: path, buckets: buckets)
+      print(try jsonLine(for: waveform))
       fflush(stdout)
-    case .aiSuggestQuestions:
-      let response = try await AppleIntelligenceService.shared.suggestQuestions(
-        transcript: readStandardInputText()
-      )
-      print(response)
-      fflush(stdout)
-    case let .aiAsk(question):
-      let response = try await AppleIntelligenceService.shared.ask(
-        question,
-        transcript: readStandardInputText()
-      )
-      print(response)
+    case let .mix(inputs, output):
+      try mixAudioFiles(inputs: inputs, outputPath: output)
+      print(#"{"ok":true}"#)
       fflush(stdout)
     case let .stream(stream):
       try await runMicrophoneTranscription(
@@ -58,7 +48,9 @@ public struct LivePolyTransHelper {
         sourceLanguage: options.sourceLanguage,
         targetLanguage: options.targetLanguage,
         languages: options.languages,
-        segmentDirectory: options.segmentDirectory
+        segmentDirectory: options.segmentDirectory,
+        recordFile: options.recordFile,
+        transcriptFile: options.transcriptFile
       )
     }
   }

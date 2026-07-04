@@ -25,14 +25,19 @@ swiftc \
   "${SDK_ARGS[@]}" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSignalLevel.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSilenceGate.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioConversion.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioFileTools.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioRecorder.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AppleIntelligenceService.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/CommandLineOptions.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/DebugLog.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/HelperEvents.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ISO8601Timestamp.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/JsonLine.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/LanguageDetection.swift" \
-  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/LiveTranslationPolicy.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ScreenCaptureKitSpeakerConfiguration.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/SegmentWriter.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptArbitration.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptAttributes.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptEvent.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptLanguageDetection.swift" \

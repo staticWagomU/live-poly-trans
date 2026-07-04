@@ -1,6 +1,6 @@
 import Foundation
 
-public struct TranscriptSpan: Codable, Equatable {
+public struct TranscriptSpan: Codable, Equatable, Sendable {
   public let text: String
   public let confidence: Double?
   public let startMs: Int64?
@@ -14,7 +14,7 @@ public struct TranscriptSpan: Codable, Equatable {
   }
 }
 
-public struct TranscriptEvent: Codable, Equatable {
+public struct TranscriptEvent: Codable, Equatable, Sendable {
   public let type: String
   public let stream: String
   public let speakerId: String

@@ -43,6 +43,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
   private let format: AVAudioFormat
   private var isCapturing = false
   private var isOutputAdded = false
+  private var continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
 
   public init() async throws {
     let hasScreenCapturePermission = requestScreenCapturePermission()
@@ -71,32 +72,51 @@ public final class SpeakerTapInput: @unchecked Sendable {
     stop()
   }
 
-  public func makeInputSequence(analyzerFormat: AVAudioFormat) async throws -> AsyncThrowingStream<AnalyzerInput, Error> {
+  public func makeInputSequence(
+    analyzerFormat: AVAudioFormat,
+    recorder: AudioRecorder? = nil
+  ) async throws -> AsyncThrowingStream<AnalyzerInput, Error> {
     stop()
 
     let audioFormat = format
     let converter = audioConverter(from: audioFormat, to: analyzerFormat)
+    // Trailing silence must reach the analyzer long enough to trigger
+    // finalization of the pending segment; only prolonged silence is dropped
+    // to save CPU. Dropped stretches stay on the capture clock below, so the
+    // analyzer sees an explicit gap instead of compressed time.
     let silenceGate = AudioSilenceGate(
       silenceThresholdRMS: 0.0001,
-      maxTrailingSilentFrames: Int(audioFormat.sampleRate)
+      maxTrailingSilentFrames: Int(audioFormat.sampleRate * speakerTrailingSilenceSeconds)
     )
     let audioCounter = AudioDebugCounter(label: "speaker")
     let convertedAudioCounter = AudioDebugCounter(label: "speaker-converted")
+    let captureClock = AudioCaptureClock(sampleRate: audioFormat.sampleRate)
     let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
+      stateQueue.sync {
+        self.continuation = continuation
+      }
       streamOutput.setHandler { sampleBuffer in
         do {
           guard let buffer = try screenCaptureKitAudioBuffer(
             from: sampleBuffer,
-            format: audioFormat,
-            silenceGate: silenceGate
+            format: audioFormat
           ) else {
+            return
+          }
+
+          // Recording taps the raw capture BEFORE silence gating so the file
+          // timeline matches transcript timestamps sample for sample.
+          let bufferStartTime = captureClock.advance(by: buffer.frameLength)
+          recorder?.write(buffer)
+
+          guard silenceGate.shouldEmit(buffer) else {
             return
           }
 
           audioCounter.record(buffer)
           let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
           convertedAudioCounter.record(analyzerBuffer)
-          continuation.yield(AnalyzerInput(buffer: analyzerBuffer))
+          continuation.yield(AnalyzerInput(buffer: analyzerBuffer, bufferStartTime: bufferStartTime))
         } catch {
           continuation.finish(throwing: error)
         }
@@ -140,6 +160,13 @@ public final class SpeakerTapInput: @unchecked Sendable {
       isOutputAdded = false
       return (wasCapturing, hadOutput)
     }
+
+    let pendingContinuation = stateQueue.sync { () -> AsyncThrowingStream<AnalyzerInput, Error>.Continuation? in
+      let current = continuation
+      continuation = nil
+      return current
+    }
+    pendingContinuation?.finish()
 
     streamOutput.reset()
 
@@ -211,21 +238,36 @@ final class SpeakerStreamOutput: NSObject, SCStreamOutput, @unchecked Sendable {
   }
 }
 
+public let speakerTrailingSilenceSeconds = 2.5
+
+/// Frame-accurate clock over everything captured (including gated silence);
+/// feeding explicit buffer start times keeps analyzer segment timestamps
+/// aligned with the recording file.
+public final class AudioCaptureClock: @unchecked Sendable {
+  private let sampleRate: Double
+  private let lock = NSLock()
+  private var frames: Int64 = 0
+
+  public init(sampleRate: Double) {
+    self.sampleRate = sampleRate
+  }
+
+  public func advance(by frameLength: AVAudioFrameCount) -> CMTime {
+    lock.lock()
+    defer { lock.unlock() }
+
+    let start = frames
+    frames += Int64(frameLength)
+    return CMTime(value: start, timescale: CMTimeScale(sampleRate))
+  }
+}
+
 func screenCaptureKitAudioBuffer(
   from sampleBuffer: CMSampleBuffer,
-  format: AVAudioFormat,
-  silenceGate: AudioSilenceGate? = nil
+  format: AVAudioFormat
 ) throws -> AVAudioPCMBuffer? {
   try withScreenCaptureKitAudioBufferList(from: sampleBuffer) { audioBufferList in
-    if let silenceGate {
-      let level = audioSignalLevel(bufferList: audioBufferList, format: format)
-      let frameLength = audioFrameLength(audioBufferList, format: format)
-      guard silenceGate.shouldEmit(level: level, frameLength: Int(frameLength)) else {
-        return nil
-      }
-    }
-
-    return copyAudioBufferList(audioBufferList, format: format)
+    copyAudioBufferList(audioBufferList, format: format)
   }
 }
 

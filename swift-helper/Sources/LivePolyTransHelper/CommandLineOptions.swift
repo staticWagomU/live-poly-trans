@@ -1,8 +1,8 @@
 public enum HelperCommand: Equatable, Sendable {
   case detectLanguages
-  case aiGenerateSummary
-  case aiSuggestQuestions
-  case aiAsk(question: String)
+  case aiServer
+  case waveform(path: String, buckets: Int)
+  case mix(inputs: [String], output: String)
   case stream(AudioStream)
 }
 
@@ -17,46 +17,48 @@ public struct CommandLineOptions: Equatable, Sendable {
   public let targetLanguage: String?
   public let languages: [String]
   public let segmentDirectory: String?
+  public let recordFile: String?
+  public let transcriptFile: String?
+
+  public init(
+    command: HelperCommand,
+    sourceLanguage: String? = nil,
+    targetLanguage: String? = nil,
+    languages: [String] = [],
+    segmentDirectory: String? = nil,
+    recordFile: String? = nil,
+    transcriptFile: String? = nil
+  ) {
+    self.command = command
+    self.sourceLanguage = sourceLanguage
+    self.targetLanguage = targetLanguage
+    self.languages = languages
+    self.segmentDirectory = segmentDirectory
+    self.recordFile = recordFile
+    self.transcriptFile = transcriptFile
+  }
 
   public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
     if arguments.contains("--detect-languages") {
-      return CommandLineOptions(
-        command: .detectLanguages,
-        sourceLanguage: nil,
-        targetLanguage: nil,
-        languages: [],
-        segmentDirectory: nil
-      )
+      return CommandLineOptions(command: .detectLanguages)
     }
 
-    if arguments.contains("--ai-generate-summary") {
-      return CommandLineOptions(
-        command: .aiGenerateSummary,
-        sourceLanguage: value(after: "--source-language", in: arguments),
-        targetLanguage: nil,
-        languages: [],
-        segmentDirectory: nil
-      )
+    if arguments.contains("--ai-server") {
+      return CommandLineOptions(command: .aiServer)
     }
 
-    if arguments.contains("--ai-suggest-questions") {
-      return CommandLineOptions(
-        command: .aiSuggestQuestions,
-        sourceLanguage: value(after: "--source-language", in: arguments),
-        targetLanguage: nil,
-        languages: [],
-        segmentDirectory: nil
-      )
+    if let waveformPath = value(after: "--waveform", in: arguments) {
+      let buckets = value(after: "--buckets", in: arguments).flatMap(Int.init) ?? defaultWaveformBuckets
+      return CommandLineOptions(command: .waveform(path: waveformPath, buckets: buckets))
     }
 
-    if let question = value(after: "--ai-ask", in: arguments) {
-      return CommandLineOptions(
-        command: .aiAsk(question: question),
-        sourceLanguage: value(after: "--source-language", in: arguments),
-        targetLanguage: nil,
-        languages: [],
-        segmentDirectory: nil
-      )
+    if arguments.contains("--mix") {
+      let inputs = values(after: "--input", in: arguments)
+      guard inputs.count == 2, let output = value(after: "--output", in: arguments) else {
+        throw CommandLineOptionsError.unsupportedArguments(arguments)
+      }
+
+      return CommandLineOptions(command: .mix(inputs: inputs, output: output))
     }
 
     guard
@@ -71,7 +73,9 @@ public struct CommandLineOptions: Equatable, Sendable {
       sourceLanguage: value(after: "--source-language", in: arguments),
       targetLanguage: value(after: "--target-language", in: arguments),
       languages: values(after: "--language", in: arguments),
-      segmentDirectory: value(after: "--segment-directory", in: arguments)
+      segmentDirectory: value(after: "--segment-directory", in: arguments),
+      recordFile: value(after: "--record-file", in: arguments),
+      transcriptFile: value(after: "--transcript-file", in: arguments)
     )
   }
 }
