@@ -15,6 +15,10 @@ struct CommandLineOptionsTests {
     try parsesMicStreamCommandWithLocales()
     try parsesSpeakerStreamCommandWithSegmentDirectory()
     try parsesStreamCommandWithRecordingFiles()
+    try parsesStreamCommandWithWhisperEngine()
+    try defaultsToBuiltinTranscriptionEngine()
+    try rejectsUnknownTranscriptionEngine()
+    try rejectsWhisperEngineWithoutModelAndCliPaths()
     try readsValueAfterFlag()
     try readsRepeatedValuesAfterFlag()
     try formatsIso8601Timestamp()
@@ -157,6 +161,62 @@ struct CommandLineOptionsTests {
 
     try expectEqual(options.recordFile, "/tmp/rec/mic.m4a")
     try expectEqual(options.transcriptFile, "/tmp/rec/mic.jsonl")
+  }
+
+  static func parsesStreamCommandWithWhisperEngine() throws {
+    let options = try CommandLineOptions.parse([
+      "helper",
+      "--stream", "mic",
+      "--transcription-engine", "whisper",
+      "--whisper-model", "/models/ggml-large-v3-turbo.bin",
+      "--whisper-cli", "/opt/homebrew/bin/whisper-cli"
+    ])
+
+    try expectEqual(options.transcriptionEngine, .whisper)
+    try expectEqual(options.whisperModel, "/models/ggml-large-v3-turbo.bin")
+    try expectEqual(options.whisperCli, "/opt/homebrew/bin/whisper-cli")
+  }
+
+  static func defaultsToBuiltinTranscriptionEngine() throws {
+    let options = try CommandLineOptions.parse(["helper", "--stream", "mic"])
+
+    try expectEqual(options.transcriptionEngine, .builtin)
+    try expectEqual(options.whisperModel, nil)
+    try expectEqual(options.whisperCli, nil)
+  }
+
+  static func rejectsUnknownTranscriptionEngine() throws {
+    do {
+      _ = try CommandLineOptions.parse([
+        "helper", "--stream", "mic", "--transcription-engine", "parakeet"
+      ])
+      throw TestFailure(message: "Expected parsing to reject an unknown transcription engine")
+    } catch is CommandLineOptionsError {
+      // expected
+    }
+  }
+
+  static func rejectsWhisperEngineWithoutModelAndCliPaths() throws {
+    let incompleteArguments: [[String]] = [
+      ["helper", "--stream", "mic", "--transcription-engine", "whisper"],
+      [
+        "helper", "--stream", "mic", "--transcription-engine", "whisper",
+        "--whisper-model", "/models/ggml-large-v3-turbo.bin"
+      ],
+      [
+        "helper", "--stream", "mic", "--transcription-engine", "whisper",
+        "--whisper-cli", "/opt/homebrew/bin/whisper-cli"
+      ]
+    ]
+
+    for arguments in incompleteArguments {
+      do {
+        _ = try CommandLineOptions.parse(arguments)
+        throw TestFailure(message: "Expected whisper engine to require model and cli paths: \(arguments)")
+      } catch is CommandLineOptionsError {
+        // expected
+      }
+    }
   }
 
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {

@@ -13,6 +13,11 @@ public enum AudioStream: String, Equatable, Sendable {
   case speaker
 }
 
+public enum TranscriptionEngine: String, Equatable, Sendable {
+  case builtin
+  case whisper
+}
+
 public struct CommandLineOptions: Equatable, Sendable {
   public let command: HelperCommand
   public let sourceLanguage: String?
@@ -21,6 +26,9 @@ public struct CommandLineOptions: Equatable, Sendable {
   public let segmentDirectory: String?
   public let recordFile: String?
   public let transcriptFile: String?
+  public let transcriptionEngine: TranscriptionEngine
+  public let whisperModel: String?
+  public let whisperCli: String?
 
   public init(
     command: HelperCommand,
@@ -29,7 +37,10 @@ public struct CommandLineOptions: Equatable, Sendable {
     languages: [String] = [],
     segmentDirectory: String? = nil,
     recordFile: String? = nil,
-    transcriptFile: String? = nil
+    transcriptFile: String? = nil,
+    transcriptionEngine: TranscriptionEngine = .builtin,
+    whisperModel: String? = nil,
+    whisperCli: String? = nil
   ) {
     self.command = command
     self.sourceLanguage = sourceLanguage
@@ -38,6 +49,9 @@ public struct CommandLineOptions: Equatable, Sendable {
     self.segmentDirectory = segmentDirectory
     self.recordFile = recordFile
     self.transcriptFile = transcriptFile
+    self.transcriptionEngine = transcriptionEngine
+    self.whisperModel = whisperModel
+    self.whisperCli = whisperCli
   }
 
   public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
@@ -78,6 +92,13 @@ public struct CommandLineOptions: Equatable, Sendable {
       throw CommandLineOptionsError.unsupportedArguments(arguments)
     }
 
+    let engine = try parsedTranscriptionEngine(in: arguments)
+    let whisperModel = value(after: "--whisper-model", in: arguments)
+    let whisperCli = value(after: "--whisper-cli", in: arguments)
+    if engine == .whisper, whisperModel == nil || whisperCli == nil {
+      throw CommandLineOptionsError.missingWhisperConfiguration
+    }
+
     return CommandLineOptions(
       command: .stream(stream),
       sourceLanguage: value(after: "--source-language", in: arguments),
@@ -85,13 +106,30 @@ public struct CommandLineOptions: Equatable, Sendable {
       languages: values(after: "--language", in: arguments),
       segmentDirectory: value(after: "--segment-directory", in: arguments),
       recordFile: value(after: "--record-file", in: arguments),
-      transcriptFile: value(after: "--transcript-file", in: arguments)
+      transcriptFile: value(after: "--transcript-file", in: arguments),
+      transcriptionEngine: engine,
+      whisperModel: whisperModel,
+      whisperCli: whisperCli
     )
   }
 }
 
+private func parsedTranscriptionEngine(in arguments: [String]) throws -> TranscriptionEngine {
+  guard let engineName = value(after: "--transcription-engine", in: arguments) else {
+    return .builtin
+  }
+
+  guard let engine = TranscriptionEngine(rawValue: engineName) else {
+    throw CommandLineOptionsError.unknownTranscriptionEngine(engineName)
+  }
+
+  return engine
+}
+
 public enum CommandLineOptionsError: Error, Equatable, Sendable {
   case unsupportedArguments([String])
+  case unknownTranscriptionEngine(String)
+  case missingWhisperConfiguration
 }
 
 public func value(after flag: String, in arguments: [String]) -> String? {
