@@ -11,6 +11,30 @@ describe('chooseDefaultLanguagePair', () => {
       ])
     ).toEqual({ source: 'en-US', target: 'ja-JP' });
   });
+
+  it('uses the system language as main when installed', () => {
+    expect(
+      chooseDefaultLanguagePair(
+        [
+          { id: 'en-US', label: 'English' },
+          { id: 'ja-JP', label: 'Japanese' }
+        ],
+        'ja-JP'
+      )
+    ).toEqual({ source: 'ja-JP', target: 'en-US' });
+  });
+
+  it('falls back to English main when the system language is not installed', () => {
+    expect(
+      chooseDefaultLanguagePair(
+        [
+          { id: 'en-US', label: 'English' },
+          { id: 'ja-JP', label: 'Japanese' }
+        ],
+        'fr-FR'
+      )
+    ).toEqual({ source: 'en-US', target: 'ja-JP' });
+  });
 });
 
 describe('languageControlLabel', () => {

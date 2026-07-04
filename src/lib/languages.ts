@@ -8,9 +8,28 @@ export type LanguagePair = {
   target: string;
 };
 
-export function chooseDefaultLanguagePair(languages: LanguageInfo[]): LanguagePair {
+export function chooseDefaultLanguagePair(
+  languages: LanguageInfo[],
+  preferredLanguage?: string
+): LanguagePair {
   const english = languages.find((language) => language.id.toLowerCase().startsWith('en'));
   const japanese = languages.find((language) => language.id.toLowerCase().startsWith('ja'));
+
+  const preferredPrimary = (preferredLanguage ?? '').split('-')[0]?.toLowerCase() ?? '';
+  const preferred = preferredPrimary
+    ? languages.find((language) => language.id.toLowerCase().startsWith(preferredPrimary))
+    : undefined;
+
+  if (preferred) {
+    const partner = [japanese, english, ...languages].find(
+      (language) =>
+        language && language.id.split('-')[0]?.toLowerCase() !== preferredPrimary
+    );
+
+    if (partner) {
+      return { source: preferred.id, target: partner.id };
+    }
+  }
 
   if (english && japanese) {
     return { source: english.id, target: japanese.id };
