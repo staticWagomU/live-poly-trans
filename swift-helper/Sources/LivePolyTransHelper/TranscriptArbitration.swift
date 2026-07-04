@@ -54,17 +54,26 @@ public func primaryLanguageCode(_ language: String) -> String {
 /// The two language transcribers segment the same audio differently, so
 /// candidates are paired by time-range overlap instead of start proximity.
 public func candidateRangesOverlap(_ left: TranscriptCandidate, _ right: TranscriptCandidate) -> Bool {
-  if abs(left.startMs - right.startMs) <= pointOverlapToleranceMs {
+  timeRangesOverlap(
+    startA: left.startMs, durationA: left.durationMs,
+    startB: right.startMs, durationB: right.durationMs
+  )
+}
+
+public func timeRangesOverlap(
+  startA: Int64, durationA: Int64,
+  startB: Int64, durationB: Int64
+) -> Bool {
+  if abs(startA - startB) <= pointOverlapToleranceMs {
     return true
   }
 
-  let overlap = min(left.startMs + left.durationMs, right.startMs + right.durationMs)
-    - max(left.startMs, right.startMs)
+  let overlap = min(startA + durationA, startB + durationB) - max(startA, startB)
   guard overlap > 0 else {
     return false
   }
 
-  let shorterDuration = max(1, min(left.durationMs, right.durationMs))
+  let shorterDuration = max(1, min(durationA, durationB))
   return Double(overlap) / Double(shorterDuration) >= minimumOverlapRatio
 }
 
@@ -280,6 +289,7 @@ public actor TranscriptArbiter {
   private var pendingFinals: [TranscriptCandidate] = []
   private var lastInterim: TranscriptCandidate?
   private var latestVolatiles: [String: TranscriptCandidate] = [:]
+  private var flushedRanges: [(startMs: Int64, endMs: Int64)] = []
 
   public init(
     languageCount: Int,
@@ -307,6 +317,10 @@ public actor TranscriptArbiter {
   }
 
   private func receiveVolatile(_ candidate: TranscriptCandidate) async {
+    guard !coversFlushedUtterance(candidate) else {
+      return
+    }
+
     latestVolatiles[candidate.language] = candidate
 
     var winner = candidate
@@ -327,6 +341,13 @@ public actor TranscriptArbiter {
 
   private func receiveFinal(_ candidate: TranscriptCandidate) async {
     latestVolatiles[candidate.language] = nil
+
+    // The other language's transcriber already finalized this stretch of
+    // audio and its group was flushed; a second bubble would duplicate it.
+    guard !coversFlushedUtterance(candidate) else {
+      return
+    }
+
     pendingFinals.append(candidate)
 
     let hasCounterpart = pendingFinals.contains {
@@ -355,6 +376,7 @@ public actor TranscriptArbiter {
   private func flushGroup(containing seed: TranscriptCandidate) async {
     let group = overlappingGroup(in: pendingFinals, seed: seed)
     pendingFinals.removeAll { group.contains($0) }
+    rememberFlushedRange(of: group)
 
     for candidate in group {
       if let volatileCandidate = latestVolatiles[candidate.language],
@@ -370,4 +392,28 @@ public actor TranscriptArbiter {
     lastInterim = nil
     await output(.final(winner))
   }
+
+  private func rememberFlushedRange(of group: [TranscriptCandidate]) {
+    guard let startMs = group.map(\.startMs).min(),
+      let endMs = group.map({ $0.startMs + $0.durationMs }).max()
+    else {
+      return
+    }
+
+    flushedRanges.append((startMs: startMs, endMs: endMs))
+    if flushedRanges.count > flushedRangeHistoryLimit {
+      flushedRanges.removeFirst(flushedRanges.count - flushedRangeHistoryLimit)
+    }
+  }
+
+  private func coversFlushedUtterance(_ candidate: TranscriptCandidate) -> Bool {
+    flushedRanges.contains { range in
+      timeRangesOverlap(
+        startA: candidate.startMs, durationA: candidate.durationMs,
+        startB: range.startMs, durationB: max(0, range.endMs - range.startMs)
+      )
+    }
+  }
 }
+
+private let flushedRangeHistoryLimit = 8

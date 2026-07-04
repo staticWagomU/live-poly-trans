@@ -46,6 +46,7 @@ struct CommandLineOptionsTests {
     try await arbiterSuppressesCrossLanguageInterimFlicker()
     try await arbiterPairsFinalsAcrossLanguages()
     try await arbiterFlushesUnpairedFinalAfterHold()
+    try await arbiterDropsLateCounterpartFinalForFlushedUtterance()
     print("all swift helper tests passed")
   }
 
@@ -628,6 +629,37 @@ struct CommandLineOptionsTests {
     await arbiter.receive(english)
     try expectEqual(await collector.snapshot(), [])
 
+    try await Task.sleep(nanoseconds: 400_000_000)
+    try expectEqual(await collector.snapshot(), [.final(english)])
+  }
+
+  static func arbiterDropsLateCounterpartFinalForFlushedUtterance() async throws {
+    let collector = OutputCollector()
+    let arbiter = TranscriptArbiter(languageCount: 2, holdMilliseconds: 50) { output in
+      await collector.append(output)
+    }
+
+    let english = makeCandidate(
+      language: "en-US",
+      text: "the release ships on friday",
+      startMs: 0,
+      durationMs: 2_000,
+      confidence: 0.9
+    )
+    await arbiter.receive(english)
+    try await Task.sleep(nanoseconds: 400_000_000)
+    try expectEqual(await collector.snapshot(), [.final(english)])
+
+    // The other language finalizes the same audio range after the hold
+    // already flushed; it must not surface as a second bubble.
+    let lateJapanese = makeCandidate(
+      language: "ja-JP",
+      text: "ザリリースシップスオンフライデー",
+      startMs: 100,
+      durationMs: 1_900,
+      confidence: 0.8
+    )
+    await arbiter.receive(lateJapanese)
     try await Task.sleep(nanoseconds: 400_000_000)
     try expectEqual(await collector.snapshot(), [.final(english)])
   }
