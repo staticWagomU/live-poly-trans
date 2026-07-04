@@ -24,6 +24,27 @@ export type TranscriptSpan = {
   endMs?: number;
 };
 
+export type TranslationEvent = {
+  type: 'translation';
+  stream: 'mic' | 'speaker';
+  segmentId: string;
+  language: string;
+  targetLanguage: string;
+  trans: string;
+  timestamp: string;
+  sessionId: string;
+};
+
+export type StatusEvent = {
+  type: 'status';
+  stream: 'mic' | 'speaker';
+  state: string;
+  lang?: string;
+  sessionId: string;
+};
+
+export type HelperEvent = TranscriptEvent | TranslationEvent | StatusEvent;
+
 export type ChatMessage = {
   id: string;
   role: 'self' | 'speaker';
@@ -83,4 +104,22 @@ export function fallbackSpeakerId(stream: TranscriptEvent['stream']) {
 
 export function fallbackSpeakerLabel(stream: TranscriptEvent['stream']) {
   return stream === 'mic' ? 'Speaker A' : 'Speaker B';
+}
+
+export function applyTranslationEvent(
+  messages: ChatMessage[],
+  event: Pick<TranslationEvent, 'stream' | 'segmentId' | 'trans'>
+): ChatMessage[] {
+  const role = event.stream === 'mic' ? 'self' : 'speaker';
+  const index = messages.findIndex(
+    (message) => message.role === role && message.segmentId === event.segmentId
+  );
+
+  if (index === -1) {
+    return messages;
+  }
+
+  return messages.map((message, messageIndex) =>
+    messageIndex === index ? { ...message, translation: event.trans } : message
+  );
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { transcriptEventToMessage } from './transcripts';
+import { applyTranslationEvent, transcriptEventToMessage } from './transcripts';
+import type { ChatMessage } from './transcripts';
 
 describe('transcriptEventToMessage', () => {
   it('maps microphone events to self chat messages', () => {
@@ -103,5 +104,40 @@ describe('transcriptEventToMessage', () => {
       detectedLanguageConfidence: 0.92,
       spans: [{ text: 'hello', confidence: 0.75, startMs: 100, endMs: 600 }]
     });
+  });
+});
+
+describe('applyTranslationEvent', () => {
+  const finalMessage: ChatMessage = {
+    id: 'speaker-en-US-5000',
+    role: 'speaker',
+    speakerId: 'system-audio',
+    speakerLabel: 'Speaker B',
+    language: 'en-US',
+    text: 'the release is Friday',
+    translation: null,
+    isFinal: true,
+    timestamp: '2026-07-04T10:00:00Z',
+    segmentId: '5000-2000'
+  };
+
+  it('patches the matching final message with the delivered translation', () => {
+    const updated = applyTranslationEvent([finalMessage], {
+      stream: 'speaker',
+      segmentId: '5000-2000',
+      trans: 'リリースは金曜日です'
+    });
+
+    expect(updated[0].translation).toBe('リリースは金曜日です');
+  });
+
+  it('leaves messages untouched when nothing matches', () => {
+    const updated = applyTranslationEvent([finalMessage], {
+      stream: 'mic',
+      segmentId: '5000-2000',
+      trans: '別ストリームの翻訳'
+    });
+
+    expect(updated).toEqual([finalMessage]);
   });
 });
