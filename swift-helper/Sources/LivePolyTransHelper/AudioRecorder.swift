@@ -1,4 +1,4 @@
-import AVFAudio
+@preconcurrency import AVFAudio
 import Foundation
 
 public let recordingSampleRate: Double = 48_000
