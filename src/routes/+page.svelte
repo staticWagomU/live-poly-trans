@@ -17,11 +17,36 @@
   import { isScrolledToBottom } from '$lib/scroll';
   import { displayTranscriptMessage } from '$lib/transcriptDisplay';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
-  import { transcriptEventToMessage, type ChatMessage, type TranscriptEvent } from '$lib/transcripts';
+  import {
+    applyTranslationEvent,
+    transcriptEventToMessage,
+    type ChatMessage,
+    type HelperEvent,
+    type StatusEvent,
+    type TranscriptEvent
+  } from '$lib/transcripts';
+  import {
+    boundMessagesByChars,
+    planSummaryRequest,
+    recentChatHistory,
+    type ChatTurn
+  } from '$lib/aiContext';
+  import RecordingsView from '$lib/RecordingsView.svelte';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
     supported: LanguageInfo[];
+  };
+
+  type CreatedRecording = {
+    id: string;
+    dir: string;
+  };
+
+  type HelperExitedPayload = {
+    stream: AudioStream;
+    sessionId: string;
+    code: number | null;
   };
 
   const captureModeOptions: Array<{ mode: CaptureMode; label: string }> = [
@@ -30,6 +55,11 @@
     { mode: 'speaker', label: 'Speaker' }
   ];
 
+  const recordingPreferenceKey = 'lpt-save-audio';
+  const summaryRefreshDelayMs = 6000;
+  const maxRestartAttempts = 3;
+
+  let activeTab: 'live' | 'recordings' = 'live';
   let mainLanguage = 'en-US';
   let subLanguage = 'ja-JP';
   let installedLanguages: LanguageInfo[] = [
@@ -44,19 +74,25 @@
     mic: null,
     speaker: null
   };
+  let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
+  let recordingEnabled = false;
+  let currentRecording: CreatedRecording | null = null;
   let isStarting = false;
   let messagesContainer: HTMLDivElement | null = null;
   let latestMessageAnchor: HTMLDivElement | null = null;
   let showJumpToLatest = false;
+  let statusMessage: string | null = null;
+  let actionNotice: string | null = null;
+  let actionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   let aiSummary = '';
+  let summaryCoveredCount = 0;
+  let summaryError: string | null = null;
   let aiQuestion = '';
-  let aiAnswer = '';
+  let chatTurns: ChatTurn[] = [];
   let aiError: string | null = null;
   let isSummaryLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-
-  const summaryRefreshDelayMs = 6000;
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -65,16 +101,18 @@
   $: visibleMessages = [...messages, ...interimMessages];
 
   onMount(async () => {
-    const unlistenTranscript = await listen<TranscriptEvent>('transcript-event', (event) => {
-      if (!isCurrentTranscriptEvent(event.payload)) {
-        return;
-      }
+    recordingEnabled = localStorage.getItem(recordingPreferenceKey) === '1';
 
-      void applyTranscriptEvent(event.payload);
+    const unlistenTranscript = await listen<HelperEvent>('transcript-event', (event) => {
+      void handleHelperEvent(event.payload);
     });
 
     const unlistenError = await listen<string>('helper-error', (event) => {
       aiError = event.payload;
+    });
+
+    const unlistenExited = await listen<HelperExitedPayload>('helper-exited', (event) => {
+      void handleHelperExit(event.payload);
     });
 
     await detectLanguages();
@@ -82,21 +120,54 @@
     return () => {
       unlistenTranscript();
       unlistenError();
+      unlistenExited();
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
+      }
+      if (actionNoticeTimer) {
+        clearTimeout(actionNoticeTimer);
       }
     };
   });
 
-  async function detectLanguages() {
+  async function detectLanguages(preserveSelection = false) {
     try {
       const payload = await invoke<LanguageDetectionPayload>('detect_languages');
       installedLanguages = payload.installed.length > 0 ? payload.installed : installedLanguages;
-      const pair = chooseDefaultLanguagePair(installedLanguages);
+
+      const stillInstalled = (id: string) =>
+        installedLanguages.some((language) => language.id === id);
+      if (preserveSelection && stillInstalled(mainLanguage) && stillInstalled(subLanguage)) {
+        return;
+      }
+
+      const pair = chooseDefaultLanguagePair(installedLanguages, navigator.language);
       mainLanguage = pair.source;
       subLanguage = pair.target;
     } catch (error) {
       aiError = String(error);
+    }
+  }
+
+  async function handleHelperEvent(payload: HelperEvent) {
+    if (!isCurrentSessionEvent(payload)) {
+      return;
+    }
+
+    if (payload.type === 'transcript') {
+      await applyTranscriptEvent(payload);
+    } else if (payload.type === 'translation') {
+      messages = applyTranslationEvent(messages, payload);
+    } else if (payload.type === 'status') {
+      handleStatusEvent(payload);
+    }
+  }
+
+  function handleStatusEvent(event: StatusEvent) {
+    if (event.state === 'downloading-language') {
+      statusMessage = `Downloading ${event.lang ?? ''} speech model…`;
+    } else if (event.state === 'language-ready') {
+      statusMessage = null;
     }
   }
 
@@ -111,19 +182,16 @@
 
     if (shouldScrollToLatest) {
       scrollToLatest('auto');
-      if (event.isFinal) {
-        scheduleSummaryRefresh();
-      }
-      return;
+    } else {
+      syncJumpToLatestButton();
     }
 
-    syncJumpToLatestButton();
     if (event.isFinal) {
       scheduleSummaryRefresh();
     }
   }
 
-  function isCurrentTranscriptEvent(event: TranscriptEvent) {
+  function isCurrentSessionEvent(event: HelperEvent) {
     return streamSessionIds[event.stream] === event.sessionId;
   }
 
@@ -146,18 +214,35 @@
     streamSessionIds = nextSessionIds;
   }
 
+  function setRecordingEnabled(enabled: boolean) {
+    recordingEnabled = enabled;
+    localStorage.setItem(recordingPreferenceKey, enabled ? '1' : '0');
+  }
+
   async function toggleRecording() {
     aiError = null;
+    statusMessage = null;
 
     if (isRecording) {
       clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
       interimMessages = [];
       await invoke('stop_all_sessions');
+      await finishCurrentRecording();
       return;
     }
 
     isStarting = true;
+    restartAttempts = { mic: 0, speaker: 0 };
+
+    if (recordingEnabled) {
+      try {
+        currentRecording = await invoke<CreatedRecording>('create_recording');
+      } catch (error) {
+        aiError = `Could not prepare audio recording: ${String(error)}`;
+        currentRecording = null;
+      }
+    }
 
     const failures: string[] = [];
 
@@ -173,10 +258,24 @@
 
     if (activeStreams.size === 0) {
       aiError = failures.join('\n');
+      await finishCurrentRecording();
       return;
     }
 
     aiError = failures.length > 0 ? failures.join('\n') : null;
+  }
+
+  async function finishCurrentRecording() {
+    if (!currentRecording) {
+      return;
+    }
+
+    try {
+      await invoke('finalize_recording', { id: currentRecording.id });
+    } catch {
+      // Metadata finalize is best-effort; the audio files are already closed.
+    }
+    currentRecording = null;
   }
 
   async function selectCaptureMode(mode: CaptureMode) {
@@ -221,7 +320,8 @@
         sourceLanguage: mainLanguage,
         targetLanguage: subLanguage,
         languages: selectedTranscriptionLanguages(),
-        sessionId
+        sessionId,
+        recordingDir: currentRecording?.dir ?? null
       });
     } catch (error) {
       if (streamSessionIds[stream] === sessionId) {
@@ -239,6 +339,44 @@
     activeStreams.delete(stream);
     activeStreams = new Set(activeStreams);
     await invoke('stop_stream_session', { stream });
+  }
+
+  async function handleHelperExit(payload: HelperExitedPayload) {
+    if (streamSessionIds[payload.stream] !== payload.sessionId) {
+      return;
+    }
+
+    setStreamSession(payload.stream, null);
+    activeStreams.delete(payload.stream);
+    activeStreams = new Set(activeStreams);
+
+    const attempt = restartAttempts[payload.stream] + 1;
+    if (attempt > maxRestartAttempts) {
+      aiError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up.`;
+      statusMessage = null;
+      return;
+    }
+
+    restartAttempts = { ...restartAttempts, [payload.stream]: attempt };
+    statusMessage = `Restarting ${payload.stream} capture (attempt ${attempt}/${maxRestartAttempts})…`;
+
+    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
+
+    const stillWanted =
+      streamsForCaptureMode(captureMode).includes(payload.stream) &&
+      streamSessionIds[payload.stream] === null;
+    if (!stillWanted) {
+      statusMessage = null;
+      return;
+    }
+
+    try {
+      await startStream(payload.stream);
+      statusMessage = null;
+    } catch (error) {
+      statusMessage = null;
+      aiError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
+    }
   }
 
   function selectedTranscriptionLanguages() {
@@ -296,39 +434,117 @@
   }
 
   async function generateMeetingSummary(automatic = false) {
-    if (isSummaryLoading || (automatic && messages.length === 0)) {
+    if (isSummaryLoading) {
+      return;
+    }
+
+    const plan = planSummaryRequest(messages, summaryCoveredCount, aiSummary);
+    if (!plan) {
       return;
     }
 
     isSummaryLoading = true;
-    aiError = null;
+    if (!automatic) {
+      aiError = null;
+    }
 
     try {
-      aiSummary = await invoke<string>('ai_generate_summary', { messages, sourceLanguage: mainLanguage });
+      aiSummary = await invoke<string>('ai_generate_summary', {
+        messages: plan.messages,
+        sourceLanguage: mainLanguage,
+        previousSummary: plan.previousSummary
+      });
+      summaryCoveredCount = plan.coveredCount;
+      summaryError = null;
     } catch (error) {
-      if (!automatic) {
-        aiError = String(error);
-      }
+      summaryError = String(error);
     } finally {
       isSummaryLoading = false;
     }
   }
 
   async function askMeetingQuestion() {
-    if (!aiQuestion.trim()) {
+    const question = aiQuestion.trim();
+    if (!question || isAnswerLoading) {
       return;
     }
 
     isAnswerLoading = true;
     aiError = null;
+    const history = recentChatHistory(chatTurns);
+    const bounded = boundMessagesByChars(messages, 6000);
+    chatTurns = [...chatTurns, { question, answer: '' }];
+    aiQuestion = '';
 
     try {
-      aiAnswer = await invoke<string>('ai_ask', { question: aiQuestion, messages });
+      const answer = await invoke<string>('ai_ask', {
+        question,
+        messages: bounded.kept,
+        language: mainLanguage,
+        history
+      });
+      chatTurns = chatTurns.map((turn, index) =>
+        index === chatTurns.length - 1 ? { ...turn, answer } : turn
+      );
     } catch (error) {
       aiError = String(error);
+      chatTurns = chatTurns.slice(0, -1);
+      aiQuestion = question;
     } finally {
       isAnswerLoading = false;
     }
+  }
+
+  function showActionNotice(text: string) {
+    actionNotice = text;
+    if (actionNoticeTimer) {
+      clearTimeout(actionNoticeTimer);
+    }
+    actionNoticeTimer = setTimeout(() => {
+      actionNotice = null;
+    }, 5000);
+  }
+
+  async function copyTranscript() {
+    const text = messages
+      .map((message) => {
+        const translation = message.translation ? `\n  => ${message.translation}` : '';
+        return `[${message.timestamp}] ${message.speakerLabel} / ${message.language}: ${message.text}${translation}`;
+      })
+      .join('\n');
+
+    try {
+      await navigator.clipboard.writeText(text);
+      showActionNotice('Transcript copied.');
+    } catch (error) {
+      aiError = String(error);
+    }
+  }
+
+  async function saveTranscript() {
+    if (messages.length === 0) {
+      return;
+    }
+
+    try {
+      const result = await invoke<{ json_path: string; text_path: string }>('save_transcript', {
+        messages
+      });
+      showActionNotice(`Saved: ${result.json_path}`);
+    } catch (error) {
+      aiError = String(error);
+    }
+  }
+
+  function clearConversation() {
+    messages = [];
+    interimMessages = [];
+    aiSummary = '';
+    summaryCoveredCount = 0;
+    summaryError = null;
+    chatTurns = [];
+    aiError = null;
+    actionNotice = null;
   }
 </script>
 
@@ -339,18 +555,41 @@
 <main class="stage">
   <section class="window" aria-label="LivePolyTrans">
     <header class="toolbar" data-tauri-drag-region>
-      <div class="capture-switch" data-mode={selectedCaptureMode} aria-label="Audio capture mode">
-        {#each captureModeOptions as option}
+      <div class="toolbar-lead">
+        <div class="tab-switch" role="tablist" aria-label="View">
           <button
             type="button"
-            class:active={selectedCaptureMode === option.mode}
-            aria-pressed={selectedCaptureMode === option.mode}
-            disabled={isStarting}
-            on:click={() => selectCaptureMode(option.mode)}
+            role="tab"
+            aria-selected={activeTab === 'live'}
+            class:active={activeTab === 'live'}
+            on:click={() => (activeTab = 'live')}
           >
-            {option.label}
+            Live
           </button>
-        {/each}
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'recordings'}
+            class:active={activeTab === 'recordings'}
+            on:click={() => (activeTab = 'recordings')}
+          >
+            Recordings
+          </button>
+        </div>
+
+        <div class="capture-switch" data-mode={selectedCaptureMode} aria-label="Audio capture mode">
+          {#each captureModeOptions as option}
+            <button
+              type="button"
+              class:active={selectedCaptureMode === option.mode}
+              aria-pressed={selectedCaptureMode === option.mode}
+              disabled={isStarting}
+              on:click={() => selectCaptureMode(option.mode)}
+            >
+              {option.label}
+            </button>
+          {/each}
+        </div>
       </div>
 
       <div class="toolbar-actions">
@@ -372,7 +611,26 @@
               {/each}
             </select>
           </label>
+          <button
+            type="button"
+            class="refresh-languages"
+            title="Refresh installed languages"
+            aria-label="Refresh installed languages"
+            on:click={() => detectLanguages(true)}
+          >
+            ↻
+          </button>
         </div>
+
+        <label class="record-toggle" title="Save mic and speaker audio files while transcribing">
+          <input
+            type="checkbox"
+            checked={recordingEnabled}
+            disabled={isRecording}
+            on:change={(event) => setRecordingEnabled(event.currentTarget.checked)}
+          />
+          <span>Save audio</span>
+        </label>
 
         <button class="record" class:recording={isRecording} disabled={isStarting} on:click={toggleRecording}>
           <span></span>{isStarting ? 'Starting' : isRecording ? 'Stop' : 'Record'}
@@ -380,126 +638,176 @@
       </div>
     </header>
 
-    <div class="conversation">
-      <section class="thread" aria-label="Translation chat">
-        <div class="thread-head">
-          <div>
-            <span class="date-pill">Today</span>
-            <h1>Live translation log</h1>
-          </div>
-          <div class="legend" aria-label="Message lanes">
-            <span><i class="mic-dot"></i>Speaker A</span>
-            <span><i class="speaker-dot"></i>Speaker B</span>
-          </div>
-        </div>
-
-        {#if visibleMessages.length === 0 && isRecording}
-          <div class="listening-empty" aria-live="polite">
-            <div class="pulse-ring">
-              <span></span>
+    {#if activeTab === 'live'}
+      <div class="conversation">
+        <section class="thread" aria-label="Translation chat">
+          <div class="thread-head">
+            <div>
+              <span class="date-pill">Today</span>
+              <h1>Live translation log</h1>
+              {#if statusMessage}
+                <p class="status-chip" aria-live="polite">{statusMessage}</p>
+              {/if}
+              {#if actionNotice}
+                <p class="action-notice">{actionNotice}</p>
+              {/if}
             </div>
-            <h2>{isStarting ? 'Preparing audio capture...' : 'Listening for speech'}</h2>
-            <p>
-              Speak normally. The first words can take a few seconds while Apple Speech warms up.
-            </p>
-            <div class="stream-chips" aria-label="Active streams">
-              <span class:active={isSpeakerRecording}>Speaker</span>
-              <span class:active={isMicRecording}>Mic</span>
-            </div>
-          </div>
-        {:else if visibleMessages.length === 0}
-          <div class="starter" aria-live="polite">
-            <article class="chat-row speaker-row">
-              <div class="chat-bubble incoming">
-                <span>Preview · Speaker B</span>
-                <p>The other person’s audio will appear here.</p>
-                <small>Press Record to start listening.</small>
+            <div class="thread-side">
+              <div class="legend" aria-label="Message lanes">
+                <span><i class="mic-dot"></i>Speaker A</span>
+                <span><i class="speaker-dot"></i>Speaker B</span>
               </div>
-            </article>
-            <article class="chat-row self-row">
-              <div class="chat-bubble outgoing">
-                <span>Preview · Speaker A</span>
-                <p>Your spoken replies will appear in the same conversation.</p>
-                <small>This is a preview, not a captured transcript.</small>
+              <div class="thread-actions" aria-label="Transcript actions">
+                <button type="button" disabled={messages.length === 0} on:click={copyTranscript}>
+                  Copy
+                </button>
+                <button type="button" disabled={messages.length === 0} on:click={saveTranscript}>
+                  Save
+                </button>
+                <button
+                  type="button"
+                  disabled={visibleMessages.length === 0}
+                  on:click={clearConversation}
+                >
+                  Clear
+                </button>
               </div>
-            </article>
-          </div>
-        {:else}
-          <div class="messages-shell">
-            <div
-              class="messages"
-              bind:this={messagesContainer}
-              aria-live="polite"
-              on:scroll={handleMessagesScroll}
-            >
-              {#each visibleMessages as message (message.id)}
-                {@const transcriptDisplay = displayTranscriptMessage(message, mainLanguage, subLanguage)}
-                <article class="chat-row" class:self-row={message.role === 'self'}>
-                  <div
-                    class="chat-bubble"
-                    class:outgoing={message.role === 'self'}
-                    class:incoming={message.role !== 'self'}
-                    class:pending={!message.isFinal}
-                  >
-                    <span>{message.speakerLabel} · {transcriptDisplay.primaryLanguage}</span>
-                    <p>{transcriptDisplay.primaryText}</p>
-                    {#if transcriptDisplay.secondaryText}
-                      <small>{transcriptDisplay.secondaryText}</small>
-                    {/if}
-                  </div>
-                </article>
-              {/each}
-              <div class="messages-end-anchor" bind:this={latestMessageAnchor} aria-hidden="true"></div>
             </div>
-
-            {#if showJumpToLatest}
-              <button type="button" class="jump-to-latest" on:click={scrollToLatest}>
-                Jump to latest
-              </button>
-            {/if}
           </div>
-        {/if}
-      </section>
 
-      <aside class="meeting-ai" aria-label="Meeting AI">
-        <div class="ai-head">
-          <div>
-            <span class="date-pill">AI</span>
-            <h2>Meeting</h2>
-          </div>
-          <button
-            type="button"
-            disabled={isSummaryLoading}
-            on:click={() => generateMeetingSummary(false)}
-          >
-            {isSummaryLoading ? 'Updating' : 'Refresh'}
-          </button>
-        </div>
+          {#if visibleMessages.length === 0 && isRecording}
+            <div class="listening-empty" aria-live="polite">
+              <div class="pulse-ring">
+                <span></span>
+              </div>
+              <h2>{isStarting ? 'Preparing audio capture...' : 'Listening for speech'}</h2>
+              <p>
+                Speak normally. The first words can take a few seconds while Apple Speech warms up.
+              </p>
+              <div class="stream-chips" aria-label="Active streams">
+                <span class:active={isSpeakerRecording}>Speaker</span>
+                <span class:active={isMicRecording}>Mic</span>
+              </div>
+            </div>
+          {:else if visibleMessages.length === 0}
+            <div class="starter" aria-live="polite">
+              <article class="chat-row speaker-row">
+                <div class="chat-bubble incoming">
+                  <span>Preview · Speaker B</span>
+                  <p>The other person’s audio will appear here.</p>
+                  <small>Press Record to start listening.</small>
+                </div>
+              </article>
+              <article class="chat-row self-row">
+                <div class="chat-bubble outgoing">
+                  <span>Preview · Speaker A</span>
+                  <p>Your spoken replies will appear in the same conversation.</p>
+                  <small>This is a preview, not a captured transcript.</small>
+                </div>
+              </article>
+            </div>
+          {:else}
+            <div class="messages-shell">
+              <div
+                class="messages"
+                bind:this={messagesContainer}
+                aria-live="polite"
+                on:scroll={handleMessagesScroll}
+              >
+                {#each visibleMessages as message (message.id)}
+                  {@const transcriptDisplay = displayTranscriptMessage(message, mainLanguage, subLanguage)}
+                  <article class="chat-row" class:self-row={message.role === 'self'}>
+                    <div
+                      class="chat-bubble"
+                      class:outgoing={message.role === 'self'}
+                      class:incoming={message.role !== 'self'}
+                      class:pending={!message.isFinal}
+                    >
+                      <span>{message.speakerLabel} · {transcriptDisplay.primaryLanguage}</span>
+                      <p>{transcriptDisplay.primaryText}</p>
+                      {#if transcriptDisplay.secondaryText}
+                        <small>{transcriptDisplay.secondaryText}</small>
+                      {/if}
+                    </div>
+                  </article>
+                {/each}
+                <div class="messages-end-anchor" bind:this={latestMessageAnchor} aria-hidden="true"></div>
+              </div>
 
-        {#if aiError}
-          <p class="ai-error">{aiError}</p>
-        {/if}
-
-        <section class="ai-section">
-          <div class="ai-section-head">
-            <h3>Summary</h3>
-          </div>
-          <pre>{aiSummary || 'No summary yet.'}</pre>
+              {#if showJumpToLatest}
+                <button type="button" class="jump-to-latest" on:click={scrollToLatest}>
+                  Jump to latest
+                </button>
+              {/if}
+            </div>
+          {/if}
         </section>
 
-        <section class="ai-section ask-section">
-          <div class="ai-section-head">
-            <h3>Ask</h3>
-            <button type="button" disabled={isAnswerLoading || !aiQuestion.trim()} on:click={askMeetingQuestion}>
-              {isAnswerLoading ? 'Asking' : 'Ask'}
+        <aside class="meeting-ai" aria-label="Meeting AI">
+          <div class="ai-head">
+            <div>
+              <span class="date-pill">AI</span>
+              <h2>Meeting</h2>
+            </div>
+            <button
+              type="button"
+              disabled={isSummaryLoading}
+              on:click={() => generateMeetingSummary(false)}
+            >
+              {isSummaryLoading ? 'Updating' : 'Refresh'}
             </button>
           </div>
-          <textarea bind:value={aiQuestion} rows="3" aria-label="Meeting question"></textarea>
-          <pre>{aiAnswer || 'No answer yet.'}</pre>
-        </section>
-      </aside>
-    </div>
 
+          {#if aiError}
+            <p class="ai-error">{aiError}</p>
+          {/if}
+
+          <section class="ai-section">
+            <div class="ai-section-head">
+              <h3>Summary</h3>
+              {#if isSummaryLoading}
+                <span class="ai-working">updating…</span>
+              {/if}
+            </div>
+            {#if summaryError}
+              <p class="ai-error">{summaryError}</p>
+            {/if}
+            <pre>{aiSummary || 'No summary yet.'}</pre>
+          </section>
+
+          <section class="ai-section ask-section">
+            <div class="ai-section-head">
+              <h3>Ask</h3>
+              <button
+                type="button"
+                disabled={isAnswerLoading || !aiQuestion.trim()}
+                on:click={askMeetingQuestion}
+              >
+                {isAnswerLoading ? 'Asking' : 'Ask'}
+              </button>
+            </div>
+            <div class="chat-turns" aria-live="polite">
+              {#if chatTurns.length === 0}
+                <p class="chat-empty">Ask anything about the meeting so far.</p>
+              {/if}
+              {#each chatTurns as turn}
+                <div class="chat-turn">
+                  <p class="chat-question">{turn.question}</p>
+                  {#if turn.answer}
+                    <p class="chat-answer">{turn.answer}</p>
+                  {:else}
+                    <p class="chat-answer pending">Thinking…</p>
+                  {/if}
+                </div>
+              {/each}
+            </div>
+            <textarea bind:value={aiQuestion} rows="3" aria-label="Meeting question"></textarea>
+          </section>
+        </aside>
+      </div>
+    {:else}
+      <RecordingsView />
+    {/if}
   </section>
 </main>
 
@@ -578,6 +886,12 @@
     backdrop-filter: blur(18px);
   }
 
+  .toolbar-lead {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+
   .toolbar-actions {
     display: flex;
     align-items: center;
@@ -587,22 +901,33 @@
 
   .language-strip,
   .capture-switch,
+  .tab-switch,
   .record,
+  .record-toggle,
   .date-pill {
     border: 1px solid var(--hairline);
     background: var(--canvas);
   }
 
-  .capture-switch {
+  .capture-switch,
+  .tab-switch {
     position: relative;
     display: grid;
-    width: 238px;
-    grid-template-columns: repeat(3, 1fr);
     isolation: isolate;
     overflow: hidden;
     border-radius: 11px;
     padding: 3px;
     background: #e9e9ed;
+  }
+
+  .capture-switch {
+    width: 238px;
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .tab-switch {
+    width: 190px;
+    grid-template-columns: repeat(2, 1fr);
   }
 
   .capture-switch::before {
@@ -631,7 +956,8 @@
     --capture-pill-x: 200%;
   }
 
-  .capture-switch button {
+  .capture-switch button,
+  .tab-switch button {
     position: relative;
     z-index: 1;
     border: 0;
@@ -647,12 +973,19 @@
       opacity 180ms ease;
   }
 
-  .capture-switch button:hover:not(:disabled) {
+  .capture-switch button:hover:not(:disabled),
+  .tab-switch button:hover {
     color: var(--ink);
   }
 
-  .capture-switch button.active {
+  .capture-switch button.active,
+  .tab-switch button.active {
     color: var(--ink);
+  }
+
+  .tab-switch button.active {
+    background: var(--canvas);
+    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   }
 
   .capture-switch button:disabled {
@@ -692,9 +1025,44 @@
     font-weight: 600;
   }
 
+  .refresh-languages {
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink-muted);
+    padding: 4px 6px;
+    font-size: 14px;
+  }
+
+  .refresh-languages:hover {
+    color: var(--apple-blue);
+  }
+
   .arrow {
     color: var(--ink-muted);
     font-size: 13px;
+  }
+
+  .record-toggle {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    color: var(--ink-muted);
+    padding: 7px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .record-toggle input {
+    accent-color: var(--apple-blue);
+    margin: 0;
+  }
+
+  .record-toggle input:disabled + span {
+    opacity: 0.6;
   }
 
   .record {
@@ -800,6 +1168,11 @@
     opacity: 0.56;
   }
 
+  .ai-working {
+    color: var(--ink-muted);
+    font-size: 11px;
+  }
+
   .ai-error {
     max-height: 58px;
     overflow: auto;
@@ -847,6 +1220,57 @@
     padding-bottom: 12px;
   }
 
+  .chat-turns {
+    display: flex;
+    max-height: 260px;
+    flex-direction: column;
+    gap: 10px;
+    overflow: auto;
+  }
+
+  .chat-empty {
+    margin: 0;
+    color: var(--ink-muted);
+    font-size: 12px;
+  }
+
+  .chat-turn {
+    display: grid;
+    gap: 5px;
+  }
+
+  .chat-question {
+    justify-self: end;
+    max-width: 90%;
+    margin: 0;
+    border-radius: 12px 12px 4px 12px;
+    background: var(--apple-blue);
+    color: white;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    line-height: 1.4;
+    word-break: break-word;
+  }
+
+  .chat-answer {
+    justify-self: start;
+    max-width: 95%;
+    margin: 0;
+    border: 1px solid var(--divider-soft);
+    border-radius: 12px 12px 12px 4px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 7px 10px;
+    font-size: 12.5px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .chat-answer.pending {
+    color: var(--ink-muted);
+  }
+
   .ask-section textarea {
     width: 100%;
     min-width: 0;
@@ -877,6 +1301,56 @@
     font-size: 21px;
     font-weight: 600;
     letter-spacing: 0;
+  }
+
+  .status-chip {
+    width: fit-content;
+    margin: 8px 0 0;
+    border: 1px solid rgba(0, 102, 204, 0.24);
+    border-radius: 999px;
+    background: var(--apple-blue-soft);
+    color: var(--apple-blue);
+    padding: 4px 10px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .action-notice {
+    margin: 8px 0 0;
+    color: var(--ink-muted);
+    font-size: 11px;
+    word-break: break-all;
+  }
+
+  .thread-side {
+    display: grid;
+    justify-items: end;
+    gap: 8px;
+  }
+
+  .thread-actions {
+    display: flex;
+    gap: 6px;
+  }
+
+  .thread-actions button {
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--ink-muted);
+    padding: 5px 10px;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .thread-actions button:hover:not(:disabled) {
+    border-color: rgba(0, 102, 204, 0.3);
+    color: var(--apple-blue);
+  }
+
+  .thread-actions button:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
 
   .legend {
@@ -1114,6 +1588,19 @@
     opacity: 0.42;
   }
 
+  @media (max-width: 1140px) {
+    .toolbar {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .toolbar-actions {
+      justify-self: stretch;
+      justify-content: end;
+      flex-wrap: wrap;
+    }
+  }
+
   @media (max-width: 980px) {
     .conversation {
       grid-template-columns: minmax(0, 1fr);
@@ -1127,14 +1614,13 @@
   }
 
   @media (max-width: 900px) {
-    .toolbar {
-      grid-template-columns: 1fr;
-      align-items: stretch;
+    .toolbar-lead {
+      flex-wrap: wrap;
     }
 
     .toolbar-actions {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 1fr auto auto;
       justify-self: stretch;
     }
 
@@ -1146,6 +1632,7 @@
 
     .capture-switch {
       width: auto;
+      flex: 1 1 auto;
     }
   }
 
