@@ -16,6 +16,14 @@
   } from '$lib/audioMode';
   import { isScrolledToBottom } from '$lib/scroll';
   import { displayTranscriptMessage } from '$lib/transcriptDisplay';
+  import {
+    DEFAULT_TRANSCRIPT_FONT_SCALE,
+    canDecreaseTranscriptFontScale,
+    canIncreaseTranscriptFontScale,
+    decreaseTranscriptFontScale,
+    increaseTranscriptFontScale,
+    parseTranscriptFontScale
+  } from '$lib/transcriptFontSize';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import {
     applyTranslationEvent,
@@ -56,6 +64,7 @@
   ];
 
   const recordingPreferenceKey = 'lpt-save-audio';
+  const fontScalePreferenceKey = 'lpt-transcript-font-scale';
   const summaryRefreshDelayMs = 6000;
   const maxRestartAttempts = 3;
 
@@ -93,6 +102,7 @@
   let isSummaryLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -102,6 +112,7 @@
 
   onMount(async () => {
     recordingEnabled = localStorage.getItem(recordingPreferenceKey) === '1';
+    transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
 
     const unlistenTranscript = await listen<HelperEvent>('transcript-event', (event) => {
       void handleHelperEvent(event.payload);
@@ -212,6 +223,11 @@
       nextSessionIds[stream] = null;
     }
     streamSessionIds = nextSessionIds;
+  }
+
+  function setTranscriptFontScale(scale: number) {
+    transcriptFontScale = scale;
+    localStorage.setItem(fontScalePreferenceKey, String(scale));
   }
 
   function setRecordingEnabled(enabled: boolean) {
@@ -640,7 +656,11 @@
 
     {#if activeTab === 'live'}
       <div class="conversation">
-        <section class="thread" aria-label="Translation chat">
+        <section
+          class="thread"
+          aria-label="Translation chat"
+          style="--transcript-font-scale: {transcriptFontScale}"
+        >
           <div class="thread-head">
             <div>
               <span class="date-pill">Today</span>
@@ -658,6 +678,28 @@
                 <span><i class="speaker-dot"></i>Speaker B</span>
               </div>
               <div class="thread-actions" aria-label="Transcript actions">
+                <button
+                  type="button"
+                  class="font-size-button"
+                  title="Decrease transcript text size"
+                  aria-label="Decrease transcript text size"
+                  disabled={!canDecreaseTranscriptFontScale(transcriptFontScale)}
+                  on:click={() =>
+                    setTranscriptFontScale(decreaseTranscriptFontScale(transcriptFontScale))}
+                >
+                  A−
+                </button>
+                <button
+                  type="button"
+                  class="font-size-button"
+                  title="Increase transcript text size"
+                  aria-label="Increase transcript text size"
+                  disabled={!canIncreaseTranscriptFontScale(transcriptFontScale)}
+                  on:click={() =>
+                    setTranscriptFontScale(increaseTranscriptFontScale(transcriptFontScale))}
+                >
+                  A＋
+                </button>
                 <button type="button" disabled={messages.length === 0} on:click={copyTranscript}>
                   Copy
                 </button>
@@ -1564,7 +1606,7 @@
 
   .chat-bubble p {
     margin: 0;
-    font-size: 17px;
+    font-size: calc(17px * var(--transcript-font-scale, 1));
     font-weight: 400;
     line-height: 1.42;
     letter-spacing: 0;
@@ -1574,7 +1616,7 @@
     display: block;
     margin-top: 8px;
     opacity: 0.64;
-    font-size: 14px;
+    font-size: calc(14px * var(--transcript-font-scale, 1));
     font-weight: 400;
     line-height: 1.35;
   }
