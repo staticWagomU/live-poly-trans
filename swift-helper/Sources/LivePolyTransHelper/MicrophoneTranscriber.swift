@@ -233,7 +233,7 @@ final class ShutdownOnce: @unchecked Sendable {
 private func installShutdownHandlers(
   stream: AudioStream,
   analyzer: SpeechAnalyzer,
-  inputSource: AudioInputSource
+  inputSource: AudioInputSource<AnalyzerInput>
 ) {
   let trigger: @Sendable () -> Void = {
     shutdownOnce.run {
@@ -270,7 +270,7 @@ private func makeInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
   recordFile: String?
-) async throws -> AudioInputSource {
+) async throws -> AudioInputSource<AnalyzerInput> {
   switch stream {
   case .mic:
     return try await makeMicrophoneInputSource(
@@ -292,7 +292,33 @@ private func makeMicrophoneInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
   recordFile: String?
-) async throws -> AudioInputSource {
+) async throws -> AudioInputSource<AnalyzerInput> {
+  try await makeMicrophoneCaptureSource(
+    recordFile: recordFile,
+    targetFormat: { naturalFormat in
+      let analyzerFormat = try await analyzerAudioFormat(
+        compatibleWith: transcribers,
+        naturalFormat: naturalFormat
+      )
+      try await analyzer.prepareToAnalyze(in: analyzerFormat)
+      helperDebugLog("mic-analyzer-prepared")
+      return analyzerFormat
+    },
+    transform: { AnalyzerInput(buffer: $0.buffer) }
+  )
+}
+
+/// Engine-agnostic mic capture: taps the input node, converts every buffer
+/// to the resolved target format, and yields whatever `transform` makes of
+/// it. `targetFormat` receives the microphone's natural format so callers
+/// can negotiate (builtin) or fix (whisper) the conversion target, and runs
+/// before the engine starts so it may also prepare downstream consumers.
+@available(macOS 26.0, *)
+func makeMicrophoneCaptureSource<Element: Sendable>(
+  recordFile: String?,
+  targetFormat resolveTargetFormat: (AVAudioFormat) async throws -> AVAudioFormat,
+  transform: @escaping @Sendable (CapturedAudioBuffer) -> Element
+) async throws -> AudioInputSource<Element> {
   guard await requestMicrophonePermission() else {
     throw HelperRuntimeError.microphonePermissionDenied
   }
@@ -301,26 +327,23 @@ private func makeMicrophoneInputSource(
   let engine = AVAudioEngine()
   let input = engine.inputNode
   let inputFormat = input.outputFormat(forBus: 0)
-  let analyzerFormat = try await analyzerAudioFormat(compatibleWith: transcribers, naturalFormat: inputFormat)
-  let converter = audioConverter(from: inputFormat, to: analyzerFormat)
+  let targetFormat = try await resolveTargetFormat(inputFormat)
+  let converter = audioConverter(from: inputFormat, to: targetFormat)
   let recorder = try AudioRecorder(path: recordFile, sourceFormat: inputFormat)
   let audioCounter = AudioDebugCounter(label: "mic")
 
   helperDebugLog("mic-input-format {\(audioFormatDescription(inputFormat))}")
-  helperDebugLog("mic-analyzer-format {\(audioFormatDescription(analyzerFormat))} converter=\(converter == nil ? "none" : "enabled")")
+  helperDebugLog("mic-target-format {\(audioFormatDescription(targetFormat))} converter=\(converter == nil ? "none" : "enabled")")
 
-  try await analyzer.prepareToAnalyze(in: analyzerFormat)
-  helperDebugLog("mic-analyzer-prepared")
-
-  let continuationBox = ContinuationBox()
-  let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
+  let continuationBox = ContinuationBox<Element>()
+  let inputSequence = AsyncThrowingStream<Element, Error> { continuation in
     continuationBox.store(continuation)
     input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
       do {
         audioCounter.record(buffer)
         recorder?.write(buffer)
-        let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
-        continuation.yield(AnalyzerInput(buffer: analyzerBuffer))
+        let convertedBuffer = try convertBuffer(buffer, to: targetFormat, using: converter)
+        continuation.yield(transform(CapturedAudioBuffer(buffer: convertedBuffer)))
       } catch {
         continuation.finish(throwing: error)
       }
@@ -345,7 +368,7 @@ private func makeSpeakerInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
   recordFile: String?
-) async throws -> AudioInputSource {
+) async throws -> AudioInputSource<AnalyzerInput> {
   let speakerInput = try await SpeakerTapInput()
   let analyzerFormat = try await analyzerAudioFormat(
     compatibleWith: transcribers,
@@ -367,11 +390,11 @@ private func makeSpeakerInputSource(
   }
 }
 
-final class ContinuationBox: @unchecked Sendable {
+final class ContinuationBox<Element: Sendable>: @unchecked Sendable {
   private let lock = NSLock()
-  private var continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
+  private var continuation: AsyncThrowingStream<Element, Error>.Continuation?
 
-  func store(_ continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation) {
+  func store(_ continuation: AsyncThrowingStream<Element, Error>.Continuation) {
     lock.lock()
     self.continuation = continuation
     lock.unlock()
@@ -386,13 +409,13 @@ final class ContinuationBox: @unchecked Sendable {
   }
 }
 
-struct AudioInputSource: @unchecked Sendable {
-  let sequence: AsyncThrowingStream<AnalyzerInput, Error>
+struct AudioInputSource<Element: Sendable>: @unchecked Sendable {
+  let sequence: AsyncThrowingStream<Element, Error>
   let recorder: AudioRecorder?
   let cleanup: @Sendable () -> Void
 
   init(
-    sequence: AsyncThrowingStream<AnalyzerInput, Error>,
+    sequence: AsyncThrowingStream<Element, Error>,
     recorder: AudioRecorder? = nil,
     cleanup: @escaping @Sendable () -> Void
   ) {

@@ -43,7 +43,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
   private let format: AVAudioFormat
   private var isCapturing = false
   private var isOutputAdded = false
-  private var continuation: AsyncThrowingStream<AnalyzerInput, Error>.Continuation?
+  private var finishContinuation: (@Sendable () -> Void)?
 
   public init() async throws {
     let hasScreenCapturePermission = requestScreenCapturePermission()
@@ -76,24 +76,43 @@ public final class SpeakerTapInput: @unchecked Sendable {
     analyzerFormat: AVAudioFormat,
     recorder: AudioRecorder? = nil
   ) async throws -> AsyncThrowingStream<AnalyzerInput, Error> {
-    stop()
-
-    let audioFormat = format
-    let converter = audioConverter(from: audioFormat, to: analyzerFormat)
     // Trailing silence must reach the analyzer long enough to trigger
     // finalization of the pending segment; only prolonged silence is dropped
-    // to save CPU. Dropped stretches stay on the capture clock below, so the
+    // to save CPU. Dropped stretches stay on the capture clock, so the
     // analyzer sees an explicit gap instead of compressed time.
     let silenceGate = AudioSilenceGate(
       silenceThresholdRMS: 0.0001,
-      maxTrailingSilentFrames: Int(audioFormat.sampleRate * speakerTrailingSilenceSeconds)
+      maxTrailingSilentFrames: Int(format.sampleRate * speakerTrailingSilenceSeconds)
     )
+    return try await makeCaptureSequence(
+      targetFormat: analyzerFormat,
+      recorder: recorder,
+      shouldInclude: { silenceGate.shouldEmit($0) },
+      transform: { AnalyzerInput(buffer: $0.buffer, bufferStartTime: $0.startTime) }
+    )
+  }
+
+  /// Engine-agnostic capture: converts every non-gated buffer to
+  /// `targetFormat` and yields whatever `transform` makes of it.
+  /// `shouldInclude` decides on the raw (pre-conversion) buffer so skipped
+  /// stretches also skip conversion; recording and the capture clock run
+  /// before it so gated gaps stay on the file/clock timeline.
+  public func makeCaptureSequence<Element: Sendable>(
+    targetFormat: AVAudioFormat,
+    recorder: AudioRecorder? = nil,
+    shouldInclude: @escaping @Sendable (AVAudioPCMBuffer) -> Bool = { _ in true },
+    transform: @escaping @Sendable (CapturedAudioBuffer) -> Element
+  ) async throws -> AsyncThrowingStream<Element, Error> {
+    stop()
+
+    let audioFormat = format
+    let converter = audioConverter(from: audioFormat, to: targetFormat)
     let audioCounter = AudioDebugCounter(label: "speaker")
     let convertedAudioCounter = AudioDebugCounter(label: "speaker-converted")
     let captureClock = AudioCaptureClock(sampleRate: audioFormat.sampleRate)
-    let inputSequence = AsyncThrowingStream<AnalyzerInput, Error> { continuation in
+    let inputSequence = AsyncThrowingStream<Element, Error> { continuation in
       stateQueue.sync {
-        self.continuation = continuation
+        self.finishContinuation = { continuation.finish() }
       }
       streamOutput.setHandler { sampleBuffer in
         do {
@@ -109,14 +128,16 @@ public final class SpeakerTapInput: @unchecked Sendable {
           let bufferStartTime = captureClock.advance(by: buffer.frameLength)
           recorder?.write(buffer)
 
-          guard silenceGate.shouldEmit(buffer) else {
+          guard shouldInclude(buffer) else {
             return
           }
 
           audioCounter.record(buffer)
-          let analyzerBuffer = try convertBuffer(buffer, to: analyzerFormat, using: converter)
-          convertedAudioCounter.record(analyzerBuffer)
-          continuation.yield(AnalyzerInput(buffer: analyzerBuffer, bufferStartTime: bufferStartTime))
+          let convertedBuffer = try convertBuffer(buffer, to: targetFormat, using: converter)
+          convertedAudioCounter.record(convertedBuffer)
+          continuation.yield(
+            transform(CapturedAudioBuffer(buffer: convertedBuffer, startTime: bufferStartTime))
+          )
         } catch {
           continuation.finish(throwing: error)
         }
@@ -161,12 +182,12 @@ public final class SpeakerTapInput: @unchecked Sendable {
       return (wasCapturing, hadOutput)
     }
 
-    let pendingContinuation = stateQueue.sync { () -> AsyncThrowingStream<AnalyzerInput, Error>.Continuation? in
-      let current = continuation
-      continuation = nil
+    let pendingFinish = stateQueue.sync { () -> (@Sendable () -> Void)? in
+      let current = finishContinuation
+      finishContinuation = nil
       return current
     }
-    pendingContinuation?.finish()
+    pendingFinish?()
 
     streamOutput.reset()
 
