@@ -351,11 +351,7 @@ public actor TranscriptArbiter {
 
     pendingFinals.append(candidate)
 
-    let hasCounterpart = pendingFinals.contains {
-      $0.language != candidate.language && candidateRangesOverlap($0, candidate)
-    }
-
-    if languageCount <= 1 || hasCounterpart {
+    if languageCount <= 1 || hasCounterpart(for: candidate, in: pendingFinals) {
       await flushGroup(containing: candidate)
       return
     }
@@ -377,7 +373,7 @@ public actor TranscriptArbiter {
 
     // The other language is still transcribing this stretch of audio, so its
     // final is in flight; flushing now would lock in the wrong-language text.
-    if counterpartVolatileOverlaps(candidate),
+    if hasCounterpart(for: candidate, in: latestVolatiles.values),
       holdExtensions[extensionKey(candidate), default: 0] < maxHoldExtensions {
       holdExtensions[extensionKey(candidate), default: 0] += 1
       scheduleHold(for: candidate)
@@ -387,8 +383,11 @@ public actor TranscriptArbiter {
     await flushGroup(containing: candidate)
   }
 
-  private func counterpartVolatileOverlaps(_ candidate: TranscriptCandidate) -> Bool {
-    latestVolatiles.values.contains {
+  private func hasCounterpart(
+    for candidate: TranscriptCandidate,
+    in candidates: some Collection<TranscriptCandidate>
+  ) -> Bool {
+    candidates.contains {
       $0.language != candidate.language && candidateRangesOverlap($0, candidate)
     }
   }
@@ -404,9 +403,6 @@ public actor TranscriptArbiter {
 
     for candidate in group {
       holdExtensions[extensionKey(candidate)] = nil
-    }
-
-    for candidate in group {
       if let volatileCandidate = latestVolatiles[candidate.language],
         candidateRangesOverlap(volatileCandidate, candidate) {
         latestVolatiles[candidate.language] = nil
