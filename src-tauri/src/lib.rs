@@ -6,12 +6,15 @@ use std::{
     io::Write,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
-    sync::{Arc, Mutex},
+    process::{Child, ChildStdin, Command, Stdio},
+    sync::{mpsc, Arc, Mutex},
+    time::{Duration, Instant},
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
+const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
+const HELPER_STOP_GRACE: Duration = Duration::from_secs(3);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageInfo {
@@ -25,10 +28,15 @@ pub struct LanguageDetectionPayload {
     pub supported: Vec<LanguageInfo>,
 }
 
+pub struct StreamChild {
+    pub session_id: String,
+    pub child: Child,
+}
+
 #[derive(Default)]
 pub struct HelperSession {
-    pub children: Mutex<HashMap<String, Child>>,
-    pub meeting_transcript: Arc<Mutex<Vec<AiTranscriptEntry>>>,
+    pub children: Arc<Mutex<HashMap<String, StreamChild>>>,
+    pub ai_server: Arc<Mutex<Option<AiServer>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,15 +77,13 @@ pub struct SaveTranscriptResult {
     pub text_path: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AiTranscriptEntry {
-    pub speaker_id: String,
-    pub speaker_label: String,
-    pub language: String,
-    pub text: String,
-    pub translation: Option<String>,
-    pub timestamp: String,
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AiChatTurn {
+    pub question: String,
+    pub answer: String,
 }
+
+// MARK: helper binary resolution
 
 pub fn helper_binary_name() -> &'static str {
     if cfg!(target_arch = "aarch64") {
@@ -121,11 +127,12 @@ pub fn resolve_helper_path() -> Result<PathBuf, String> {
         .ok_or_else(|| format!("helper binary was not found: {}", helper_binary_name()))
 }
 
+// MARK: stream helper process plumbing
+
 pub fn read_json_lines(
     app: AppHandle,
     stdout: impl std::io::Read + Send + 'static,
     session_id: String,
-    meeting_transcript: Arc<Mutex<Vec<AiTranscriptEntry>>>,
 ) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -142,9 +149,6 @@ pub fn read_json_lines(
                             value.get("segmentId").and_then(Value::as_str).unwrap_or("-"),
                             value.get("text").and_then(Value::as_str).map(str::len).unwrap_or(0)
                         );
-                    }
-                    if let Ok(mut entries) = meeting_transcript.lock() {
-                        record_final_transcript_event(&mut entries, &value);
                     }
                     let _ = app.emit("transcript-event", value);
                 }
@@ -173,81 +177,341 @@ pub fn attach_session_id(value: &mut Value, session_id: &str) {
     }
 }
 
-pub fn record_final_transcript_event(entries: &mut Vec<AiTranscriptEntry>, value: &Value) {
-    if !should_log_transcript_event(value) {
-        return;
-    }
-
-    let Some(text) = value.get("text").and_then(Value::as_str) else {
-        return;
-    };
-
-    if text.trim().is_empty() {
-        return;
-    }
-
-    let stream = value
-        .get("stream")
-        .and_then(Value::as_str)
-        .unwrap_or("speaker");
-    let speaker_id = value
-        .get("speakerId")
-        .and_then(Value::as_str)
-        .unwrap_or(stream)
-        .to_string();
-    let speaker_label = value
-        .get("speakerLabel")
-        .and_then(Value::as_str)
-        .unwrap_or(if stream == "mic" {
-            "Speaker A"
-        } else {
-            "Speaker B"
-        })
-        .to_string();
-    let language = value
-        .get("lang")
-        .and_then(Value::as_str)
-        .unwrap_or("und")
-        .to_string();
-    let timestamp = value
-        .get("time")
-        .or_else(|| value.get("timestamp"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
-    let translation = value
-        .get("trans")
-        .and_then(Value::as_str)
-        .filter(|translation| !translation.trim().is_empty())
-        .map(ToString::to_string);
-
-    entries.push(AiTranscriptEntry {
-        speaker_id,
-        speaker_label,
-        language,
-        text: text.to_string(),
-        translation,
-        timestamp,
+pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) {
+    std::thread::spawn(move || {
+        let reader = BufReader::new(stderr);
+        for line in reader.lines().map_while(Result::ok) {
+            eprintln!("{line}");
+            if !line.starts_with(HELPER_DEBUG_PREFIX) {
+                let _ = app.emit("helper-error", line);
+            }
+        }
     });
 }
 
-pub fn build_ai_transcript_context(entries: &[AiTranscriptEntry]) -> String {
-    entries
-        .iter()
-        .map(|entry| {
-            let translation = entry
-                .translation
-                .as_ref()
-                .map(|translation| format!("\n  => {translation}"))
-                .unwrap_or_default();
+/// Polls the helper child so an unexpected crash surfaces as a
+/// `helper-exited` event instead of the UI silently showing a dead session.
+/// Intentional stops remove the map entry first, so no event is emitted.
+fn watch_helper_exit(
+    app: AppHandle,
+    children: Arc<Mutex<HashMap<String, StreamChild>>>,
+    stream: String,
+    session_id: String,
+) {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(Duration::from_millis(500));
 
-            format!(
-                "[{}] {} / {}: {}{}",
-                entry.timestamp, entry.speaker_label, entry.language, entry.text, translation
-            )
+        let exited = {
+            let Ok(mut guard) = children.lock() else {
+                return;
+            };
+
+            match guard.get_mut(&stream) {
+                Some(entry) if entry.session_id == session_id => match entry.child.try_wait() {
+                    Ok(Some(status)) => {
+                        guard.remove(&stream);
+                        Some(status.code())
+                    }
+                    Ok(None) => None,
+                    Err(_) => return,
+                },
+                _ => return,
+            }
+        };
+
+        if let Some(code) = exited {
+            eprintln!(
+                "live-poly-trans tauri: helper-exited stream={stream} session={session_id} code={code:?}"
+            );
+            let _ = app.emit(
+                "helper-exited",
+                serde_json::json!({
+                    "stream": stream,
+                    "sessionId": session_id,
+                    "code": code,
+                }),
+            );
+            return;
+        }
+    });
+}
+
+/// Closing stdin asks the helper to flush pending finals and finalize any
+/// recording file; SIGKILL is the fallback, not the default.
+pub fn stop_stream_child(
+    children: &Mutex<HashMap<String, StreamChild>>,
+    stream: &str,
+) -> Result<(), String> {
+    let entry = children
+        .lock()
+        .map_err(|error| error.to_string())?
+        .remove(stream);
+
+    let Some(mut entry) = entry else {
+        return Ok(());
+    };
+
+    eprintln!(
+        "live-poly-trans tauri: stop-stream stream={} pid={}",
+        stream,
+        entry.child.id()
+    );
+    drop(entry.child.stdin.take());
+
+    let deadline = Instant::now() + HELPER_STOP_GRACE;
+    loop {
+        match entry.child.try_wait() {
+            Ok(Some(_)) => return Ok(()),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+
+    eprintln!("live-poly-trans tauri: stop-stream-force stream={stream}");
+    let _ = entry.child.kill();
+    let _ = entry.child.wait();
+    Ok(())
+}
+
+pub fn build_stream_helper_args(
+    stream: &str,
+    source_language: &str,
+    target_language: &str,
+    languages: &[String],
+    segment_dir: &str,
+    record_file: Option<&str>,
+    transcript_file: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        "--stream".to_string(),
+        stream.to_string(),
+        "--source-language".to_string(),
+        source_language.to_string(),
+        "--target-language".to_string(),
+        target_language.to_string(),
+        "--segment-directory".to_string(),
+        segment_dir.to_string(),
+    ];
+
+    for language in languages {
+        args.push("--language".to_string());
+        args.push(language.clone());
+    }
+
+    if let Some(record_file) = record_file {
+        args.push("--record-file".to_string());
+        args.push(record_file.to_string());
+    }
+
+    if let Some(transcript_file) = transcript_file {
+        args.push("--transcript-file".to_string());
+        args.push(transcript_file.to_string());
+    }
+
+    args
+}
+
+// MARK: AI server (persistent helper process)
+
+#[derive(Debug, Serialize)]
+struct AiServerRequestPayload<'a> {
+    id: String,
+    command: &'a str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    question: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    language: Option<&'a str>,
+    #[serde(rename = "previousSummary", skip_serializing_if = "Option::is_none")]
+    previous_summary: Option<&'a str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    history: Option<&'a [AiChatTurn]>,
+    transcript: &'a str,
+}
+
+#[derive(Debug, Deserialize)]
+struct AiServerResponse {
+    id: String,
+    ok: bool,
+    #[serde(default)]
+    response: Option<String>,
+    #[serde(default)]
+    error: Option<String>,
+}
+
+#[derive(Debug)]
+pub struct AiCommandRequest {
+    pub command: &'static str,
+    pub question: Option<String>,
+    pub language: Option<String>,
+    pub previous_summary: Option<String>,
+    pub history: Vec<AiChatTurn>,
+    pub transcript: String,
+}
+
+pub struct AiServer {
+    child: Child,
+    stdin: ChildStdin,
+    pending: Arc<Mutex<HashMap<String, mpsc::Sender<AiServerResponse>>>>,
+    next_id: u64,
+}
+
+enum AiRequestError {
+    /// The response indicates a model/prompt problem; the server is healthy.
+    Protocol(String),
+    /// The pipe or process is broken; the server must be respawned.
+    Transport(String),
+}
+
+impl AiServer {
+    fn spawn() -> Result<AiServer, String> {
+        let helper_path = resolve_helper_path()?;
+        eprintln!(
+            "live-poly-trans tauri: ai-server-start helper={}",
+            helper_path.display()
+        );
+
+        let mut child = Command::new(helper_path)
+            .arg("--ai-server")
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .map_err(|error| error.to_string())?;
+
+        let stdin = child
+            .stdin
+            .take()
+            .ok_or_else(|| "ai server stdin unavailable".to_string())?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "ai server stdout unavailable".to_string())?;
+        let pending: Arc<Mutex<HashMap<String, mpsc::Sender<AiServerResponse>>>> =
+            Arc::default();
+
+        let reader_pending = pending.clone();
+        std::thread::spawn(move || {
+            let reader = BufReader::new(stdout);
+            for line in reader.lines().map_while(Result::ok) {
+                if let Ok(response) = serde_json::from_str::<AiServerResponse>(&line) {
+                    if let Ok(mut guard) = reader_pending.lock() {
+                        if let Some(sender) = guard.remove(&response.id) {
+                            let _ = sender.send(response);
+                        }
+                    }
+                }
+            }
+        });
+
+        if let Some(stderr) = child.stderr.take() {
+            std::thread::spawn(move || {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    eprintln!("{line}");
+                }
+            });
+        }
+
+        Ok(AiServer {
+            child,
+            stdin,
+            pending,
+            next_id: 1,
         })
-        .collect::<Vec<_>>()
-        .join("\n")
+    }
+
+    fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
+
+    fn request(&mut self, request: &AiCommandRequest) -> Result<String, AiRequestError> {
+        let id = self.next_id.to_string();
+        self.next_id += 1;
+
+        let payload = AiServerRequestPayload {
+            id: id.clone(),
+            command: request.command,
+            question: request.question.as_deref(),
+            language: request.language.as_deref(),
+            previous_summary: request.previous_summary.as_deref(),
+            history: if request.history.is_empty() {
+                None
+            } else {
+                Some(&request.history)
+            },
+            transcript: &request.transcript,
+        };
+        let line = serde_json::to_string(&payload)
+            .map_err(|error| AiRequestError::Transport(error.to_string()))?;
+
+        let (sender, receiver) = mpsc::channel();
+        if let Ok(mut guard) = self.pending.lock() {
+            guard.insert(id.clone(), sender);
+        }
+
+        if let Err(error) = writeln!(self.stdin, "{line}").and_then(|_| self.stdin.flush()) {
+            if let Ok(mut guard) = self.pending.lock() {
+                guard.remove(&id);
+            }
+            return Err(AiRequestError::Transport(error.to_string()));
+        }
+
+        match receiver.recv_timeout(AI_REQUEST_TIMEOUT) {
+            Ok(response) => {
+                if response.ok {
+                    Ok(response.response.unwrap_or_default())
+                } else {
+                    Err(AiRequestError::Protocol(
+                        response.error.unwrap_or_else(|| "unknown AI error".to_string()),
+                    ))
+                }
+            }
+            Err(_) => {
+                if let Ok(mut guard) = self.pending.lock() {
+                    guard.remove(&id);
+                }
+                Err(AiRequestError::Transport("AI request timed out".to_string()))
+            }
+        }
+    }
+
+    fn shutdown(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+pub fn run_ai_request(
+    ai_server: &Mutex<Option<AiServer>>,
+    request: AiCommandRequest,
+) -> Result<String, String> {
+    let mut guard = ai_server.lock().map_err(|error| error.to_string())?;
+
+    let needs_spawn = match guard.as_mut() {
+        Some(server) => !server.is_alive(),
+        None => true,
+    };
+    if needs_spawn {
+        *guard = Some(AiServer::spawn()?);
+    }
+
+    let server = guard.as_mut().expect("ai server just ensured");
+    match server.request(&request) {
+        Ok(response) => Ok(response),
+        Err(AiRequestError::Protocol(message)) => Err(message),
+        Err(AiRequestError::Transport(message)) => {
+            // Broken pipe or hang: kill and drop so the next call starts fresh.
+            if let Some(mut server) = guard.take() {
+                server.shutdown();
+            }
+            Err(message)
+        }
+    }
 }
 
 pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage]) -> String {
@@ -271,73 +535,113 @@ pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage])
         .join("\n")
 }
 
-pub fn meeting_ai_context(
-    selected_messages: &[SavedTranscriptMessage],
-    fallback_entries: &[AiTranscriptEntry],
-) -> String {
-    if selected_messages.is_empty() {
-        return build_ai_transcript_context(fallback_entries);
-    }
+// MARK: recordings
 
-    build_ai_context_from_saved_messages(selected_messages)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RecordingMeta {
+    pub id: String,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    #[serde(rename = "endedAt", default, skip_serializing_if = "Option::is_none")]
+    pub ended_at: Option<String>,
 }
 
-pub fn helper_ai_args(
-    command: &str,
-    question: Option<&str>,
-    source_language: Option<&str>,
-) -> Vec<String> {
-    let mut args = vec![command.to_string()];
-    if let Some(question) = question {
-        args.push(question.to_string());
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordingFileInfo {
+    pub name: String,
+    pub stream: String,
+    pub path: String,
+    #[serde(rename = "sizeBytes")]
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecordingSummary {
+    pub id: String,
+    #[serde(rename = "startedAt")]
+    pub started_at: String,
+    #[serde(rename = "endedAt")]
+    pub ended_at: Option<String>,
+    pub files: Vec<RecordingFileInfo>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct CreatedRecording {
+    pub id: String,
+    pub dir: String,
+}
+
+pub fn readable_timestamp() -> String {
+    chrono::Local::now().format("%Y%m%d-%H%M%S").to_string()
+}
+
+/// "mic.m4a" / "mic-2.m4a" → "mic"; restart attempts keep their lane.
+pub fn recording_stream_name(file_name: &str) -> String {
+    let stem = file_name.split('.').next().unwrap_or(file_name);
+    stem.split('-').next().unwrap_or(stem).to_string()
+}
+
+/// Picks `<stream>.m4a`, or a numbered variant when a crash-restart would
+/// otherwise truncate the previous take.
+pub fn next_recording_file_path(dir: &Path, stream: &str) -> PathBuf {
+    let base = dir.join(format!("{stream}.m4a"));
+    if !base.exists() {
+        return base;
     }
-    if let Some(source_language) = source_language {
-        if !source_language.trim().is_empty() {
-            args.push("--source-language".to_string());
-            args.push(source_language.to_string());
+
+    for attempt in 2..1000 {
+        let candidate = dir.join(format!("{stream}-{attempt}.m4a"));
+        if !candidate.exists() {
+            return candidate;
         }
     }
 
-    args
+    base
 }
 
-pub fn run_helper_ai_command(args: &[String], transcript: &str) -> Result<String, String> {
-    let helper_path = resolve_helper_path()?;
-    let mut child = Command::new(helper_path)
-        .args(args)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|error| error.to_string())?;
-
-    if let Some(mut stdin) = child.stdin.take() {
-        stdin
-            .write_all(transcript.as_bytes())
-            .map_err(|error| error.to_string())?;
+pub fn unique_destination(dir: &Path, base_name: &str, extension: &str) -> PathBuf {
+    let first = dir.join(format!("{base_name}.{extension}"));
+    if !first.exists() {
+        return first;
     }
 
-    let output = child
-        .wait_with_output()
-        .map_err(|error| error.to_string())?;
-    if !output.status.success() {
-        return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-    }
-
-    Ok(String::from_utf8_lossy(&output.stdout).trim().to_owned())
-}
-
-pub fn read_stderr(app: AppHandle, stderr: impl std::io::Read + Send + 'static) {
-    std::thread::spawn(move || {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines().map_while(Result::ok) {
-            eprintln!("{line}");
-            if !line.starts_with(HELPER_DEBUG_PREFIX) {
-                let _ = app.emit("helper-error", line);
-            }
+    for attempt in 2..1000 {
+        let candidate = dir.join(format!("{base_name}-{attempt}.{extension}"));
+        if !candidate.exists() {
+            return candidate;
         }
-    });
+    }
+
+    first
 }
+
+fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("recordings"))
+}
+
+fn recording_dir_for(app: &AppHandle, id: &str) -> Result<PathBuf, String> {
+    if id.contains('/') || id.contains("..") {
+        return Err(format!("invalid recording id: {id}"));
+    }
+
+    Ok(recordings_dir(app)?.join(id))
+}
+
+fn read_recording_meta(dir: &Path) -> Option<RecordingMeta> {
+    let raw = fs::read_to_string(dir.join("meta.json")).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> {
+    let json = serde_json::to_string_pretty(meta).map_err(|error| error.to_string())?;
+    fs::write(dir.join("meta.json"), json).map_err(|error| error.to_string())
+}
+
+// MARK: commands
 
 pub mod commands {
     use super::*;
@@ -362,8 +666,9 @@ pub mod commands {
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
     }
 
+    #[allow(clippy::too_many_arguments)]
     #[tauri::command]
-    pub fn start_stream_session(
+    pub async fn start_stream_session(
         app: AppHandle,
         state: State<'_, HelperSession>,
         stream: String,
@@ -371,98 +676,128 @@ pub mod commands {
         target_language: String,
         languages: Vec<String>,
         session_id: String,
+        recording_dir: Option<String>,
     ) -> Result<(), String> {
-        stop_helper_child(&state, &stream)?;
+        let children = state.children.clone();
 
-        let segment_dir = app
-            .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("segments")
-            .join(&stream);
-        fs::create_dir_all(&segment_dir).map_err(|error| error.to_string())?;
+        tauri::async_runtime::spawn_blocking(move || {
+            stop_stream_child(&children, &stream)?;
 
-        let mut helper_args = vec![
-            "--stream".to_string(),
-            stream.clone(),
-            "--source-language".to_string(),
-            source_language,
-            "--target-language".to_string(),
-            target_language,
-            "--segment-directory".to_string(),
-            segment_dir.to_string_lossy().into_owned(),
-        ];
+            let segment_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| error.to_string())?
+                .join("segments")
+                .join(&stream);
+            fs::create_dir_all(&segment_dir).map_err(|error| error.to_string())?;
 
-        for language in languages {
-            helper_args.push("--language".to_string());
-            helper_args.push(language);
-        }
+            let (record_file, transcript_file) = match recording_dir.as_deref() {
+                Some(dir) => {
+                    let dir = PathBuf::from(dir);
+                    fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+                    (
+                        Some(
+                            next_recording_file_path(&dir, &stream)
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
+                        Some(
+                            dir.join(format!("{stream}.jsonl"))
+                                .to_string_lossy()
+                                .into_owned(),
+                        ),
+                    )
+                }
+                None => (None, None),
+            };
 
-        let helper_path = resolve_helper_path()?;
-        eprintln!(
-            "live-poly-trans tauri: start-stream stream={} helper={} segment_dir={} args={:?}",
-            stream,
-            helper_path.display(),
-            segment_dir.display(),
-            helper_args
-        );
-
-        let mut child = Command::new(helper_path)
-            .args(helper_args)
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .map_err(|error| error.to_string())?;
-        eprintln!(
-            "live-poly-trans tauri: helper-started stream={} pid={}",
-            stream,
-            child.id()
-        );
-
-        if let Some(stdout) = child.stdout.take() {
-            read_json_lines(
-                app.clone(),
-                stdout,
-                session_id,
-                state.meeting_transcript.clone(),
+            let helper_args = build_stream_helper_args(
+                &stream,
+                &source_language,
+                &target_language,
+                &languages,
+                &segment_dir.to_string_lossy(),
+                record_file.as_deref(),
+                transcript_file.as_deref(),
             );
-        }
 
-        if let Some(stderr) = child.stderr.take() {
-            read_stderr(app, stderr);
-        }
+            let helper_path = resolve_helper_path()?;
+            eprintln!(
+                "live-poly-trans tauri: start-stream stream={} helper={} args={:?}",
+                stream,
+                helper_path.display(),
+                helper_args
+            );
 
-        state
-            .children
-            .lock()
-            .map_err(|error| error.to_string())?
-            .insert(stream, child);
-        Ok(())
+            let mut child = Command::new(helper_path)
+                .args(helper_args)
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|error| error.to_string())?;
+            eprintln!(
+                "live-poly-trans tauri: helper-started stream={} pid={}",
+                stream,
+                child.id()
+            );
+
+            if let Some(stdout) = child.stdout.take() {
+                read_json_lines(app.clone(), stdout, session_id.clone());
+            }
+
+            if let Some(stderr) = child.stderr.take() {
+                read_stderr(app.clone(), stderr);
+            }
+
+            children
+                .lock()
+                .map_err(|error| error.to_string())?
+                .insert(
+                    stream.clone(),
+                    StreamChild {
+                        session_id: session_id.clone(),
+                        child,
+                    },
+                );
+
+            watch_helper_exit(app, children.clone(), stream, session_id);
+            Ok(())
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
-    pub fn stop_stream_session(
+    pub async fn stop_stream_session(
         state: State<'_, HelperSession>,
         stream: String,
     ) -> Result<(), String> {
-        stop_helper_child(&state, &stream)
+        let children = state.children.clone();
+        tauri::async_runtime::spawn_blocking(move || stop_stream_child(&children, &stream))
+            .await
+            .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
-    pub fn stop_all_sessions(state: State<'_, HelperSession>) -> Result<(), String> {
-        let streams = state
-            .children
-            .lock()
-            .map_err(|error| error.to_string())?
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+    pub async fn stop_all_sessions(state: State<'_, HelperSession>) -> Result<(), String> {
+        let children = state.children.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            let streams = children
+                .lock()
+                .map_err(|error| error.to_string())?
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>();
 
-        for stream in streams {
-            stop_helper_child(&state, &stream)?;
-        }
+            for stream in streams {
+                stop_stream_child(&children, &stream)?;
+            }
 
-        Ok(())
+            Ok(())
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
@@ -477,7 +812,7 @@ pub mod commands {
             .join("exports");
         fs::create_dir_all(&transcript_dir).map_err(|error| error.to_string())?;
 
-        let timestamp = chrono_like_timestamp();
+        let timestamp = readable_timestamp();
         let json_path = transcript_dir.join(format!("transcript-{timestamp}.json"));
         let text_path = transcript_dir.join(format!("transcript-{timestamp}.txt"));
 
@@ -512,23 +847,42 @@ pub mod commands {
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
         source_language: String,
+        previous_summary: Option<String>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(
-            &state,
-            "--ai-generate-summary",
-            None,
-            Some(&source_language),
-            &messages,
-        )
-        .await
+        let ai_server = state.ai_server.clone();
+        let request = AiCommandRequest {
+            command: "summary",
+            question: None,
+            language: Some(source_language),
+            previous_summary,
+            history: Vec::new(),
+            transcript: build_ai_context_from_saved_messages(&messages),
+        };
+
+        tauri::async_runtime::spawn_blocking(move || run_ai_request(&ai_server, request))
+            .await
+            .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
     pub async fn ai_suggest_questions(
         state: State<'_, HelperSession>,
         messages: Vec<SavedTranscriptMessage>,
+        language: Option<String>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-suggest-questions", None, None, &messages).await
+        let ai_server = state.ai_server.clone();
+        let request = AiCommandRequest {
+            command: "suggest",
+            question: None,
+            language,
+            previous_summary: None,
+            history: Vec::new(),
+            transcript: build_ai_context_from_saved_messages(&messages),
+        };
+
+        tauri::async_runtime::spawn_blocking(move || run_ai_request(&ai_server, request))
+            .await
+            .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
@@ -536,67 +890,240 @@ pub mod commands {
         state: State<'_, HelperSession>,
         question: String,
         messages: Vec<SavedTranscriptMessage>,
+        language: Option<String>,
+        history: Option<Vec<AiChatTurn>>,
     ) -> Result<String, String> {
-        run_meeting_ai_command(&state, "--ai-ask", Some(&question), None, &messages).await
-    }
-
-    #[tauri::command]
-    pub fn clear_meeting_ai_context(state: State<'_, HelperSession>) -> Result<(), String> {
-        state
-            .meeting_transcript
-            .lock()
-            .map_err(|error| error.to_string())?
-            .clear();
-        Ok(())
-    }
-
-    pub async fn run_meeting_ai_command(
-        state: &State<'_, HelperSession>,
-        command: &str,
-        question: Option<&str>,
-        source_language: Option<&str>,
-        messages: &[SavedTranscriptMessage],
-    ) -> Result<String, String> {
-        let transcript = {
-            let entries = state
-                .meeting_transcript
-                .lock()
-                .map_err(|error| error.to_string())?;
-            meeting_ai_context(messages, &entries)
+        let ai_server = state.ai_server.clone();
+        let request = AiCommandRequest {
+            command: "ask",
+            question: Some(question),
+            language,
+            previous_summary: None,
+            history: history.unwrap_or_default(),
+            transcript: build_ai_context_from_saved_messages(&messages),
         };
-        let args = helper_ai_args(command, question, source_language);
-        tauri::async_runtime::spawn_blocking(move || run_helper_ai_command(&args, &transcript))
+
+        tauri::async_runtime::spawn_blocking(move || run_ai_request(&ai_server, request))
             .await
             .map_err(|error| error.to_string())?
     }
 
-    pub fn stop_helper_child(state: &State<'_, HelperSession>, stream: &str) -> Result<(), String> {
-        if let Some(mut child) = state
-            .children
-            .lock()
-            .map_err(|error| error.to_string())?
-            .remove(stream)
-        {
-            eprintln!(
-                "live-poly-trans tauri: stop-stream stream={} pid={}",
-                stream,
-                child.id()
-            );
-            child.kill().map_err(|error| error.to_string())?;
-            let _ = child.wait();
+    #[tauri::command]
+    pub fn create_recording(app: AppHandle) -> Result<CreatedRecording, String> {
+        let id = format!("rec-{}", readable_timestamp());
+        let dir = recording_dir_for(&app, &id)?;
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+
+        write_recording_meta(
+            &dir,
+            &RecordingMeta {
+                id: id.clone(),
+                started_at: chrono::Local::now().to_rfc3339(),
+                ended_at: None,
+            },
+        )?;
+
+        Ok(CreatedRecording {
+            id,
+            dir: dir.display().to_string(),
+        })
+    }
+
+    #[tauri::command]
+    pub fn finalize_recording(app: AppHandle, id: String) -> Result<(), String> {
+        let dir = recording_dir_for(&app, &id)?;
+        let Some(mut meta) = read_recording_meta(&dir) else {
+            return Ok(());
+        };
+
+        meta.ended_at = Some(chrono::Local::now().to_rfc3339());
+        write_recording_meta(&dir, &meta)
+    }
+
+    #[tauri::command]
+    pub fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
+        let root = recordings_dir(&app)?;
+        let Ok(entries) = fs::read_dir(&root) else {
+            return Ok(Vec::new());
+        };
+
+        let mut recordings = Vec::new();
+        for entry in entries.flatten() {
+            let dir = entry.path();
+            if !dir.is_dir() {
+                continue;
+            }
+
+            let Some(meta) = read_recording_meta(&dir) else {
+                continue;
+            };
+
+            let mut files = Vec::new();
+            if let Ok(dir_entries) = fs::read_dir(&dir) {
+                for file_entry in dir_entries.flatten() {
+                    let path = file_entry.path();
+                    if path.extension().and_then(|ext| ext.to_str()) != Some("m4a") {
+                        continue;
+                    }
+
+                    let name = file_entry.file_name().to_string_lossy().into_owned();
+                    let size_bytes = file_entry.metadata().map(|meta| meta.len()).unwrap_or(0);
+                    files.push(RecordingFileInfo {
+                        stream: recording_stream_name(&name),
+                        name,
+                        path: path.display().to_string(),
+                        size_bytes,
+                    });
+                }
+            }
+
+            files.sort_by(|left, right| left.name.cmp(&right.name));
+            recordings.push(RecordingSummary {
+                id: meta.id,
+                started_at: meta.started_at,
+                ended_at: meta.ended_at,
+                files,
+            });
         }
 
-        Ok(())
+        recordings.sort_by(|left, right| right.started_at.cmp(&left.started_at));
+        Ok(recordings)
     }
-}
 
-fn chrono_like_timestamp() -> String {
-    let seconds = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or_default();
+    #[tauri::command]
+    pub fn read_recording_transcript(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
+        let dir = recording_dir_for(&app, &id)?;
+        let Ok(entries) = fs::read_dir(&dir) else {
+            return Ok(Vec::new());
+        };
 
-    seconds.to_string()
+        let mut events = Vec::new();
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+                continue;
+            }
+
+            let Ok(contents) = fs::read_to_string(&path) else {
+                continue;
+            };
+
+            for line in contents.lines() {
+                if let Ok(value) = serde_json::from_str::<Value>(line) {
+                    events.push(value);
+                }
+            }
+        }
+
+        Ok(events)
+    }
+
+    #[tauri::command]
+    pub async fn recording_waveform(
+        app: AppHandle,
+        id: String,
+        file_name: String,
+    ) -> Result<Value, String> {
+        if file_name.contains('/') || file_name.contains("..") {
+            return Err(format!("invalid recording file name: {file_name}"));
+        }
+
+        let path = recording_dir_for(&app, &id)?.join(&file_name);
+        if !path.exists() {
+            return Err(format!("recording file not found: {file_name}"));
+        }
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let helper_path = resolve_helper_path()?;
+            let output = Command::new(helper_path)
+                .arg("--waveform")
+                .arg(&path)
+                .output()
+                .map_err(|error| error.to_string())?;
+
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+            }
+
+            serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn export_recording(
+        app: AppHandle,
+        id: String,
+        variant: String,
+    ) -> Result<String, String> {
+        let dir = recording_dir_for(&app, &id)?;
+        let downloads = app
+            .path()
+            .download_dir()
+            .map_err(|error| error.to_string())?;
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let source = match variant.as_str() {
+                "mic" | "speaker" => {
+                    let path = dir.join(format!("{variant}.m4a"));
+                    if !path.exists() {
+                        return Err(format!("no {variant} recording in {id}"));
+                    }
+                    path
+                }
+                "mixed" => {
+                    let mic = dir.join("mic.m4a");
+                    let speaker = dir.join("speaker.m4a");
+                    if !mic.exists() || !speaker.exists() {
+                        return Err(
+                            "mixed export needs both mic and speaker recordings".to_string()
+                        );
+                    }
+
+                    let mixed = dir.join("mixed.m4a");
+                    let is_stale = match (fs::metadata(&mixed), fs::metadata(&mic)) {
+                        (Ok(mixed_meta), Ok(mic_meta)) => {
+                            matches!(
+                                (mixed_meta.modified(), mic_meta.modified()),
+                                (Ok(mixed_time), Ok(mic_time)) if mixed_time < mic_time
+                            )
+                        }
+                        _ => true,
+                    };
+
+                    if is_stale {
+                        let helper_path = resolve_helper_path()?;
+                        let output = Command::new(helper_path)
+                            .arg("--mix")
+                            .arg("--input")
+                            .arg(&mic)
+                            .arg("--input")
+                            .arg(&speaker)
+                            .arg("--output")
+                            .arg(&mixed)
+                            .output()
+                            .map_err(|error| error.to_string())?;
+
+                        if !output.status.success() {
+                            return Err(
+                                String::from_utf8_lossy(&output.stderr).trim().to_owned()
+                            );
+                        }
+                    }
+                    mixed
+                }
+                other => return Err(format!("unknown export variant: {other}")),
+            };
+
+            let destination =
+                unique_destination(&downloads, &format!("LivePolyTrans-{id}-{variant}"), "m4a");
+            fs::copy(&source, &destination).map_err(|error| error.to_string())?;
+            Ok(destination.display().to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
 }
 
 pub fn run() {
@@ -611,7 +1138,12 @@ pub fn run() {
             commands::ai_generate_summary,
             commands::ai_suggest_questions,
             commands::ai_ask,
-            commands::clear_meeting_ai_context
+            commands::create_recording,
+            commands::finalize_recording,
+            commands::list_recordings,
+            commands::read_recording_transcript,
+            commands::recording_waveform,
+            commands::export_recording
         ])
         .setup(|app| {
             let _ = app.get_webview_window("main");
@@ -653,9 +1185,6 @@ mod tests {
 
         assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/../Resources/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
-        )));
-        assert!(candidates.contains(&PathBuf::from(
-            "/App/LivePolyTrans.app/Contents/MacOS/../Resources/binaries/LivePolyTransHelper.app/Contents/MacOS/live-poly-trans-helper"
         )));
         assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/helper"
@@ -714,46 +1243,6 @@ mod tests {
     }
 
     #[test]
-    fn records_final_transcript_events_for_ai_context() {
-        let mut entries = Vec::new();
-        let event = serde_json::json!({
-            "type": "transcript",
-            "isFinal": true,
-            "speakerId": "system-audio",
-            "speakerLabel": "Speaker B",
-            "lang": "en-US",
-            "text": "we should ship the summary panel",
-            "trans": "概要パネルを出しましょう",
-            "timestamp": "2026-06-23T10:00:00Z"
-        });
-
-        record_final_transcript_event(&mut entries, &event);
-
-        assert_eq!(entries.len(), 1);
-        assert_eq!(entries[0].speaker_label, "Speaker B");
-        assert_eq!(
-            build_ai_transcript_context(&entries),
-            "[2026-06-23T10:00:00Z] Speaker B / en-US: we should ship the summary panel\n  => 概要パネルを出しましょう"
-        );
-    }
-
-    #[test]
-    fn builds_helper_ai_args_for_questions() {
-        assert_eq!(
-            helper_ai_args("--ai-ask", Some("What changed?"), None),
-            vec!["--ai-ask".to_string(), "What changed?".to_string()]
-        );
-        assert_eq!(
-            helper_ai_args("--ai-generate-summary", None, Some("en-US")),
-            vec![
-                "--ai-generate-summary".to_string(),
-                "--source-language".to_string(),
-                "en-US".to_string()
-            ]
-        );
-    }
-
-    #[test]
     fn builds_ai_context_from_selected_saved_messages() {
         let messages = vec![SavedTranscriptMessage {
             role: "speaker".to_string(),
@@ -774,30 +1263,87 @@ mod tests {
     }
 
     #[test]
-    fn meeting_ai_context_prefers_selected_messages_over_raw_entries() {
-        let selected = vec![SavedTranscriptMessage {
-            role: "speaker".to_string(),
-            speaker_id: Some("system-audio".to_string()),
-            speaker_label: Some("Speaker B".to_string()),
-            language: "ja-JP".to_string(),
-            text: "選ばれた日本語候補".to_string(),
-            translation: None,
-            timestamp: "2026-06-23T10:00:00Z".to_string(),
-            confidence: Some(0.88),
-            spans: None,
-        }];
-        let raw = vec![AiTranscriptEntry {
-            speaker_id: "system-audio".to_string(),
-            speaker_label: "Speaker B".to_string(),
-            language: "en-US".to_string(),
-            text: "wrong raw candidate".to_string(),
-            translation: None,
-            timestamp: "2026-06-23T10:00:00Z".to_string(),
-        }];
+    fn builds_stream_helper_args_with_recording_files() {
+        let args = build_stream_helper_args(
+            "mic",
+            "en-US",
+            "ja-JP",
+            &["en-US".to_string(), "ja-JP".to_string()],
+            "/tmp/segments/mic",
+            Some("/tmp/rec/mic.m4a"),
+            Some("/tmp/rec/mic.jsonl"),
+        );
 
         assert_eq!(
-            meeting_ai_context(&selected, &raw),
-            "[2026-06-23T10:00:00Z] Speaker B / ja-JP: 選ばれた日本語候補"
+            args,
+            vec![
+                "--stream",
+                "mic",
+                "--source-language",
+                "en-US",
+                "--target-language",
+                "ja-JP",
+                "--segment-directory",
+                "/tmp/segments/mic",
+                "--language",
+                "en-US",
+                "--language",
+                "ja-JP",
+                "--record-file",
+                "/tmp/rec/mic.m4a",
+                "--transcript-file",
+                "/tmp/rec/mic.jsonl",
+            ]
         );
+    }
+
+    #[test]
+    fn builds_stream_helper_args_without_recording() {
+        let args = build_stream_helper_args(
+            "speaker",
+            "en-US",
+            "ja-JP",
+            &[],
+            "/tmp/segments/speaker",
+            None,
+            None,
+        );
+
+        assert!(!args.contains(&"--record-file".to_string()));
+        assert!(!args.contains(&"--transcript-file".to_string()));
+    }
+
+    #[test]
+    fn classifies_recording_stream_from_file_name() {
+        assert_eq!(recording_stream_name("mic.m4a"), "mic");
+        assert_eq!(recording_stream_name("mic-2.m4a"), "mic");
+        assert_eq!(recording_stream_name("speaker.m4a"), "speaker");
+    }
+
+    #[test]
+    fn ai_request_payload_serializes_camel_case_optionals() {
+        let request = AiServerRequestPayload {
+            id: "1".to_string(),
+            command: "summary",
+            question: None,
+            language: Some("ja-JP"),
+            previous_summary: Some("前回の要約"),
+            history: None,
+            transcript: "本文",
+        };
+
+        let json = serde_json::to_value(&request).unwrap();
+        assert_eq!(json["previousSummary"], "前回の要約");
+        assert_eq!(json["language"], "ja-JP");
+        assert!(json.get("question").is_none());
+        assert!(json.get("history").is_none());
+    }
+
+    #[test]
+    fn readable_timestamp_is_filename_safe() {
+        let timestamp = readable_timestamp();
+        assert_eq!(timestamp.len(), "20260704-120000".len());
+        assert!(!timestamp.contains(':'));
+        assert!(!timestamp.contains('/'));
     }
 }
