@@ -1,5 +1,4 @@
 import type { ChatMessage } from './transcripts';
-import { isCompetingTranscriptCandidate, mergeTranscriptMessages } from './transcriptSelection';
 
 export type TranscriptMessageState = {
   messages: ChatMessage[];
@@ -24,17 +23,16 @@ export function applyTranscriptMessage(
 }
 
 export function upsertFinalMessage(messages: ChatMessage[], incoming: ChatMessage) {
-  const existingIndex = messages.findIndex(
-    (message) =>
-      message.id === incoming.id || isCompetingTranscriptCandidate(message, incoming)
-  );
+  const existingIndex = messages.findIndex((message) => message.id === incoming.id);
 
   if (existingIndex === -1) {
     return [...messages, incoming];
   }
 
   return messages.map((message, index) =>
-    index === existingIndex ? mergeTranscriptMessages(message, incoming) : message
+    index === existingIndex
+      ? { ...message, ...incoming, translation: incoming.translation ?? message.translation }
+      : message
   );
 }
 
