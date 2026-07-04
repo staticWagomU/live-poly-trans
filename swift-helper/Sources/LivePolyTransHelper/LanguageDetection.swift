@@ -8,6 +8,7 @@ public struct LanguageInfo: Codable, Equatable {
 public struct LanguageDetectionPayload: Codable, Equatable {
   public let installed: [LanguageInfo]
   public let supported: [LanguageInfo]
+  public let reserved: [LanguageInfo]
 }
 
 public func languageInfo(from locale: Locale) -> LanguageInfo {
@@ -19,10 +20,12 @@ public func languageInfo(from locale: Locale) -> LanguageInfo {
 
 public func languageDetectionPayload(
   installed: [Locale],
-  supported: [Locale]
+  supported: [Locale],
+  reserved: [Locale]
 ) -> LanguageDetectionPayload {
   LanguageDetectionPayload(
     installed: installed.map(languageInfo(from:)).sorted { $0.id < $1.id },
-    supported: supported.map(languageInfo(from:)).sorted { $0.id < $1.id }
+    supported: supported.map(languageInfo(from:)).sorted { $0.id < $1.id },
+    reserved: reserved.map(languageInfo(from:)).sorted { $0.id < $1.id }
   )
 }

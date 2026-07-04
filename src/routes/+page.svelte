@@ -40,6 +40,7 @@
     type ChatTurn
   } from '$lib/aiContext';
   import RecordingsView from '$lib/RecordingsView.svelte';
+  import SettingsView from '$lib/SettingsView.svelte';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -68,7 +69,7 @@
   const summaryRefreshDelayMs = 6000;
   const maxRestartAttempts = 3;
 
-  let activeTab: 'live' | 'recordings' = 'live';
+  let activeTab: 'live' | 'recordings' | 'settings' = 'live';
   let mainLanguage = 'en-US';
   let subLanguage = 'ja-JP';
   let installedLanguages: LanguageInfo[] = [
@@ -144,20 +145,24 @@
   async function detectLanguages(preserveSelection = false) {
     try {
       const payload = await invoke<LanguageDetectionPayload>('detect_languages');
-      installedLanguages = payload.installed.length > 0 ? payload.installed : installedLanguages;
-
-      const stillInstalled = (id: string) =>
-        installedLanguages.some((language) => language.id === id);
-      if (preserveSelection && stillInstalled(mainLanguage) && stillInstalled(subLanguage)) {
-        return;
-      }
-
-      const pair = chooseDefaultLanguagePair(installedLanguages, navigator.language);
-      mainLanguage = pair.source;
-      subLanguage = pair.target;
+      applyInstalledLanguages(payload.installed, preserveSelection);
     } catch (error) {
       aiError = String(error);
     }
+  }
+
+  function applyInstalledLanguages(installed: LanguageInfo[], preserveSelection = true) {
+    installedLanguages = installed.length > 0 ? installed : installedLanguages;
+
+    const stillInstalled = (id: string) =>
+      installedLanguages.some((language) => language.id === id);
+    if (preserveSelection && stillInstalled(mainLanguage) && stillInstalled(subLanguage)) {
+      return;
+    }
+
+    const pair = chooseDefaultLanguagePair(installedLanguages, navigator.language);
+    mainLanguage = pair.source;
+    subLanguage = pair.target;
   }
 
   async function handleHelperEvent(payload: HelperEvent) {
@@ -591,6 +596,15 @@
           >
             Recordings
           </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={activeTab === 'settings'}
+            class:active={activeTab === 'settings'}
+            on:click={() => (activeTab = 'settings')}
+          >
+            Settings
+          </button>
         </div>
 
         <div class="capture-switch" data-mode={selectedCaptureMode} aria-label="Audio capture mode">
@@ -847,8 +861,13 @@
           </section>
         </aside>
       </div>
-    {:else}
+    {:else if activeTab === 'recordings'}
       <RecordingsView />
+    {:else}
+      <SettingsView
+        {isRecording}
+        onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
+      />
     {/if}
   </section>
 </main>
@@ -968,8 +987,8 @@
   }
 
   .tab-switch {
-    width: 190px;
-    grid-template-columns: repeat(2, 1fr);
+    width: 276px;
+    grid-template-columns: repeat(3, 1fr);
   }
 
   .capture-switch::before {

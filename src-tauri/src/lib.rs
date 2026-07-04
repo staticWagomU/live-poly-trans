@@ -26,6 +26,8 @@ pub struct LanguageInfo {
 pub struct LanguageDetectionPayload {
     pub installed: Vec<LanguageInfo>,
     pub supported: Vec<LanguageInfo>,
+    #[serde(default)]
+    pub reserved: Vec<LanguageInfo>,
 }
 
 pub struct StreamChild {
@@ -666,6 +668,47 @@ pub mod commands {
         serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
     }
 
+    /// Runs a helper language-pack command (`--install-language` /
+    /// `--uninstall-language`) and returns the refreshed detection payload.
+    /// Installation blocks while the speech model downloads, so it runs on a
+    /// blocking thread instead of the async runtime.
+    async fn run_language_pack_command(
+        flag: &'static str,
+        language: String,
+    ) -> Result<LanguageDetectionPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let helper_path = resolve_helper_path()?;
+            eprintln!(
+                "live-poly-trans tauri: language-pack flag={flag} language={language} helper={}",
+                helper_path.display()
+            );
+
+            let output = Command::new(helper_path)
+                .arg(flag)
+                .arg(&language)
+                .output()
+                .map_err(|error| error.to_string())?;
+
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+            }
+
+            serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn install_language(language: String) -> Result<LanguageDetectionPayload, String> {
+        run_language_pack_command("--install-language", language).await
+    }
+
+    #[tauri::command]
+    pub async fn uninstall_language(language: String) -> Result<LanguageDetectionPayload, String> {
+        run_language_pack_command("--uninstall-language", language).await
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[tauri::command]
     pub async fn start_stream_session(
@@ -1131,6 +1174,8 @@ pub fn run() {
         .manage(HelperSession::default())
         .invoke_handler(tauri::generate_handler![
             commands::detect_languages,
+            commands::install_language,
+            commands::uninstall_language,
             commands::start_stream_session,
             commands::stop_stream_session,
             commands::stop_all_sessions,

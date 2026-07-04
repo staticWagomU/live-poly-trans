@@ -25,13 +25,13 @@ public struct LivePolyTransHelper {
 
     switch options.command {
     case .detectLanguages:
-      let payload = await languageDetectionPayload(
-        installed: SpeechTranscriber.installedLocales,
-        supported: SpeechTranscriber.supportedLocales
-      )
-      helperDebugLog("detect-languages installed=\(payload.installed.count) supported=\(payload.supported.count)")
-      print(try jsonLine(for: payload))
-      fflush(stdout)
+      try await printLanguageDetectionPayload()
+    case let .installLanguage(language):
+      try await installLanguageAsset(language)
+      try await printLanguageDetectionPayload()
+    case let .uninstallLanguage(language):
+      try await uninstallLanguageAsset(language)
+      try await printLanguageDetectionPayload()
     case .aiServer:
       await runAiServer()
     case let .waveform(path, buckets):
@@ -53,6 +53,18 @@ public struct LivePolyTransHelper {
         transcriptFile: options.transcriptFile
       )
     }
+  }
+
+  @available(macOS 26.0, *)
+  static func printLanguageDetectionPayload() async throws {
+    let payload = await languageDetectionPayload(
+      installed: SpeechTranscriber.installedLocales,
+      supported: SpeechTranscriber.supportedLocales,
+      reserved: AssetInventory.reservedLocales
+    )
+    helperDebugLog("detect-languages installed=\(payload.installed.count) supported=\(payload.supported.count) reserved=\(payload.reserved.count)")
+    print(try jsonLine(for: payload))
+    fflush(stdout)
   }
 }
 

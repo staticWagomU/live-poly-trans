@@ -7,6 +7,8 @@ import Speech
 struct CommandLineOptionsTests {
   static func main() async throws {
     try parsesDetectLanguagesCommand()
+    try parsesInstallLanguageCommand()
+    try parsesUninstallLanguageCommand()
     try parsesAiServerCommand()
     try parsesWaveformCommand()
     try parsesMixCommand()
@@ -54,6 +56,20 @@ struct CommandLineOptionsTests {
   static func parsesDetectLanguagesCommand() throws {
     let options = try CommandLineOptions.parse(["helper", "--detect-languages"])
     try expectEqual(options.command, .detectLanguages)
+  }
+
+  static func parsesInstallLanguageCommand() throws {
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--install-language", "fr-FR"]).command,
+      .installLanguage("fr-FR")
+    )
+  }
+
+  static func parsesUninstallLanguageCommand() throws {
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--uninstall-language", "fr-FR"]).command,
+      .uninstallLanguage("fr-FR")
+    )
   }
 
   static func parsesAiServerCommand() throws {

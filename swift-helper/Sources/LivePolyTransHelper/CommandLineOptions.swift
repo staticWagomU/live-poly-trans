@@ -1,5 +1,7 @@
 public enum HelperCommand: Equatable, Sendable {
   case detectLanguages
+  case installLanguage(String)
+  case uninstallLanguage(String)
   case aiServer
   case waveform(path: String, buckets: Int)
   case mix(inputs: [String], output: String)
@@ -41,6 +43,14 @@ public struct CommandLineOptions: Equatable, Sendable {
   public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
     if arguments.contains("--detect-languages") {
       return CommandLineOptions(command: .detectLanguages)
+    }
+
+    if let language = value(after: "--install-language", in: arguments) {
+      return CommandLineOptions(command: .installLanguage(language))
+    }
+
+    if let language = value(after: "--uninstall-language", in: arguments) {
+      return CommandLineOptions(command: .uninstallLanguage(language))
     }
 
     if arguments.contains("--ai-server") {

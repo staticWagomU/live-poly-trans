@@ -8,6 +8,8 @@ public enum HelperRuntimeError: Error, CustomStringConvertible {
   case missingConvertedAudioBuffer
   case audioConversionFailed(String)
   case speechLanguageNotInstalled(String)
+  case speechLanguageNotSupported(String)
+  case speechLanguageNotReserved(String)
 
   public var description: String {
     switch self {
@@ -23,6 +25,10 @@ public enum HelperRuntimeError: Error, CustomStringConvertible {
       "Audio conversion failed: \(message)"
     case let .speechLanguageNotInstalled(language):
       "Speech language is not installed and could not be downloaded: \(language)."
+    case let .speechLanguageNotSupported(language):
+      "Speech language is not supported on this device: \(language)."
+    case let .speechLanguageNotReserved(language):
+      "Speech language is not held by this app, so there is nothing to remove: \(language)."
     }
   }
 }
