@@ -192,19 +192,6 @@ private func consumeResults(
   helperDebugLog("result-listener-end stream=\(stream.rawValue) language=\(language)")
 }
 
-func isMeaningfulTranscript(_ text: String, isFinal: Bool) -> Bool {
-  let hasSpeechLikeContent = text.contains { character in
-    character.isLetter || character.isNumber
-  }
-
-  guard hasSpeechLikeContent else {
-    return false
-  }
-
-  let minimumLength = isFinal ? 2 : 3
-  return text.count >= minimumLength
-}
-
 // MARK: - Graceful shutdown
 
 /// Triggered by stdin EOF (Rust drops the pipe on stop) or SIGTERM. Ending

@@ -42,6 +42,7 @@ swiftc \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptEvent.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptLanguageDetection.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/UtteranceChunker.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/WhisperResultParsing.swift" \
   "$ROOT_DIR/swift-helper/TestSupport/CommandLineOptionsTests.swift" \
   -o "$TMP_DIR/command-line-options-tests"
 

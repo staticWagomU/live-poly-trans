@@ -45,6 +45,15 @@ struct CommandLineOptionsTests {
     try chunkerReportsStartAndDurationFromCumulativeFrames()
     try chunkerIncludesPreRollBeforeSpeechOnset()
     try chunkerFlushReturnsPendingSpeech()
+    try parsesWhisperCliFullJson()
+    try computesMeanTokenProbabilityConfidence()
+    try sanitizesWhisperNonSpeechAnnotations()
+    try mapsWhisperLanguageToSessionLanguageByPrefix()
+    try fallsBackToLanguageFitnessForUnmatchedWhisperLanguage()
+    try buildsWhisperCliArguments()
+    try keepsMeaningfulTranscriptRules()
+    try buildsTranscriptCandidateFromWhisperResult()
+    try dropsNonSpeechWhisperResult()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
     try overlapsCandidatesSharingMostOfTheirRange()
@@ -350,6 +359,170 @@ struct CommandLineOptionsTests {
     // utterance; flushing it must not produce a chunk.
     _ = chunker.consume(chunkerSpeechBuffer)
     try expectEqual(chunker.flush(), nil)
+  }
+
+  // MARK: - Whisper result parsing
+  // Fixture mirrors whisper-cli --output-json-full: result.language holds the
+  // detected code, transcription carries segments with per-token
+  // probabilities. Extra fields the parser ignores (systeminfo, params,
+  // token ids/timestamps) are included to keep the fixture honest.
+
+  static let whisperFixtureJson = """
+  {
+    "systeminfo": "AVX = 0 | NEON = 1",
+    "model": {"type": "large v3"},
+    "params": {"model": "/models/ggml-large-v3-turbo.bin", "language": "auto"},
+    "result": {"language": "ja"},
+    "transcription": [
+      {
+        "timestamps": {"from": "00:00:00,000", "to": "00:00:02,000"},
+        "offsets": {"from": 0, "to": 2000},
+        "text": "こんにちは、",
+        "tokens": [
+          {"text": "[_BEG_]", "id": 50365, "p": 0.99, "t_dtw": -1},
+          {"text": "こんにちは", "id": 38088, "p": 0.9, "t_dtw": -1},
+          {"text": "、", "id": 1231, "p": 0.7, "t_dtw": -1}
+        ]
+      },
+      {
+        "timestamps": {"from": "00:00:02,000", "to": "00:00:04,420"},
+        "offsets": {"from": 2000, "to": 4420},
+        "text": "会議を始めましょう。",
+        "tokens": [
+          {"text": "会議", "id": 12949, "p": 0.8, "t_dtw": -1}
+        ]
+      }
+    ]
+  }
+  """
+
+  static func parsesWhisperCliFullJson() throws {
+    let result = try parsedWhisperResult(Data(whisperFixtureJson.utf8))
+
+    try expectEqual(result.result.language, "ja")
+    try expectEqual(result.transcription.count, 2)
+    try expectEqual(result.transcription[0].text, "こんにちは、")
+    try expectEqual(result.transcription[1].offsets.from, 2000)
+    try expectEqual(result.transcription[1].offsets.to, 4420)
+    try expectEqual(result.transcription[0].tokens?.count, 3)
+  }
+
+  static func computesMeanTokenProbabilityConfidence() throws {
+    let result = try parsedWhisperResult(Data(whisperFixtureJson.utf8))
+
+    // Special tokens like [_BEG_] carry decoder bookkeeping, not speech;
+    // they are excluded from the mean: (0.9 + 0.7 + 0.8) / 3.
+    guard let confidence = whisperConfidence(result) else {
+      throw TestFailure(message: "Expected a confidence from token probabilities")
+    }
+    try expectEqual((confidence * 100).rounded() / 100, 0.8)
+  }
+
+  static func sanitizesWhisperNonSpeechAnnotations() throws {
+    try expectEqual(sanitizedWhisperText("[BLANK_AUDIO]"), "")
+    try expectEqual(sanitizedWhisperText(" (upbeat music) "), "")
+    try expectEqual(sanitizedWhisperText("♪♪"), "")
+    try expectEqual(sanitizedWhisperText("ご視聴ありがとうございました"), "")
+    try expectEqual(sanitizedWhisperText("ご視聴ありがとうございました。"), "")
+    try expectEqual(sanitizedWhisperText(" Hello there. [BLANK_AUDIO]"), "Hello there.")
+    try expectEqual(sanitizedWhisperText("こんにちは、会議を始めましょう。"), "こんにちは、会議を始めましょう。")
+  }
+
+  static func mapsWhisperLanguageToSessionLanguageByPrefix() throws {
+    try expectEqual(
+      sessionLanguage(forWhisperLanguage: "ja", sourceLanguage: "ja-JP", targetLanguage: "en-US", text: "こんにちは"),
+      "ja-JP"
+    )
+    try expectEqual(
+      sessionLanguage(forWhisperLanguage: "en", sourceLanguage: "ja-JP", targetLanguage: "en-US", text: "hello"),
+      "en-US"
+    )
+  }
+
+  static func fallsBackToLanguageFitnessForUnmatchedWhisperLanguage() throws {
+    try expectEqual(
+      sessionLanguage(forWhisperLanguage: "zh", sourceLanguage: "ja-JP", targetLanguage: "en-US", text: "こんにちは、会議"),
+      "ja-JP"
+    )
+    try expectEqual(
+      sessionLanguage(forWhisperLanguage: "ko", sourceLanguage: "ja-JP", targetLanguage: "en-US", text: "hello there"),
+      "en-US"
+    )
+  }
+
+  static func buildsWhisperCliArguments() throws {
+    try expectEqual(
+      whisperCliArguments(
+        modelPath: "/models/ggml-large-v3-turbo.bin",
+        audioPath: "/tmp/chunk-0.wav",
+        outputBase: "/tmp/chunk-0"
+      ),
+      [
+        "-m", "/models/ggml-large-v3-turbo.bin",
+        "-f", "/tmp/chunk-0.wav",
+        "-l", "auto",
+        "--output-json-full",
+        "-of", "/tmp/chunk-0",
+        "--no-prints"
+      ]
+    )
+  }
+
+  static func keepsMeaningfulTranscriptRules() throws {
+    try expectEqual(isMeaningfulTranscript("ok", isFinal: true), true)
+    try expectEqual(isMeaningfulTranscript("ok", isFinal: false), false)
+    try expectEqual(isMeaningfulTranscript("okay", isFinal: false), true)
+    try expectEqual(isMeaningfulTranscript("...", isFinal: true), false)
+    try expectEqual(isMeaningfulTranscript("", isFinal: true), false)
+  }
+
+  static func buildsTranscriptCandidateFromWhisperResult() throws {
+    let result = try parsedWhisperResult(Data(whisperFixtureJson.utf8))
+    guard
+      let candidate = whisperTranscriptCandidate(
+        result: result,
+        chunkStartMs: 5_000,
+        chunkDurationMs: 4_420,
+        sourceLanguage: "ja-JP",
+        targetLanguage: "en-US"
+      )
+    else {
+      throw TestFailure(message: "Expected a candidate from a meaningful whisper result")
+    }
+
+    try expectEqual(candidate.language, "ja-JP")
+    try expectEqual(candidate.text, "こんにちは、会議を始めましょう。")
+    try expectEqual(candidate.isFinal, true)
+    try expectEqual(candidate.startMs, 5_000)
+    try expectEqual(candidate.durationMs, 4_420)
+    try expectEqual(candidate.segmentId, "5000-4420")
+    try expectEqual(candidate.detectedLanguage, "ja")
+  }
+
+  static func dropsNonSpeechWhisperResult() throws {
+    let blankJson = """
+    {
+      "result": {"language": "en"},
+      "transcription": [
+        {
+          "timestamps": {"from": "00:00:00,000", "to": "00:00:01,000"},
+          "offsets": {"from": 0, "to": 1000},
+          "text": " [BLANK_AUDIO]",
+          "tokens": []
+        }
+      ]
+    }
+    """
+    let result = try parsedWhisperResult(Data(blankJson.utf8))
+    let candidate = whisperTranscriptCandidate(
+      result: result,
+      chunkStartMs: 0,
+      chunkDurationMs: 1_000,
+      sourceLanguage: "ja-JP",
+      targetLanguage: "en-US"
+    )
+
+    try expectEqual(candidate, nil)
   }
 
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {
