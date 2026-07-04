@@ -47,6 +47,7 @@ struct CommandLineOptionsTests {
     try await arbiterPairsFinalsAcrossLanguages()
     try await arbiterFlushesUnpairedFinalAfterHold()
     try await arbiterDropsLateCounterpartFinalForFlushedUtterance()
+    try await arbiterExtendsHoldWhileCounterpartVolatileIsActive()
     print("all swift helper tests passed")
   }
 
@@ -662,6 +663,49 @@ struct CommandLineOptionsTests {
     await arbiter.receive(lateJapanese)
     try await Task.sleep(nanoseconds: 400_000_000)
     try expectEqual(await collector.snapshot(), [.final(english)])
+  }
+
+  static func arbiterExtendsHoldWhileCounterpartVolatileIsActive() async throws {
+    let collector = OutputCollector()
+    let arbiter = TranscriptArbiter(languageCount: 2, holdMilliseconds: 80) { output in
+      await collector.append(output)
+    }
+
+    // Japanese is still transcribing when the English mishearing finalizes;
+    // the arbiter should wait for the Japanese final instead of flushing.
+    let japaneseVolatile = makeCandidate(
+      language: "ja-JP",
+      text: "次のリリースは",
+      isFinal: false,
+      startMs: 0,
+      durationMs: 1_500,
+      confidence: 0.5
+    )
+    let englishMishearing = makeCandidate(
+      language: "en-US",
+      text: "tsugi no ririsu",
+      startMs: 100,
+      durationMs: 1_900,
+      confidence: 0.3
+    )
+    let japaneseFinal = makeCandidate(
+      language: "ja-JP",
+      text: "次のリリースは金曜日です",
+      startMs: 0,
+      durationMs: 2_000,
+      confidence: 0.8
+    )
+
+    await arbiter.receive(japaneseVolatile)
+    await arbiter.receive(englishMishearing)
+    try await Task.sleep(nanoseconds: 180_000_000)
+    await arbiter.receive(japaneseFinal)
+    try await Task.sleep(nanoseconds: 200_000_000)
+
+    try expectEqual(
+      await collector.snapshot(),
+      [.interim(japaneseVolatile), .final(japaneseFinal)]
+    )
   }
 }
 

@@ -290,6 +290,7 @@ public actor TranscriptArbiter {
   private var lastInterim: TranscriptCandidate?
   private var latestVolatiles: [String: TranscriptCandidate] = [:]
   private var flushedRanges: [(startMs: Int64, endMs: Int64)] = []
+  private var holdExtensions: [String: Int] = [:]
 
   public init(
     languageCount: Int,
@@ -359,6 +360,10 @@ public actor TranscriptArbiter {
       return
     }
 
+    scheduleHold(for: candidate)
+  }
+
+  private func scheduleHold(for candidate: TranscriptCandidate) {
     Task { [holdMilliseconds] in
       try? await Task.sleep(nanoseconds: UInt64(holdMilliseconds) * 1_000_000)
       await self.flushIfStillPending(candidate)
@@ -370,13 +375,36 @@ public actor TranscriptArbiter {
       return
     }
 
+    // The other language is still transcribing this stretch of audio, so its
+    // final is in flight; flushing now would lock in the wrong-language text.
+    if counterpartVolatileOverlaps(candidate),
+      holdExtensions[extensionKey(candidate), default: 0] < maxHoldExtensions {
+      holdExtensions[extensionKey(candidate), default: 0] += 1
+      scheduleHold(for: candidate)
+      return
+    }
+
     await flushGroup(containing: candidate)
+  }
+
+  private func counterpartVolatileOverlaps(_ candidate: TranscriptCandidate) -> Bool {
+    latestVolatiles.values.contains {
+      $0.language != candidate.language && candidateRangesOverlap($0, candidate)
+    }
+  }
+
+  private func extensionKey(_ candidate: TranscriptCandidate) -> String {
+    "\(candidate.language)|\(candidate.segmentId)"
   }
 
   private func flushGroup(containing seed: TranscriptCandidate) async {
     let group = overlappingGroup(in: pendingFinals, seed: seed)
     pendingFinals.removeAll { group.contains($0) }
     rememberFlushedRange(of: group)
+
+    for candidate in group {
+      holdExtensions[extensionKey(candidate)] = nil
+    }
 
     for candidate in group {
       if let volatileCandidate = latestVolatiles[candidate.language],
@@ -417,3 +445,4 @@ public actor TranscriptArbiter {
 }
 
 private let flushedRangeHistoryLimit = 8
+private let maxHoldExtensions = 3
