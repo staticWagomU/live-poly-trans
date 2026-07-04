@@ -23,15 +23,29 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$APPDATA/recordings/**"
+        ]
+      }
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["dmg"],
-    "icon": ["icons/icon.png"],
-    "externalBin": ["binaries/helper"],
-    "resources": ["binaries/LivePolyTransHelper.app"],
+    "targets": [
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
+    "externalBin": [
+      "binaries/helper"
+    ],
+    "resources": [
+      "binaries/LivePolyTransHelper.app"
+    ],
     "macOS": {
       "minimumSystemVersion": "26.0",
       "dmg": {
