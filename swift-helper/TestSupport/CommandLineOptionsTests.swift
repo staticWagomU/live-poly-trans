@@ -39,6 +39,12 @@ struct CommandLineOptionsTests {
     try calculatesAudioFrameLength()
     try gatesLeadingAndTrailingSilence()
     try resumesAfterDroppedSilence()
+    try chunkerEmitsChunkAfterTrailingSilence()
+    try chunkerIgnoresAudioShorterThanMinimumSpeech()
+    try chunkerSplitsAtMaxChunkDuration()
+    try chunkerReportsStartAndDurationFromCumulativeFrames()
+    try chunkerIncludesPreRollBeforeSpeechOnset()
+    try chunkerFlushReturnsPendingSpeech()
     try configuresScreenCaptureKitSpeakerStream()
     try configuresScreenCaptureKitSpeakerAudioFormat()
     try overlapsCandidatesSharingMostOfTheirRange()
@@ -217,6 +223,133 @@ struct CommandLineOptionsTests {
         // expected
       }
     }
+  }
+
+  // MARK: - UtteranceChunker
+  // 16 kHz mono; test buffers are 4096 frames = 256 ms, mirroring the
+  // capture tap granularity.
+
+  static func makeChunker(maxChunkMs: Int = 28_000) -> UtteranceChunker {
+    UtteranceChunker(
+      sampleRate: 16_000,
+      silenceThresholdRMS: 0.01,
+      minSpeechMs: 300,
+      trailingSilenceMs: 800,
+      maxChunkMs: maxChunkMs,
+      preRollMs: 200
+    )
+  }
+
+  static let chunkerSpeechBuffer = [Float](repeating: 0.1, count: 4096)
+  static let chunkerSilentBuffer = [Float](repeating: 0, count: 4096)
+
+  static func chunkerEmitsChunkAfterTrailingSilence() throws {
+    let chunker = makeChunker()
+    var chunks: [UtteranceChunk] = []
+
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSpeechBuffer)
+    }
+    try expectEqual(chunks.count, 0)
+
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+
+    try expectEqual(chunks.count, 1)
+    try expectEqual(chunks[0].startMs, 0)
+    try expectEqual(chunks[0].durationMs, 2048)
+    try expectEqual(chunks[0].samples.count, 8 * 4096)
+  }
+
+  static func chunkerIgnoresAudioShorterThanMinimumSpeech() throws {
+    let chunker = makeChunker()
+    var chunks: [UtteranceChunk] = []
+
+    chunks += chunker.consume(chunkerSpeechBuffer)
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+
+    try expectEqual(chunks.count, 0)
+  }
+
+  static func chunkerSplitsAtMaxChunkDuration() throws {
+    let chunker = makeChunker(maxChunkMs: 1_000)
+    var chunks: [UtteranceChunk] = []
+
+    for _ in 0..<6 {
+      chunks += chunker.consume(chunkerSpeechBuffer)
+    }
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+
+    try expectEqual(chunks.count, 2)
+    try expectEqual(chunks[0].startMs, 0)
+    try expectEqual(chunks[0].durationMs, 1024)
+    // The second chunk starts seamlessly where the first was cut and hits
+    // the cap again (2 speech + 2 silent buffers) before the 800 ms
+    // trailing-silence rule can fire.
+    try expectEqual(chunks[1].startMs, 1024)
+    try expectEqual(chunks[1].durationMs, 1024)
+  }
+
+  static func chunkerReportsStartAndDurationFromCumulativeFrames() throws {
+    let chunker = makeChunker()
+    var chunks: [UtteranceChunk] = []
+
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+    for _ in 0..<2 {
+      chunks += chunker.consume(chunkerSpeechBuffer)
+    }
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+
+    try expectEqual(chunks.count, 1)
+    // Speech starts at 1024 ms into the stream; the chunk opens 200 ms of
+    // pre-roll earlier.
+    try expectEqual(chunks[0].startMs, 824)
+    // Pre-roll (200 ms) + 2 speech buffers (512 ms) + trailing silence up to
+    // the cut (1024 ms).
+    try expectEqual(chunks[0].durationMs, 1736)
+  }
+
+  static func chunkerIncludesPreRollBeforeSpeechOnset() throws {
+    let chunker = makeChunker()
+    _ = chunker.consume(chunkerSilentBuffer)
+    _ = chunker.consume(chunkerSpeechBuffer)
+    _ = chunker.consume(chunkerSpeechBuffer)
+
+    guard let chunk = chunker.flush() else {
+      throw TestFailure(message: "Expected flush to return the pending utterance")
+    }
+
+    // 200 ms of pre-roll (3200 frames) precede the 2 speech buffers.
+    try expectEqual(chunk.samples.count, 3_200 + 2 * 4096)
+    try expectEqual(chunk.samples.prefix(3_200).allSatisfy { $0 == 0 }, true)
+  }
+
+  static func chunkerFlushReturnsPendingSpeech() throws {
+    let chunker = makeChunker()
+    _ = chunker.consume(chunkerSpeechBuffer)
+    _ = chunker.consume(chunkerSpeechBuffer)
+
+    guard let chunk = chunker.flush() else {
+      throw TestFailure(message: "Expected flush to return the pending utterance")
+    }
+
+    try expectEqual(chunk.startMs, 0)
+    try expectEqual(chunk.durationMs, 512)
+    try expectEqual(chunker.flush(), nil)
+
+    // Pending audio below the minimum speech duration is noise, not an
+    // utterance; flushing it must not produce a chunk.
+    _ = chunker.consume(chunkerSpeechBuffer)
+    try expectEqual(chunker.flush(), nil)
   }
 
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {
