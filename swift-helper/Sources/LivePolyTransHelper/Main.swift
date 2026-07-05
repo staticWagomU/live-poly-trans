@@ -43,15 +43,33 @@ public struct LivePolyTransHelper {
       print(#"{"ok":true}"#)
       fflush(stdout)
     case let .stream(stream):
-      try await runMicrophoneTranscription(
-        stream: stream,
-        sourceLanguage: options.sourceLanguage,
-        targetLanguage: options.targetLanguage,
-        languages: options.languages,
-        segmentDirectory: options.segmentDirectory,
-        recordFile: options.recordFile,
-        transcriptFile: options.transcriptFile
-      )
+      switch options.transcriptionEngine {
+      case .builtin:
+        try await runMicrophoneTranscription(
+          stream: stream,
+          sourceLanguage: options.sourceLanguage,
+          targetLanguage: options.targetLanguage,
+          languages: options.languages,
+          segmentDirectory: options.segmentDirectory,
+          recordFile: options.recordFile,
+          transcriptFile: options.transcriptFile
+        )
+      case .whisper:
+        guard let modelPath = options.whisperModel, let cliPath = options.whisperCli else {
+          throw CommandLineOptionsError.missingWhisperConfiguration
+        }
+
+        try await runWhisperTranscription(
+          stream: stream,
+          sourceLanguage: options.sourceLanguage,
+          targetLanguage: options.targetLanguage,
+          segmentDirectory: options.segmentDirectory,
+          recordFile: options.recordFile,
+          transcriptFile: options.transcriptFile,
+          modelPath: modelPath,
+          cliPath: cliPath
+        )
+      }
     }
   }
 
