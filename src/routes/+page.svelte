@@ -41,6 +41,12 @@
   } from '$lib/aiContext';
   import RecordingsView from '$lib/RecordingsView.svelte';
   import SettingsView from '$lib/SettingsView.svelte';
+  import {
+    parseSpeechModelPreference,
+    speechModelPreferenceValue,
+    streamEnginePayload,
+    type SpeechModelSelection
+  } from '$lib/speechModels';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -66,6 +72,7 @@
 
   const recordingPreferenceKey = 'lpt-save-audio';
   const fontScalePreferenceKey = 'lpt-transcript-font-scale';
+  const speechModelPreferenceKey = 'lpt-speech-model';
   const summaryRefreshDelayMs = 6000;
   const maxRestartAttempts = 3;
 
@@ -104,6 +111,7 @@
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
+  let speechModel: SpeechModelSelection = { engine: 'builtin' };
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -114,6 +122,7 @@
   onMount(async () => {
     recordingEnabled = localStorage.getItem(recordingPreferenceKey) === '1';
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
+    speechModel = parseSpeechModelPreference(localStorage.getItem(speechModelPreferenceKey));
 
     const unlistenTranscript = await listen<HelperEvent>('transcript-event', (event) => {
       void handleHelperEvent(event.payload);
@@ -240,6 +249,11 @@
     localStorage.setItem(recordingPreferenceKey, enabled ? '1' : '0');
   }
 
+  function setSpeechModel(selection: SpeechModelSelection) {
+    speechModel = selection;
+    localStorage.setItem(speechModelPreferenceKey, speechModelPreferenceValue(selection));
+  }
+
   async function toggleRecording() {
     aiError = null;
     statusMessage = null;
@@ -342,7 +356,8 @@
         targetLanguage: subLanguage,
         languages: selectedTranscriptionLanguages(),
         sessionId,
-        recordingDir: currentRecording?.dir ?? null
+        recordingDir: currentRecording?.dir ?? null,
+        ...streamEnginePayload(speechModel)
       });
     } catch (error) {
       if (streamSessionIds[stream] === sessionId) {
@@ -867,6 +882,8 @@
       <SettingsView
         {isRecording}
         onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
+        {speechModel}
+        onSpeechModelChanged={setSpeechModel}
       />
     {/if}
   </section>

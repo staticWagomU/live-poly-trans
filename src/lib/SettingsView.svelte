@@ -3,6 +3,14 @@
   import { onMount } from 'svelte';
   import { filterLanguagePacks, partitionLanguagePacks } from '$lib/languagePacks';
   import type { LanguageInfo } from '$lib/languages';
+  import {
+    formatModelSize,
+    resolveSpeechModelSelection,
+    speechModelLabel,
+    speechModelPreferenceValue,
+    type SpeechModelSelection,
+    type SpeechModelsPayload
+  } from '$lib/speechModels';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -12,10 +20,14 @@
 
   let {
     isRecording = false,
-    onInstalledChanged
+    onInstalledChanged,
+    speechModel = { engine: 'builtin' } as SpeechModelSelection,
+    onSpeechModelChanged
   }: {
     isRecording?: boolean;
     onInstalledChanged?: (installed: LanguageInfo[]) => void;
+    speechModel?: SpeechModelSelection;
+    onSpeechModelChanged?: (selection: SpeechModelSelection) => void;
   } = $props();
 
   let payload = $state<LanguageDetectionPayload | null>(null);
@@ -23,6 +35,8 @@
   let busyLanguage = $state<string | null>(null);
   let isLoading = $state(false);
   let error = $state<string | null>(null);
+  let modelsPayload = $state<SpeechModelsPayload | null>(null);
+  let modelsError = $state<string | null>(null);
 
   const groups = $derived(
     payload
@@ -35,7 +49,25 @@
 
   onMount(() => {
     void refresh();
+    void refreshModels();
   });
+
+  async function refreshModels() {
+    modelsError = null;
+    try {
+      const next = await invoke<SpeechModelsPayload>('list_speech_models');
+      modelsPayload = next;
+
+      // A stored whisper selection may have gone stale since last launch
+      // (model deleted, whisper-cpp uninstalled); silently return to builtin.
+      const resolved = resolveSpeechModelSelection(speechModel, next.models, next.cliAvailable);
+      if (speechModelPreferenceValue(resolved) !== speechModelPreferenceValue(speechModel)) {
+        onSpeechModelChanged?.(resolved);
+      }
+    } catch (modelsRefreshError) {
+      modelsError = String(modelsRefreshError);
+    }
+  }
 
   async function refresh() {
     isLoading = true;
@@ -87,10 +119,11 @@
   <header class="settings-head">
     <div>
       <span class="section-pill">Settings</span>
-      <h1>Language packs</h1>
+      <h1>Speech recognition</h1>
       <p class="settings-note">
-        Speech models are downloaded to this Mac and used for on-device transcription. Removing a
-        pack releases this app's copy; macOS frees the storage in the background.
+        Choose the recognition model and manage on-device language packs. Language packs apply to
+        the built-in Apple engine; whisper models are discovered from superwhisper's folder.
+        Removing a pack releases this app's copy; macOS frees the storage in the background.
       </p>
     </div>
     <div class="settings-tools">
@@ -113,6 +146,60 @@
   {#if isRecording}
     <p class="settings-warning">Stop the current recording before changing language packs.</p>
   {/if}
+
+  <section class="pack-section" aria-label="Speech recognition model">
+    <h2>Recognition model</h2>
+    {#if modelsError}
+      <p class="settings-error" role="alert">{modelsError}</p>
+    {/if}
+    <ul class="pack-list">
+      <li class="pack-row">
+        <label class="model-choice">
+          <input
+            type="radio"
+            name="speech-model"
+            checked={speechModel.engine === 'builtin'}
+            disabled={isRecording}
+            onchange={() => onSpeechModelChanged?.({ engine: 'builtin' })}
+          />
+          <div class="pack-name">
+            <span class="pack-label">Built-in (Apple)</span>
+            <span class="pack-id">Live interim results; uses the language packs below</span>
+          </div>
+        </label>
+      </li>
+      {#each modelsPayload?.models ?? [] as model (model.path)}
+        <li class="pack-row">
+          <label class="model-choice">
+            <input
+              type="radio"
+              name="speech-model"
+              checked={speechModel.engine === 'whisper' && speechModel.modelPath === model.path}
+              disabled={isRecording || !modelsPayload?.cliAvailable}
+              onchange={() => onSpeechModelChanged?.({ engine: 'whisper', modelPath: model.path })}
+            />
+            <div class="pack-name">
+              <span class="pack-label">Whisper {speechModelLabel(model.fileName)}</span>
+              <span class="pack-id">{formatModelSize(model.sizeBytes)} — {model.path}</span>
+            </div>
+          </label>
+        </li>
+      {/each}
+    </ul>
+    {#if modelsPayload && modelsPayload.models.length === 0}
+      <p class="pack-empty">No whisper models were found in superwhisper's folder.</p>
+    {/if}
+    {#if modelsPayload && !modelsPayload.cliAvailable}
+      <p class="pack-empty">
+        whisper-cli is not installed, so whisper models are disabled. Install it with:
+        <code>brew install whisper-cpp</code>
+      </p>
+    {/if}
+    <p class="model-note">
+      Whisper transcribes one utterance at a time, so text appears a moment after each pause
+      instead of streaming live.
+    </p>
+  </section>
 
   <section class="pack-section" aria-label="Installed language packs">
     <h2>Installed</h2>
@@ -389,6 +476,30 @@
     color: var(--ink-muted);
     font-size: 12px;
     font-weight: 600;
+  }
+
+  .model-choice {
+    display: flex;
+    flex: 1;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+  }
+
+  .model-choice input:disabled {
+    cursor: default;
+  }
+
+  .model-choice input:disabled + .pack-name {
+    opacity: 0.5;
+  }
+
+  .model-note {
+    max-width: 620px;
+    margin: 8px 0 0;
+    color: var(--ink-muted);
+    font-size: 12px;
+    line-height: 1.5;
   }
 
   .pack-system {
