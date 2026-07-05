@@ -15,6 +15,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
 const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 const HELPER_STOP_GRACE: Duration = Duration::from_secs(3);
+const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageInfo {
@@ -33,6 +34,59 @@ pub struct LanguageDetectionPayload {
 pub struct StreamChild {
     pub session_id: String,
     pub child: Child,
+    /// How long to wait for a graceful exit before SIGKILL. Whisper sessions
+    /// still run one final inference on the pending utterance after stdin
+    /// closes, so they get a longer grace than the builtin engine.
+    pub stop_grace: Duration,
+}
+
+pub fn stop_grace_for_engine(engine: Option<&str>) -> Duration {
+    match engine {
+        Some("whisper") => WHISPER_STOP_GRACE,
+        _ => HELPER_STOP_GRACE,
+    }
+}
+
+// MARK: whisper engine resolution
+
+pub fn whisper_cli_candidates() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from("/opt/homebrew/bin/whisper-cli"),
+        PathBuf::from("/usr/local/bin/whisper-cli"),
+    ]
+}
+
+pub fn resolve_whisper_cli() -> Result<PathBuf, String> {
+    whisper_cli_candidates()
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            "whisper-cli was not found. Install whisper.cpp first: brew install whisper-cpp"
+                .to_string()
+        })
+}
+
+/// Validates a whisper session up front so a broken configuration fails the
+/// invoke with a readable message instead of dying at the first utterance.
+pub fn resolve_whisper_config(
+    engine: Option<&str>,
+    whisper_model: Option<&str>,
+) -> Result<Option<(String, String)>, String> {
+    if engine != Some("whisper") {
+        return Ok(None);
+    }
+
+    let model = whisper_model
+        .filter(|model| !model.is_empty())
+        .ok_or_else(|| "whisper engine requires a model path".to_string())?;
+    if !Path::new(model).exists() {
+        return Err(format!(
+            "Whisper model was not found: {model}. It may have been moved or deleted; pick another model in Settings."
+        ));
+    }
+
+    let cli = resolve_whisper_cli()?;
+    Ok(Some((model.to_string(), cli.display().to_string())))
 }
 
 #[derive(Default)]
@@ -260,7 +314,7 @@ pub fn stop_stream_child(
     );
     drop(entry.child.stdin.take());
 
-    let deadline = Instant::now() + HELPER_STOP_GRACE;
+    let deadline = Instant::now() + entry.stop_grace;
     loop {
         match entry.child.try_wait() {
             Ok(Some(_)) => return Ok(()),
@@ -738,10 +792,16 @@ pub mod commands {
         languages: Vec<String>,
         session_id: String,
         recording_dir: Option<String>,
+        engine: Option<String>,
+        whisper_model: Option<String>,
     ) -> Result<(), String> {
         let children = state.children.clone();
 
         tauri::async_runtime::spawn_blocking(move || {
+            let whisper_config =
+                resolve_whisper_config(engine.as_deref(), whisper_model.as_deref())?;
+            let stop_grace = stop_grace_for_engine(engine.as_deref());
+
             stop_stream_child(&children, &stream)?;
 
             let segment_dir = app
@@ -780,7 +840,13 @@ pub mod commands {
                 &segment_dir.to_string_lossy(),
                 record_file.as_deref(),
                 transcript_file.as_deref(),
-                None,
+                whisper_config
+                    .as_ref()
+                    .map(|(model_path, cli_path)| WhisperEngineConfig {
+                        model_path,
+                        cli_path,
+                    })
+                    .as_ref(),
             );
 
             let helper_path = resolve_helper_path()?;
@@ -820,6 +886,7 @@ pub mod commands {
                     StreamChild {
                         session_id: session_id.clone(),
                         child,
+                        stop_grace,
                     },
                 );
 
@@ -1377,6 +1444,27 @@ mod tests {
 
         assert!(!args.contains(&"--record-file".to_string()));
         assert!(!args.contains(&"--transcript-file".to_string()));
+    }
+
+    #[test]
+    fn whisper_cli_candidates_include_homebrew_paths() {
+        let candidates = whisper_cli_candidates();
+
+        assert!(candidates.contains(&PathBuf::from("/opt/homebrew/bin/whisper-cli")));
+        assert!(candidates.contains(&PathBuf::from("/usr/local/bin/whisper-cli")));
+    }
+
+    #[test]
+    fn stop_grace_for_engine_extends_whisper_shutdown() {
+        assert_eq!(
+            stop_grace_for_engine(Some("whisper")),
+            Duration::from_secs(15)
+        );
+        assert_eq!(
+            stop_grace_for_engine(Some("builtin")),
+            Duration::from_secs(3)
+        );
+        assert_eq!(stop_grace_for_engine(None), Duration::from_secs(3));
     }
 
     #[test]
