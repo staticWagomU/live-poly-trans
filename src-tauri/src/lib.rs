@@ -280,6 +280,14 @@ pub fn stop_stream_child(
     Ok(())
 }
 
+/// Whisper engine paths, always resolved by this side so the helper carries
+/// no defaults of its own.
+pub struct WhisperEngineConfig<'a> {
+    pub model_path: &'a str,
+    pub cli_path: &'a str,
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn build_stream_helper_args(
     stream: &str,
     source_language: &str,
@@ -288,6 +296,7 @@ pub fn build_stream_helper_args(
     segment_dir: &str,
     record_file: Option<&str>,
     transcript_file: Option<&str>,
+    whisper: Option<&WhisperEngineConfig>,
 ) -> Vec<String> {
     let mut args = vec![
         "--stream".to_string(),
@@ -313,6 +322,15 @@ pub fn build_stream_helper_args(
     if let Some(transcript_file) = transcript_file {
         args.push("--transcript-file".to_string());
         args.push(transcript_file.to_string());
+    }
+
+    if let Some(whisper) = whisper {
+        args.push("--transcription-engine".to_string());
+        args.push("whisper".to_string());
+        args.push("--whisper-model".to_string());
+        args.push(whisper.model_path.to_string());
+        args.push("--whisper-cli".to_string());
+        args.push(whisper.cli_path.to_string());
     }
 
     args
@@ -762,6 +780,7 @@ pub mod commands {
                 &segment_dir.to_string_lossy(),
                 record_file.as_deref(),
                 transcript_file.as_deref(),
+                None,
             );
 
             let helper_path = resolve_helper_path()?;
@@ -1317,6 +1336,7 @@ mod tests {
             "/tmp/segments/mic",
             Some("/tmp/rec/mic.m4a"),
             Some("/tmp/rec/mic.jsonl"),
+            None,
         );
 
         assert_eq!(
@@ -1352,10 +1372,73 @@ mod tests {
             "/tmp/segments/speaker",
             None,
             None,
+            None,
         );
 
         assert!(!args.contains(&"--record-file".to_string()));
         assert!(!args.contains(&"--transcript-file".to_string()));
+    }
+
+    #[test]
+    fn builds_stream_helper_args_with_whisper_engine() {
+        let args = build_stream_helper_args(
+            "mic",
+            "ja-JP",
+            "en-US",
+            &[],
+            "/tmp/segments/mic",
+            None,
+            None,
+            Some(&WhisperEngineConfig {
+                model_path: "/models/ggml-large-v3-turbo.bin",
+                cli_path: "/opt/homebrew/bin/whisper-cli",
+            }),
+        );
+
+        let tail: Vec<&str> = args.iter().rev().take(6).rev().map(String::as_str).collect();
+        assert_eq!(
+            tail,
+            vec![
+                "--transcription-engine",
+                "whisper",
+                "--whisper-model",
+                "/models/ggml-large-v3-turbo.bin",
+                "--whisper-cli",
+                "/opt/homebrew/bin/whisper-cli",
+            ]
+        );
+    }
+
+    #[test]
+    fn omits_engine_flags_for_builtin_engine() {
+        let args = build_stream_helper_args(
+            "mic",
+            "en-US",
+            "ja-JP",
+            &["en-US".to_string()],
+            "/tmp/segments/mic",
+            None,
+            None,
+            None,
+        );
+
+        // Builtin sessions must produce byte-identical args to the
+        // pre-whisper implementation: zero regression surface.
+        assert_eq!(
+            args,
+            vec![
+                "--stream",
+                "mic",
+                "--source-language",
+                "en-US",
+                "--target-language",
+                "ja-JP",
+                "--segment-directory",
+                "/tmp/segments/mic",
+                "--language",
+                "en-US",
+            ]
+        );
     }
 
     #[test]
