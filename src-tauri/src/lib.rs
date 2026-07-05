@@ -66,6 +66,56 @@ pub fn resolve_whisper_cli() -> Result<PathBuf, String> {
         })
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechModelInfo {
+    pub file_name: String,
+    pub path: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SpeechModelsPayload {
+    pub models: Vec<SpeechModelInfo>,
+    pub cli_available: bool,
+}
+
+pub fn superwhisper_models_dir(home: &Path) -> PathBuf {
+    home.join("Library/Application Support/superwhisper")
+}
+
+/// ggml-*.bin files in a directory; a missing directory (superwhisper not
+/// installed) is just an empty list, not an error.
+pub fn scan_speech_models(dir: &Path) -> Vec<SpeechModelInfo> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut models = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(file_name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if !path.is_file()
+            || !file_name.starts_with("ggml-")
+            || path.extension().and_then(|ext| ext.to_str()) != Some("bin")
+        {
+            continue;
+        }
+
+        models.push(SpeechModelInfo {
+            file_name: file_name.to_string(),
+            path: path.display().to_string(),
+            size_bytes: entry.metadata().map(|meta| meta.len()).unwrap_or(0),
+        });
+    }
+
+    models.sort_by(|left, right| left.file_name.cmp(&right.file_name));
+    models
+}
+
 /// Validates a whisper session up front so a broken configuration fails the
 /// invoke with a readable message instead of dying at the first utterance.
 pub fn resolve_whisper_config(
@@ -898,6 +948,16 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub fn list_speech_models(app: AppHandle) -> Result<SpeechModelsPayload, String> {
+        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+
+        Ok(SpeechModelsPayload {
+            models: scan_speech_models(&superwhisper_models_dir(&home)),
+            cli_available: resolve_whisper_cli().is_ok(),
+        })
+    }
+
+    #[tauri::command]
     pub async fn stop_stream_session(
         state: State<'_, HelperSession>,
         stream: String,
@@ -1264,6 +1324,7 @@ pub fn run() {
             commands::uninstall_language,
             commands::start_stream_session,
             commands::stop_stream_session,
+            commands::list_speech_models,
             commands::stop_all_sessions,
             commands::save_transcript,
             commands::ai_generate_summary,
@@ -1444,6 +1505,31 @@ mod tests {
 
         assert!(!args.contains(&"--record-file".to_string()));
         assert!(!args.contains(&"--transcript-file".to_string()));
+    }
+
+    #[test]
+    fn lists_ggml_models_with_sizes() {
+        let dir = std::env::temp_dir().join(format!("lpt-models-test-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("ggml-large-v3-turbo.bin"), b"12345").unwrap();
+        fs::write(dir.join("ggml-base.en.bin"), b"123").unwrap();
+        fs::write(dir.join("not-a-model.txt"), b"x").unwrap();
+        fs::create_dir_all(dir.join("models")).unwrap();
+
+        let models = scan_speech_models(&dir);
+        fs::remove_dir_all(&dir).unwrap();
+
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].file_name, "ggml-base.en.bin");
+        assert_eq!(models[0].size_bytes, 3);
+        assert_eq!(models[1].file_name, "ggml-large-v3-turbo.bin");
+        assert_eq!(models[1].size_bytes, 5);
+    }
+
+    #[test]
+    fn scans_missing_models_directory_as_empty() {
+        assert!(scan_speech_models(Path::new("/nonexistent/lpt-models")).is_empty());
     }
 
     #[test]
