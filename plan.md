@@ -43,17 +43,17 @@
 - [x] 1-2. 【Rust】`start_recording_session` / `stop_recording_session` コマンド新設:
       create_recording → 稼働中 helper 全プロセスへ制御行送付 → finalize_recording。
       helper が制御未対応(旧バイナリ)の場合はエラーで明示
-- [ ] 1-3. 【Web】文字起こしと録音の状態分離: `isTranscribing`(常時ON基調)と
+- [x] 1-3. 【Web】文字起こしと録音の状態分離: `isTranscribing`(常時ON基調)と
       `recordingSession`(id/開始時刻/経過秒)を別管理。captureState.ts に純関数+テスト
-- [ ] 1-4. 【Web】起動時自動開始: onMount で権限確認 → start。失敗時(マイク/画面収録
+- [x] 1-4. 【Web】起動時自動開始: onMount で権限確認 → start。失敗時(マイク/画面収録
       未許可)は平易な文言で案内(旧計画2-2を吸収)。設定「起動時に自動で開始」
       (localStorage、デフォルトON)がOFFなら一時停止状態で起動
-- [ ] 1-5. 【Web】一時停止/再開: stop_all_sessions を「pause」として再解釈し、
+- [x] 1-5. 【Web】一時停止/再開: stop_all_sessions を「pause」として再解釈し、
       フッターのステータス+ボタンに接続。録音セッション中の一時停止は録音も止まる旨を確認ダイアログ
-- [ ] 1-6. 【Web】録音マーカー: ChatMessage 列に marker アイテム(recording-start/stop、
+- [x] 1-6. 【Web】録音マーカー: ChatMessage 列に marker アイテム(recording-start/stop、
       タイムスタンプ)を挿入。transcripts.ts に型追加+表示テスト。録音中フラグを
       メッセージに付与し赤レール描画
-- [ ] 1-7. 録音停止 → トースト表示+ Recordings リストへ反映(list_recordings 再取得)
+- [x] 1-7. 録音停止 → トースト表示+ Recordings リストへ反映(list_recordings 再取得)
 
 ## Phase 2: Live画面の刷新(モック準拠)
 

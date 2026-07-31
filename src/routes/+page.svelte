@@ -22,9 +22,13 @@
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import {
     applyTranslationEvent,
+    interleaveThreadItems,
+    recordingStartMarker,
+    recordingStopMarker,
     transcriptEventToMessage,
     type ChatMessage,
     type HelperEvent,
+    type RecordingMarker,
     type StatusEvent,
     type TranscriptEvent
   } from '$lib/transcripts';
@@ -47,9 +51,11 @@
   import {
     emptyStreamSessions,
     isCurrentSessionEvent,
+    recordingElapsedSeconds,
     shouldRestartStream,
     withStreamSession,
     withoutStreamSessions,
+    type RecordingSession,
     type StreamSessions
   } from '$lib/captureState';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
@@ -76,7 +82,7 @@
     code: number | null;
   };
 
-  const recordingPreferenceKey = 'lpt-save-audio';
+  const autoStartPreferenceKey = 'lpt-auto-start';
   const fontScalePreferenceKey = 'lpt-transcript-font-scale';
   const speechModelPreferenceKey = 'lpt-speech-model';
   const summaryRefreshDelayMs = 6000;
@@ -98,8 +104,11 @@
   // Bumped on every user-initiated start/stop; a pending auto-restart from
   // before the bump must not resurrect a session the user already stopped.
   let captureGeneration = 0;
-  let recordingEnabled = false;
-  let currentRecording: CreatedRecording | null = null;
+  let recordingSession: RecordingSession | null = null;
+  let recordingElapsed = 0;
+  let recordingTimer: ReturnType<typeof setInterval> | null = null;
+  let isRecordingBusy = false;
+  let markers: RecordingMarker[] = [];
   let captureTransition: 'starting' | 'stopping' | 'switching' | null = null;
   let liveView: LiveView | undefined;
   let statusMessage: string | null = null;
@@ -119,18 +128,18 @@
   let confirmingClear = false;
   let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
 
-  $: isRecording = activeStreams.size > 0;
-  $: isMicRecording = activeStreams.has('mic');
-  $: isSpeakerRecording = activeStreams.has('speaker');
+  $: isTranscribing = activeStreams.size > 0;
+  $: isMicCapturing = activeStreams.has('mic');
+  $: isSpeakerCapturing = activeStreams.has('speaker');
   $: isCaptureBusy = captureTransition !== null;
   $: isStarting = captureTransition === 'starting';
-  $: selectedCaptureMode = isRecording ? captureModeFromStreams(activeStreams) : captureMode;
-  $: visibleMessages = [...messages, ...interimMessages];
+  $: selectedCaptureMode = isTranscribing ? captureModeFromStreams(activeStreams) : captureMode;
+  $: threadItems = [...interleaveThreadItems(messages, markers), ...interimMessages];
 
   onMount(() => {
-    recordingEnabled = localStorage.getItem(recordingPreferenceKey) === '1';
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
     speechModel = parseSpeechModelPreference(localStorage.getItem(speechModelPreferenceKey));
+    const autoStart = localStorage.getItem(autoStartPreferenceKey) !== '0';
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
       console.error('Failed to remove an app event listener', error);
@@ -153,9 +162,17 @@
         })
       )
     ])
-      .then(() => {
-        if (!cleanupRegistry.isDisposed()) {
-          return detectLanguages();
+      .then(async () => {
+        if (cleanupRegistry.isDisposed()) {
+          return;
+        }
+
+        await detectLanguages();
+
+        // The app transcribes from launch (the new base behavior); the
+        // preference only decides whether we start paused instead.
+        if (autoStart && !cleanupRegistry.isDisposed()) {
+          await startTranscription();
         }
       })
       .catch((error) => {
@@ -175,6 +192,9 @@
       }
       if (confirmClearTimer) {
         clearTimeout(confirmClearTimer);
+      }
+      if (recordingTimer) {
+        clearInterval(recordingTimer);
       }
     };
   });
@@ -210,6 +230,33 @@
     );
     mainLanguage = pair.source;
     subLanguage = pair.target;
+    void restartTranscriptionIfRunning();
+  }
+
+  /// Language/engine changes need fresh helper processes. With transcription
+  /// always on, that restart happens in place instead of asking the user to
+  /// stop and start manually. An open recording session survives: restarted
+  /// streams reattach via the recordingDir spawn argument.
+  async function restartTranscriptionIfRunning() {
+    if (!isTranscribing || isCaptureBusy) {
+      return;
+    }
+
+    captureTransition = 'switching';
+    try {
+      captureGeneration += 1;
+      clearStreamSessions([...activeStreams]);
+      activeStreams = new Set();
+      interimMessages = [];
+      await invoke('stop_all_sessions');
+      for (const stream of streamsForCaptureMode(captureMode)) {
+        await startStream(stream);
+      }
+    } catch (error) {
+      appError = String(error);
+    } finally {
+      captureTransition = null;
+    }
   }
 
   async function handleHelperEvent(payload: HelperEvent) {
@@ -237,6 +284,9 @@
   async function applyTranscriptEvent(event: TranscriptEvent) {
     const shouldScrollToLatest = liveView?.shouldStickToLatest() ?? true;
     const message = transcriptEventToMessage(event);
+    if (recordingSession) {
+      message.inRecording = true;
+    }
     const nextState = applyTranscriptMessage({ messages, interimMessages }, message);
     messages = nextState.messages;
     interimMessages = nextState.interimMessages;
@@ -271,55 +321,36 @@
     localStorage.setItem(fontScalePreferenceKey, String(scale));
   }
 
-  function setRecordingEnabled(enabled: boolean) {
-    recordingEnabled = enabled;
-    localStorage.setItem(recordingPreferenceKey, enabled ? '1' : '0');
-  }
-
   function setSpeechModel(selection: SpeechModelSelection) {
     speechModel = selection;
     localStorage.setItem(speechModelPreferenceKey, speechModelPreferenceValue(selection));
+    void restartTranscriptionIfRunning();
   }
 
-  async function toggleRecording() {
-    if (isCaptureBusy) {
+  /// Rewords raw helper errors for the two launch-time failures a person
+  /// can actually fix themselves (privacy permissions).
+  function captureStartGuidance(error: string): string {
+    if (/microphone/i.test(error)) {
+      return `Microphone access is not allowed. Enable LivePolyTrans under System Settings > Privacy & Security > Microphone, then press Resume.\n${error}`;
+    }
+    if (/screen\s*(capture|recording)/i.test(error)) {
+      return `Screen Recording access (needed for system audio) is not allowed. Enable LivePolyTrans under System Settings > Privacy & Security > Screen & System Audio Recording, then press Resume.\n${error}`;
+    }
+    return error;
+  }
+
+  async function startTranscription() {
+    if (isCaptureBusy || isTranscribing) {
       return;
     }
 
     appError = null;
     statusMessage = null;
-
-    if (isRecording) {
-      captureTransition = 'stopping';
-      captureGeneration += 1;
-      clearStreamSessions([...activeStreams]);
-      activeStreams = new Set();
-      interimMessages = [];
-      const stopErrors = await completeCaptureStop(
-        () => invoke('stop_all_sessions'),
-        finishCurrentRecording
-      );
-      if (stopErrors.length > 0) {
-        appError = `Could not fully stop capture:\n${stopErrors.map(String).join('\n')}`;
-      }
-      captureTransition = null;
-      return;
-    }
-
     captureTransition = 'starting';
     try {
       captureGeneration += 1;
       restartAttempts = { mic: 0, speaker: 0 };
       const failures: string[] = [];
-
-      if (recordingEnabled) {
-        try {
-          currentRecording = await invoke<CreatedRecording>('create_recording');
-        } catch (error) {
-          failures.push(`audio recording: ${String(error)}`);
-          currentRecording = null;
-        }
-      }
 
       for (const stream of streamsForCaptureMode(captureMode)) {
         try {
@@ -329,30 +360,115 @@
         }
       }
 
-      if (activeStreams.size === 0) {
-        try {
-          await finishCurrentRecording();
-        } catch (error) {
-          failures.push(`audio recording finalize: ${String(error)}`);
-        }
-        appError = failures.join('\n');
-        return;
+      if (failures.length > 0) {
+        appError = captureStartGuidance(failures.join('\n'));
       }
-
-      appError = failures.length > 0 ? failures.join('\n') : null;
     } finally {
       captureTransition = null;
     }
   }
 
-  async function finishCurrentRecording() {
-    const recording = currentRecording;
-    currentRecording = null;
-    if (!recording) {
+  /// Stop reinterpreted as pause: capture goes quiet but the conversation,
+  /// summary, and (after confirmation) any recording session survive.
+  async function pauseTranscription() {
+    if (isCaptureBusy || !isTranscribing) {
       return;
     }
 
-    await invoke('finalize_recording', { id: recording.id });
+    if (recordingSession) {
+      const alsoStopRecording = window.confirm(
+        'Pausing also stops the current recording. The recording will be saved to Recordings. Continue?'
+      );
+      if (!alsoStopRecording) {
+        return;
+      }
+      await stopRecordingSession();
+    }
+
+    appError = null;
+    statusMessage = null;
+    captureTransition = 'stopping';
+    captureGeneration += 1;
+    clearStreamSessions([...activeStreams]);
+    activeStreams = new Set();
+    interimMessages = [];
+    const stopErrors = await completeCaptureStop(() => invoke('stop_all_sessions'));
+    if (stopErrors.length > 0) {
+      appError = `Could not fully pause capture:\n${stopErrors.map(String).join('\n')}`;
+    }
+    captureTransition = null;
+  }
+
+  async function toggleTranscription() {
+    if (isTranscribing) {
+      await pauseTranscription();
+    } else {
+      await startTranscription();
+    }
+  }
+
+  async function toggleRecordingSession() {
+    if (isRecordingBusy) {
+      return;
+    }
+
+    isRecordingBusy = true;
+    try {
+      if (recordingSession) {
+        await stopRecordingSession();
+      } else {
+        await startRecordingSession();
+      }
+    } finally {
+      isRecordingBusy = false;
+    }
+  }
+
+  async function startRecordingSession() {
+    if (!isTranscribing) {
+      appError = 'Recording needs live transcription. Press Resume first.';
+      return;
+    }
+
+    try {
+      const created = await invoke<CreatedRecording>('start_recording_session');
+      recordingSession = { id: created.id, dir: created.dir, startedAtMs: Date.now() };
+      recordingElapsed = 0;
+      recordingTimer = setInterval(() => {
+        if (recordingSession) {
+          recordingElapsed = recordingElapsedSeconds(recordingSession, Date.now());
+        }
+      }, 1000);
+      markers = [...markers, recordingStartMarker(created.id, new Date().toISOString(), messages.length)];
+      showActionNotice('Recording started — transcription keeps running.');
+    } catch (error) {
+      appError = String(error);
+    }
+  }
+
+  async function stopRecordingSession() {
+    const session = recordingSession;
+    if (!session) {
+      return;
+    }
+
+    recordingSession = null;
+    if (recordingTimer) {
+      clearInterval(recordingTimer);
+      recordingTimer = null;
+    }
+    const durationSeconds = recordingElapsedSeconds(session, Date.now());
+
+    try {
+      await invoke('stop_recording_session', { id: session.id });
+      markers = [
+        ...markers,
+        recordingStopMarker(session.id, new Date().toISOString(), messages.length, durationSeconds)
+      ];
+      showActionNotice('Saved to Recordings.');
+    } catch (error) {
+      appError = String(error);
+    }
   }
 
   async function selectCaptureMode(mode: CaptureMode) {
@@ -363,7 +479,7 @@
     appError = null;
     captureMode = mode;
 
-    if (!isRecording) {
+    if (!isTranscribing) {
       return;
     }
 
@@ -402,7 +518,10 @@
         targetLanguage: subLanguage,
         languages: selectedTranscriptionLanguages(),
         sessionId,
-        recordingDir: currentRecording?.dir ?? null,
+        // A stream (re)started while a recording session is open attaches
+        // its recorder at spawn; mid-stream start/stop rides the control
+        // channel instead.
+        recordingDir: recordingSession?.dir ?? null,
         ...streamEnginePayload(speechModel)
       });
     } catch (error) {
@@ -465,14 +584,14 @@
     }
 
     statusMessage = null;
-    appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up. Press Record to start again.`;
+    appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up. Press Resume to start again.`;
 
-    // The crash path never goes through toggleRecording, so the recording
-    // would otherwise stay unfinalized and be orphaned by the next start.
+    // The crash path never goes through pauseTranscription, so an open
+    // recording session would otherwise stay unfinalized and be orphaned.
     if (activeStreams.size === 0) {
       interimMessages = [];
       try {
-        await finishCurrentRecording();
+        await stopRecordingSession();
       } catch (error) {
         appError = `${appError}\nCould not finalize the recording: ${String(error)}`;
       }
@@ -622,6 +741,7 @@
     confirmingClear = false;
     messages = [];
     interimMessages = [];
+    markers = [];
     aiSummary = '';
     summaryCoveredCount = 0;
     summaryError = null;
@@ -641,18 +761,20 @@
       bind:activeTab
       {selectedCaptureMode}
       {isCaptureBusy}
-      {isRecording}
+      {isTranscribing}
       {captureTransition}
       {mainLanguage}
       {subLanguage}
       {installedLanguages}
-      {recordingEnabled}
       {activeStreams}
+      isRecordingSession={recordingSession !== null}
+      {recordingElapsed}
+      {isRecordingBusy}
       onSelectCaptureMode={selectCaptureMode}
       onLanguageChange={handleLanguageChange}
       onRefreshLanguages={() => detectLanguages(true)}
-      onRecordingEnabledChange={setRecordingEnabled}
-      onToggleRecording={toggleRecording}
+      onToggleTranscription={toggleTranscription}
+      onToggleRecordingSession={toggleRecordingSession}
     />
 
     <div class="content-shell">
@@ -670,17 +792,17 @@
       {#if activeTab === 'live'}
         <LiveView
           bind:this={liveView}
-          {visibleMessages}
+          {threadItems}
           hasFinalMessages={messages.length > 0}
           {mainLanguage}
           {subLanguage}
           {transcriptFontScale}
           {statusMessage}
           {actionNotice}
-          {isRecording}
+          {isTranscribing}
           {isStarting}
-          {isMicRecording}
-          {isSpeakerRecording}
+          {isMicCapturing}
+          {isSpeakerCapturing}
           {speechModel}
           {confirmingClear}
           onFontScaleChange={setTranscriptFontScale}
@@ -700,7 +822,7 @@
         <RecordingsView />
       {:else}
         <SettingsView
-          {isRecording}
+          isRecording={isTranscribing}
           onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
           {speechModel}
           onSpeechModelChanged={setSpeechModel}

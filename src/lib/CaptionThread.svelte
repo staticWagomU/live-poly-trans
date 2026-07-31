@@ -7,20 +7,23 @@
     decreaseTranscriptFontScale,
     increaseTranscriptFontScale
   } from '$lib/transcriptFontSize';
-  import type { ChatMessage } from '$lib/transcripts';
+  import {
+    formatRecordingTimer
+  } from '$lib/captureState';
+  import { isRecordingMarker, type ThreadItem } from '$lib/transcripts';
   import type { SpeechModelSelection } from '$lib/speechModels';
 
-  export let visibleMessages: ChatMessage[];
+  export let threadItems: ThreadItem[];
   export let hasFinalMessages: boolean;
   export let mainLanguage: string;
   export let subLanguage: string;
   export let transcriptFontScale: number;
   export let statusMessage: string | null;
   export let actionNotice: string | null;
-  export let isRecording: boolean;
+  export let isTranscribing: boolean;
   export let isStarting: boolean;
-  export let isMicRecording: boolean;
-  export let isSpeakerRecording: boolean;
+  export let isMicCapturing: boolean;
+  export let isSpeakerCapturing: boolean;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
   export let onFontScaleChange: (scale: number) => void;
@@ -121,7 +124,7 @@
           type="button"
           class="clear-button"
           class:confirming={confirmingClear}
-          disabled={visibleMessages.length === 0}
+          disabled={threadItems.length === 0}
           on:click={onClear}
         >
           {confirmingClear ? 'Really clear?' : 'Clear'}
@@ -130,7 +133,7 @@
     </div>
   </div>
 
-  {#if visibleMessages.length === 0 && isRecording}
+  {#if threadItems.length === 0 && isTranscribing}
     <div class="listening-empty" aria-live="polite">
       <div class="pulse-ring">
         <span></span>
@@ -142,17 +145,17 @@
           : 'Speak normally. The first words can take a few seconds while Apple Speech warms up.'}
       </p>
       <div class="stream-chips" aria-label="Active streams">
-        <span class:active={isSpeakerRecording}>Speaker</span>
-        <span class:active={isMicRecording}>Mic</span>
+        <span class:active={isSpeakerCapturing}>Speaker</span>
+        <span class:active={isMicCapturing}>Mic</span>
       </div>
     </div>
-  {:else if visibleMessages.length === 0}
+  {:else if threadItems.length === 0}
     <div class="starter" aria-live="polite">
       <article class="chat-row speaker-row">
         <div class="chat-bubble incoming">
           <span>Preview · Speaker B</span>
           <p>The other person’s audio will appear here.</p>
-          <small>Press Record to start listening.</small>
+          <small>Transcription is paused. Press Resume to start listening.</small>
         </div>
       </article>
       <article class="chat-row self-row">
@@ -171,22 +174,34 @@
         aria-live="polite"
         on:scroll={handleMessagesScroll}
       >
-        {#each visibleMessages as message (message.id)}
-          {@const transcriptDisplay = displayTranscriptMessage(message, mainLanguage, subLanguage)}
-          <article class="chat-row" class:self-row={message.role === 'self'}>
-            <div
-              class="chat-bubble"
-              class:outgoing={message.role === 'self'}
-              class:incoming={message.role !== 'self'}
-              class:pending={!message.isFinal}
-            >
-              <span>{message.speakerLabel} · {transcriptDisplay.primaryLanguage}</span>
-              <p>{transcriptDisplay.primaryText}</p>
-              {#if transcriptDisplay.secondaryText}
-                <small>{transcriptDisplay.secondaryText}</small>
-              {/if}
+        {#each threadItems as item (item.id)}
+          {#if isRecordingMarker(item)}
+            <div class="rec-marker" class:end={item.phase === 'stop'}>
+              {item.phase === 'start'
+                ? `⏺ Recording started ${new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`
+                : `⏹ Recording saved ${new Date(item.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · ${formatRecordingTimer(item.durationSeconds ?? 0)}`}
             </div>
-          </article>
+          {:else}
+            {@const transcriptDisplay = displayTranscriptMessage(item, mainLanguage, subLanguage)}
+            <article
+              class="chat-row"
+              class:self-row={item.role === 'self'}
+              class:in-rec={item.inRecording}
+            >
+              <div
+                class="chat-bubble"
+                class:outgoing={item.role === 'self'}
+                class:incoming={item.role !== 'self'}
+                class:pending={!item.isFinal}
+              >
+                <span>{item.speakerLabel} · {transcriptDisplay.primaryLanguage}</span>
+                <p>{transcriptDisplay.primaryText}</p>
+                {#if transcriptDisplay.secondaryText}
+                  <small>{transcriptDisplay.secondaryText}</small>
+                {/if}
+              </div>
+            </article>
+          {/if}
         {/each}
         <div class="messages-end-anchor" bind:this={latestMessageAnchor} aria-hidden="true"></div>
       </div>
@@ -469,10 +484,44 @@
     }
   }
 
+  .rec-marker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--apple-red);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  .rec-marker::before,
+  .rec-marker::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 59, 48, 0.3);
+  }
+
+  .rec-marker.end {
+    color: var(--ink-muted);
+  }
+
+  .rec-marker.end::before,
+  .rec-marker.end::after {
+    background: var(--divider-soft);
+  }
+
   .chat-row {
     display: flex;
     align-items: end;
     gap: 10px;
+  }
+
+  /* Red rail: utterances captured while a recording session was open. */
+  .chat-row.in-rec {
+    border-left: 2px solid rgba(255, 59, 48, 0.45);
+    padding-left: 12px;
+    margin-left: -14px;
   }
 
   .self-row {

@@ -3,19 +3,19 @@
   import CaptionThread from '$lib/CaptionThread.svelte';
   import type { ChatTurn } from '$lib/aiContext';
   import type { SpeechModelSelection } from '$lib/speechModels';
-  import type { ChatMessage } from '$lib/transcripts';
+  import type { ThreadItem } from '$lib/transcripts';
 
-  export let visibleMessages: ChatMessage[];
+  export let threadItems: ThreadItem[];
   export let hasFinalMessages: boolean;
   export let mainLanguage: string;
   export let subLanguage: string;
   export let transcriptFontScale: number;
   export let statusMessage: string | null;
   export let actionNotice: string | null;
-  export let isRecording: boolean;
+  export let isTranscribing: boolean;
   export let isStarting: boolean;
-  export let isMicRecording: boolean;
-  export let isSpeakerRecording: boolean;
+  export let isMicCapturing: boolean;
+  export let isSpeakerCapturing: boolean;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
   export let onFontScaleChange: (scale: number) => void;
@@ -50,17 +50,17 @@
 <div class="conversation">
   <CaptionThread
     bind:this={thread}
-    {visibleMessages}
+    {threadItems}
     {hasFinalMessages}
     {mainLanguage}
     {subLanguage}
     {transcriptFontScale}
     {statusMessage}
     {actionNotice}
-    {isRecording}
+    {isTranscribing}
     {isStarting}
-    {isMicRecording}
-    {isSpeakerRecording}
+    {isMicCapturing}
+    {isSpeakerCapturing}
     {speechModel}
     {confirmingClear}
     {onFontScaleChange}

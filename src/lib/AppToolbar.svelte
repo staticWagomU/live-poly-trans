@@ -1,22 +1,25 @@
 <script lang="ts">
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
+  import { formatRecordingTimer } from '$lib/captureState';
   import { languageControlLabel, type LanguageInfo } from '$lib/languages';
 
   export let activeTab: 'live' | 'recordings' | 'settings';
   export let selectedCaptureMode: CaptureMode;
   export let isCaptureBusy: boolean;
-  export let isRecording: boolean;
+  export let isTranscribing: boolean;
   export let captureTransition: 'starting' | 'stopping' | 'switching' | null;
   export let mainLanguage: string;
   export let subLanguage: string;
   export let installedLanguages: LanguageInfo[];
-  export let recordingEnabled: boolean;
   export let activeStreams: Set<AudioStream>;
+  export let isRecordingSession: boolean;
+  export let recordingElapsed: number;
+  export let isRecordingBusy: boolean;
   export let onSelectCaptureMode: (mode: CaptureMode) => void;
   export let onLanguageChange: (which: 'source' | 'target', value: string) => void;
   export let onRefreshLanguages: () => void;
-  export let onRecordingEnabledChange: (enabled: boolean) => void;
-  export let onToggleRecording: () => void;
+  export let onToggleTranscription: () => void;
+  export let onToggleRecordingSession: () => void;
 
   const captureModeOptions: Array<{ mode: CaptureMode; label: string }> = [
     { mode: 'mic', label: 'Mic' },
@@ -79,7 +82,7 @@
         <select
           value={mainLanguage}
           aria-label="Main language"
-          disabled={isRecording || isCaptureBusy}
+          disabled={isCaptureBusy || isRecordingSession}
           on:change={(event) => onLanguageChange('source', event.currentTarget.value)}
         >
           {#each installedLanguages as language}
@@ -93,7 +96,7 @@
         <select
           value={subLanguage}
           aria-label="Sub language"
-          disabled={isRecording || isCaptureBusy}
+          disabled={isCaptureBusy || isRecordingSession}
           on:change={(event) => onLanguageChange('target', event.currentTarget.value)}
         >
           {#each installedLanguages as language}
@@ -106,24 +109,14 @@
         class="refresh-languages"
         title="Refresh installed languages"
         aria-label="Refresh installed languages"
-        disabled={isRecording || isCaptureBusy}
+        disabled={isCaptureBusy || isRecordingSession}
         on:click={onRefreshLanguages}
       >
         ↻
       </button>
     </div>
 
-    <label class="record-toggle" title="Save mic and speaker audio files while transcribing">
-      <input
-        type="checkbox"
-        checked={recordingEnabled}
-        disabled={isRecording}
-        on:change={(event) => onRecordingEnabledChange(event.currentTarget.checked)}
-      />
-      <span>Save audio</span>
-    </label>
-
-    {#if isRecording}
+    {#if isTranscribing}
       <!-- Always-visible per-stream liveness: with capture mode Both, one
            lane can die while the button still reads Stop, silently losing
            half the conversation. -->
@@ -143,18 +136,28 @@
     {/if}
 
     <button
-      class="record"
-      class:recording={isRecording || captureTransition === 'stopping'}
+      class="pause"
       disabled={isCaptureBusy}
-      on:click={onToggleRecording}
+      title={isTranscribing ? 'Pause transcription' : 'Resume transcription'}
+      on:click={onToggleTranscription}
     >
-      <span></span>{captureTransition === 'starting'
+      {captureTransition === 'starting'
         ? 'Starting'
         : captureTransition === 'stopping'
-          ? 'Stopping'
-          : isRecording
-            ? 'Stop'
-            : 'Record'}
+          ? 'Pausing'
+          : isTranscribing
+            ? 'Pause'
+            : 'Resume'}
+    </button>
+
+    <button
+      class="record"
+      class:recording={isRecordingSession}
+      disabled={isRecordingBusy || (!isTranscribing && !isRecordingSession)}
+      title="Save this conversation to Recordings"
+      on:click={onToggleRecordingSession}
+    >
+      <span></span>{isRecordingSession ? formatRecordingTimer(recordingElapsed) : 'Record'}
     </button>
   </div>
 </header>
@@ -204,7 +207,7 @@
   .capture-switch,
   .tab-switch,
   .record,
-  .record-toggle {
+  .pause {
     border: 1px solid var(--legacy-hairline);
     background: var(--legacy-canvas);
   }
@@ -353,25 +356,20 @@
     font-size: 13px;
   }
 
-  .record-toggle {
-    display: flex;
-    align-items: center;
-    gap: 6px;
+  .pause {
     border-radius: 999px;
     color: var(--ink-muted);
-    padding: 7px 12px;
-    font-size: 12px;
+    padding: 8px 12px;
+    font-size: 12.5px;
     font-weight: 600;
-    cursor: pointer;
-    user-select: none;
   }
 
-  .record-toggle input {
-    accent-color: var(--apple-blue);
-    margin: 0;
+  .pause:hover:not(:disabled) {
+    color: var(--legacy-ink);
   }
 
-  .record-toggle input:disabled + span {
+  .pause:disabled {
+    cursor: wait;
     opacity: 0.6;
   }
 
@@ -385,6 +383,7 @@
     padding: 8px 12px;
     font-size: 13px;
     font-weight: 600;
+    font-variant-numeric: tabular-nums;
   }
 
   .record span {
