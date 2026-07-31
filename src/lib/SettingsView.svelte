@@ -360,8 +360,9 @@
                 {:else}
                   相手の声(Zoom などのシステム音声)を取り込むために使います。
                 {/if}
-                {#if state === 'denied'}
-                  <br />システム設定の一覧に LivePolyTrans が並んでいます。チェックを入れてください。
+                {#if state && state !== 'granted'}
+                  <br />一度許可を求めたあとは、システム設定の一覧に LivePolyTrans が
+                  並びます。ダイアログが出ない場合はそちらのチェックを入れてください。
                 {/if}
               </div>
             </div>
@@ -379,18 +380,22 @@
               </span>
               {#if busyPermission === kind}
                 <span class="pack-busy"><span class="spinner"></span>確認中…</span>
-              {:else if state && permissionActionFor(state) === 'request'}
-                <button
-                  type="button"
-                  class="link-btn"
-                  disabled={busyPermission !== null}
-                  onclick={() => askForPermission(kind)}
-                >
-                  許可する
-                </button>
-              {:else if state && permissionActionFor(state) === 'open-settings'}
+              {:else if state && state !== 'granted'}
+                {#if permissionActionFor(state) === 'request'}
+                  <button
+                    type="button"
+                    class="link-btn"
+                    disabled={busyPermission !== null}
+                    onclick={() => askForPermission(kind)}
+                  >
+                    許可する
+                  </button>
+                {/if}
+                <!-- Screen recording cannot report a refusal (the preflight
+                     API only answers yes/no), so the way out of a denial is
+                     offered on every ungranted row rather than on `denied`. -->
                 <button type="button" class="link-btn" onclick={() => openPrivacySettings(kind)}>
-                  システム設定を開く
+                  システム設定
                 </button>
               {/if}
             </div>
