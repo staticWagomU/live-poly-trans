@@ -14,18 +14,20 @@
   export let actionNotice: string | null;
   export let isTranscribing: boolean;
   export let isStarting: boolean;
-  export let isMicCapturing: boolean;
-  export let isSpeakerCapturing: boolean;
+  export let isCaptureBusy: boolean;
+  export let captureModeLabel: string;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
-  export let onFontScaleChange: (scale: number) => void;
+  export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
   export let onClear: () => void;
 
+  export let aiOpen: boolean;
   export let aiSummary: string;
   export let summaryError: string | null;
   export let isSummaryLoading: boolean;
+  export let aiUnavailable: boolean;
   export let chatTurns: ChatTurn[];
   export let aiQuestion: string;
   export let isAnswerLoading: boolean;
@@ -47,7 +49,7 @@
   }
 </script>
 
-<div class="conversation">
+<div class="conversation" class:ai-open={aiOpen}>
   <CaptionThread
     bind:this={thread}
     {threadItems}
@@ -59,47 +61,46 @@
     {actionNotice}
     {isTranscribing}
     {isStarting}
-    {isMicCapturing}
-    {isSpeakerCapturing}
+    {isCaptureBusy}
+    {captureModeLabel}
     {speechModel}
     {confirmingClear}
-    {onFontScaleChange}
+    {onTogglePause}
     {onCopy}
     {onSave}
     {onClear}
   />
 
-  <AiPanel
-    {aiSummary}
-    {summaryError}
-    {isSummaryLoading}
-    {chatTurns}
-    bind:aiQuestion
-    {isAnswerLoading}
-    {onRefreshSummary}
-    {onAsk}
-  />
+  {#if aiOpen}
+    <AiPanel
+      {aiSummary}
+      {summaryError}
+      {isSummaryLoading}
+      {aiUnavailable}
+      {chatTurns}
+      bind:aiQuestion
+      {isAnswerLoading}
+      {onRefreshSummary}
+      {onAsk}
+    />
+  {/if}
 </div>
 
 <style>
   .conversation {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 340px;
-    gap: 0;
+    grid-template-columns: minmax(0, 1fr);
     min-height: 0;
-    padding: 0;
   }
 
-  @media (max-width: 980px) {
-    .conversation {
+  .conversation.ai-open {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+
+  @media (max-width: 900px) {
+    .conversation.ai-open {
       grid-template-columns: minmax(0, 1fr);
-      grid-template-rows: minmax(0, 1fr) minmax(280px, 38vh);
-    }
-  }
-
-  @media (max-width: 640px) {
-    .conversation {
-      grid-template-rows: minmax(0, 1fr) minmax(280px, 34vh);
+      grid-template-rows: minmax(0, 1fr) minmax(240px, 36vh);
     }
   }
 </style>

@@ -16,7 +16,11 @@
     type CaptureMode
   } from '$lib/audioMode';
   import {
+    canDecreaseTranscriptFontScale,
+    canIncreaseTranscriptFontScale,
+    decreaseTranscriptFontScale,
     DEFAULT_TRANSCRIPT_FONT_SCALE,
+    increaseTranscriptFontScale,
     parseTranscriptFontScale
   } from '$lib/transcriptFontSize';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
@@ -127,6 +131,8 @@
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
   let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
+  let aiOpen = false;
+  let aiUnavailable = false;
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');
@@ -135,6 +141,12 @@
   $: isStarting = captureTransition === 'starting';
   $: selectedCaptureMode = isTranscribing ? captureModeFromStreams(activeStreams) : captureMode;
   $: threadItems = [...interleaveThreadItems(messages, markers), ...interimMessages];
+  $: captureModeLabel =
+    selectedCaptureMode === 'both'
+      ? 'Speaker + Mic'
+      : selectedCaptureMode === 'mic'
+        ? 'Mic'
+        : 'Speaker';
 
   onMount(() => {
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
@@ -213,7 +225,12 @@
 
     const stillInstalled = (id: string) =>
       installedLanguages.some((language) => language.id === id);
-    if (preserveSelection && stillInstalled(mainLanguage) && stillInstalled(subLanguage)) {
+    // An empty sub language means "翻訳しない" and is always valid.
+    if (
+      preserveSelection &&
+      stillInstalled(mainLanguage) &&
+      (subLanguage === '' || stillInstalled(subLanguage))
+    ) {
       return;
     }
 
@@ -603,6 +620,12 @@
   }
 
   function scheduleSummaryRefresh() {
+    // A Mac without Apple Intelligence fails every request the same way;
+    // retrying on each utterance would just spam the error.
+    if (aiUnavailable) {
+      return;
+    }
+
     if (summaryRefreshTimer) {
       clearTimeout(summaryRefreshTimer);
     }
@@ -637,6 +660,9 @@
       summaryError = null;
     } catch (error) {
       summaryError = String(error);
+      if (/Apple Intelligence is unavailable/i.test(summaryError)) {
+        aiUnavailable = true;
+      }
     } finally {
       isSummaryLoading = false;
     }
@@ -667,10 +693,53 @@
       );
     } catch (error) {
       appError = String(error);
+      if (/Apple Intelligence is unavailable/i.test(appError)) {
+        aiUnavailable = true;
+      }
       chatTurns = chatTurns.slice(0, -1);
       aiQuestion = question;
     } finally {
       isAnswerLoading = false;
+    }
+  }
+
+  function handleGlobalKeydown(event: KeyboardEvent) {
+    if (!event.metaKey || event.ctrlKey || event.altKey) {
+      return;
+    }
+
+    if (event.shiftKey && event.key.toLowerCase() === 'c') {
+      event.preventDefault();
+      void copyTranscript();
+      return;
+    }
+
+    if (event.shiftKey) {
+      return;
+    }
+
+    switch (event.key) {
+      case 's':
+        event.preventDefault();
+        void saveTranscript();
+        break;
+      case '+':
+      case '=':
+        event.preventDefault();
+        if (canIncreaseTranscriptFontScale(transcriptFontScale)) {
+          setTranscriptFontScale(increaseTranscriptFontScale(transcriptFontScale));
+        }
+        break;
+      case '-':
+        event.preventDefault();
+        if (canDecreaseTranscriptFontScale(transcriptFontScale)) {
+          setTranscriptFontScale(decreaseTranscriptFontScale(transcriptFontScale));
+        }
+        break;
+      case '0':
+        event.preventDefault();
+        setTranscriptFontScale(DEFAULT_TRANSCRIPT_FONT_SCALE);
+        break;
     }
   }
 
@@ -755,6 +824,8 @@
   <title>LivePolyTrans</title>
 </svelte:head>
 
+<svelte:window on:keydown={handleGlobalKeydown} />
+
 <main class="stage">
   <section class="window" aria-label="LivePolyTrans">
     <AppToolbar
@@ -762,7 +833,6 @@
       {selectedCaptureMode}
       {isCaptureBusy}
       {isTranscribing}
-      {captureTransition}
       {mainLanguage}
       {subLanguage}
       {installedLanguages}
@@ -770,11 +840,16 @@
       isRecordingSession={recordingSession !== null}
       {recordingElapsed}
       {isRecordingBusy}
+      {aiOpen}
+      {transcriptFontScale}
       onSelectCaptureMode={selectCaptureMode}
       onLanguageChange={handleLanguageChange}
       onRefreshLanguages={() => detectLanguages(true)}
-      onToggleTranscription={toggleTranscription}
+      onToggleAiPanel={() => (aiOpen = !aiOpen)}
       onToggleRecordingSession={toggleRecordingSession}
+      onCopy={copyTranscript}
+      onSave={saveTranscript}
+      onFontScaleChange={setTranscriptFontScale}
     />
 
     <div class="content-shell">
@@ -801,17 +876,19 @@
           {actionNotice}
           {isTranscribing}
           {isStarting}
-          {isMicCapturing}
-          {isSpeakerCapturing}
+          {isCaptureBusy}
+          {captureModeLabel}
           {speechModel}
           {confirmingClear}
-          onFontScaleChange={setTranscriptFontScale}
+          onTogglePause={toggleTranscription}
           onCopy={copyTranscript}
           onSave={saveTranscript}
           onClear={requestClearConversation}
+          {aiOpen}
           {aiSummary}
           {summaryError}
           {isSummaryLoading}
+          {aiUnavailable}
           {chatTurns}
           bind:aiQuestion
           {isAnswerLoading}

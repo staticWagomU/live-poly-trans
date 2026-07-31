@@ -19,6 +19,7 @@ struct CommandLineOptionsTests {
     try defaultsToBuiltinTranscriptionEngine()
     try rejectsUnknownTranscriptionEngine()
     try rejectsWhisperEngineWithoutModelAndCliPaths()
+    try treatsEmptyLanguageArgumentsAsUnset()
     try parsesStartRecordingControlLine()
     try parsesStopRecordingControlLine()
     try ignoresMalformedControlLines()
@@ -645,6 +646,20 @@ struct CommandLineOptionsTests {
     if actual != expected {
       throw TestFailure(message: "Expected \(expected), got \(actual)")
     }
+  }
+
+  static func treatsEmptyLanguageArgumentsAsUnset() throws {
+    // The app sends --target-language "" for 翻訳しない; an empty identifier
+    // must not reach the translator as a real language.
+    let options = try CommandLineOptions.parse([
+      "helper",
+      "--stream", "mic",
+      "--source-language", "ja-JP",
+      "--target-language", ""
+    ])
+
+    try expectEqual(options.sourceLanguage, "ja-JP")
+    try expectEqual(options.targetLanguage, nil)
   }
 
   static func parsesStartRecordingControlLine() throws {

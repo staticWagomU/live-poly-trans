@@ -5,7 +5,8 @@ import {
   isRecordingMarker,
   recordingStartMarker,
   recordingStopMarker,
-  transcriptEventToMessage
+  transcriptEventToMessage,
+  windowThreadItems
 } from './transcripts';
 import type { ChatMessage } from './transcripts';
 
@@ -268,5 +269,35 @@ describe('recording markers', () => {
       'm1',
       'rec-1-start'
     ]);
+  });
+});
+
+describe('windowThreadItems', () => {
+  const message = (id: string): ChatMessage => ({
+    id,
+    role: 'self',
+    speakerId: 'self',
+    speakerLabel: 'Speaker A',
+    language: 'en-US',
+    text: id,
+    translation: null,
+    isFinal: true,
+    timestamp: '2026-07-31T00:00:00Z',
+    segmentId: id
+  });
+
+  it('returns everything when under the limit', () => {
+    const items = [message('m1'), message('m2')];
+
+    expect(windowThreadItems(items, 5)).toEqual({ items, hiddenCount: 0 });
+  });
+
+  it('keeps only the newest items and reports how many are hidden', () => {
+    const items = [message('m1'), message('m2'), message('m3'), message('m4')];
+
+    const windowed = windowThreadItems(items, 2);
+
+    expect(windowed.items.map((item) => item.id)).toEqual(['m3', 'm4']);
+    expect(windowed.hiddenCount).toBe(2);
   });
 });

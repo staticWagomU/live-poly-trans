@@ -140,6 +140,22 @@ export function interleaveThreadItems(
   return items;
 }
 
+/// Caps how much of the (ever-growing, always-on) caption stream is in the
+/// DOM at once. The hidden count feeds the "show earlier" button.
+export function windowThreadItems(
+  items: ThreadItem[],
+  limit: number
+): { items: ThreadItem[]; hiddenCount: number } {
+  if (items.length <= limit) {
+    return { items, hiddenCount: 0 };
+  }
+
+  return {
+    items: items.slice(items.length - limit),
+    hiddenCount: items.length - limit
+  };
+}
+
 export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
   const segmentId = event.segmentId ?? `${event.timestamp}-${event.text}`;
   const stableSegmentId = segmentId.split('-')[0] || segmentId;

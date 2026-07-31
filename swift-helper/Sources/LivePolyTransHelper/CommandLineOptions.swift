@@ -101,8 +101,8 @@ public struct CommandLineOptions: Equatable, Sendable {
 
     return CommandLineOptions(
       command: .stream(stream),
-      sourceLanguage: value(after: "--source-language", in: arguments),
-      targetLanguage: value(after: "--target-language", in: arguments),
+      sourceLanguage: nonEmptyValue(after: "--source-language", in: arguments),
+      targetLanguage: nonEmptyValue(after: "--target-language", in: arguments),
       languages: values(after: "--language", in: arguments),
       segmentDirectory: value(after: "--segment-directory", in: arguments),
       recordFile: value(after: "--record-file", in: arguments),
@@ -130,6 +130,12 @@ public enum CommandLineOptionsError: Error, Equatable, Sendable {
   case unsupportedArguments([String])
   case unknownTranscriptionEngine(String)
   case missingWhisperConfiguration
+}
+
+/// The app passes "" to mean "no language selected" (e.g. 翻訳しない);
+/// an empty identifier must never masquerade as a real language downstream.
+public func nonEmptyValue(after flag: String, in arguments: [String]) -> String? {
+  value(after: flag, in: arguments).flatMap { $0.isEmpty ? nil : $0 }
 }
 
 public func value(after flag: String, in arguments: [String]) -> String? {

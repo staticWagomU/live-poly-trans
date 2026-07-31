@@ -2,12 +2,18 @@
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
   import { formatRecordingTimer } from '$lib/captureState';
   import { languageControlLabel, type LanguageInfo } from '$lib/languages';
+  import {
+    canDecreaseTranscriptFontScale,
+    canIncreaseTranscriptFontScale,
+    decreaseTranscriptFontScale,
+    DEFAULT_TRANSCRIPT_FONT_SCALE,
+    increaseTranscriptFontScale
+  } from '$lib/transcriptFontSize';
 
   export let activeTab: 'live' | 'recordings' | 'settings';
   export let selectedCaptureMode: CaptureMode;
   export let isCaptureBusy: boolean;
   export let isTranscribing: boolean;
-  export let captureTransition: 'starting' | 'stopping' | 'switching' | null;
   export let mainLanguage: string;
   export let subLanguage: string;
   export let installedLanguages: LanguageInfo[];
@@ -15,429 +21,364 @@
   export let isRecordingSession: boolean;
   export let recordingElapsed: number;
   export let isRecordingBusy: boolean;
+  export let aiOpen: boolean;
+  export let transcriptFontScale: number;
   export let onSelectCaptureMode: (mode: CaptureMode) => void;
   export let onLanguageChange: (which: 'source' | 'target', value: string) => void;
   export let onRefreshLanguages: () => void;
-  export let onToggleTranscription: () => void;
+  export let onToggleAiPanel: () => void;
   export let onToggleRecordingSession: () => void;
+  export let onCopy: () => void;
+  export let onSave: () => void;
+  export let onFontScaleChange: (scale: number) => void;
 
   const captureModeOptions: Array<{ mode: CaptureMode; label: string }> = [
-    { mode: 'mic', label: 'Mic' },
+    { mode: 'speaker', label: 'Speaker' },
     { mode: 'both', label: 'Both' },
-    { mode: 'speaker', label: 'Speaker' }
+    { mode: 'mic', label: 'Mic' }
   ];
+
+  let openMenu: 'lang' | 'more' | null = null;
+
+  function toggleMenu(menu: 'lang' | 'more', event: MouseEvent) {
+    event.stopPropagation();
+    openMenu = openMenu === menu ? null : menu;
+  }
+
+  function closeMenus() {
+    openMenu = null;
+  }
+
+  function languageLabel(id: string): string {
+    const language = installedLanguages.find((candidate) => candidate.id === id);
+    return language ? languageControlLabel(language) : id;
+  }
+
+  $: languagePillLabel =
+    subLanguage === ''
+      ? `${languageLabel(mainLanguage)}(翻訳しない)`
+      : `${languageLabel(mainLanguage)} → ${languageLabel(subLanguage)}`;
+  $: languageControlsLocked = isCaptureBusy || isRecordingSession;
 </script>
 
-<header class="toolbar" data-tauri-drag-region>
-  <div class="toolbar-lead">
-    <div class="tab-switch" role="tablist" aria-label="View">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === 'live'}
-        class:active={activeTab === 'live'}
-        on:click={() => (activeTab = 'live')}
-      >
-        Live
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === 'recordings'}
-        class:active={activeTab === 'recordings'}
-        on:click={() => (activeTab = 'recordings')}
-      >
-        Recordings
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={activeTab === 'settings'}
-        class:active={activeTab === 'settings'}
-        on:click={() => (activeTab = 'settings')}
-      >
-        Settings
-      </button>
-    </div>
+<svelte:window on:click={closeMenus} />
 
-    <div class="capture-switch" data-mode={selectedCaptureMode} aria-label="Audio capture mode">
-      {#each captureModeOptions as option}
-        <button
-          type="button"
-          class:active={selectedCaptureMode === option.mode}
-          aria-pressed={selectedCaptureMode === option.mode}
-          disabled={isCaptureBusy}
-          on:click={() => onSelectCaptureMode(option.mode)}
-        >
-          {option.label}
-        </button>
-      {/each}
-    </div>
+<header class="toolbar" data-tauri-drag-region>
+  <div class="seg" role="tablist" aria-label="View">
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'live'}
+      class:active={activeTab === 'live'}
+      on:click={() => (activeTab = 'live')}
+    >
+      Live
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'recordings'}
+      class:active={activeTab === 'recordings'}
+      on:click={() => (activeTab = 'recordings')}
+    >
+      Recordings
+    </button>
+    <button
+      type="button"
+      role="tab"
+      aria-selected={activeTab === 'settings'}
+      class:active={activeTab === 'settings'}
+      on:click={() => (activeTab = 'settings')}
+    >
+      Settings
+    </button>
   </div>
 
-  <div class="toolbar-actions">
-    <div class="language-strip" aria-label="Main and sub languages">
-      <label>
-        <span>Main</span>
-        <select
-          value={mainLanguage}
-          aria-label="Main language"
-          disabled={isCaptureBusy || isRecordingSession}
-          on:change={(event) => onLanguageChange('source', event.currentTarget.value)}
-        >
-          {#each installedLanguages as language}
-            <option value={language.id}>{languageControlLabel(language)}</option>
-          {/each}
-        </select>
-      </label>
-      <span class="arrow">􀄫</span>
-      <label>
-        <span>Sub</span>
-        <select
-          value={subLanguage}
-          aria-label="Sub language"
-          disabled={isCaptureBusy || isRecordingSession}
-          on:change={(event) => onLanguageChange('target', event.currentTarget.value)}
-        >
-          {#each installedLanguages as language}
-            <option value={language.id}>{languageControlLabel(language)}</option>
-          {/each}
-        </select>
-      </label>
-      <button
-        type="button"
-        class="refresh-languages"
-        title="Refresh installed languages"
-        aria-label="Refresh installed languages"
-        disabled={isCaptureBusy || isRecordingSession}
-        on:click={onRefreshLanguages}
-      >
-        ↻
-      </button>
-    </div>
+  <div class="spacer"></div>
 
-    {#if isTranscribing}
-      <!-- Always-visible per-stream liveness: with capture mode Both, one
-           lane can die while the button still reads Stop, silently losing
-           half the conversation. -->
-      <div class="stream-health" aria-label="Capture status">
-        {#each streamsForCaptureMode(selectedCaptureMode) as stream (stream)}
-          <span
-            class="stream-dot"
-            class:dead={!activeStreams.has(stream)}
-            title={activeStreams.has(stream)
-              ? `${stream} capture is running`
-              : `${stream} capture is down`}
+  {#if activeTab === 'live'}
+    <div class="live-tools">
+      <div class="seg" aria-label="文字起こしする音源" title="文字起こしする音源">
+        {#each captureModeOptions as option}
+          <button
+            type="button"
+            class:active={selectedCaptureMode === option.mode}
+            aria-pressed={selectedCaptureMode === option.mode}
+            disabled={isCaptureBusy}
+            on:click={() => onSelectCaptureMode(option.mode)}
           >
-            {stream === 'mic' ? 'Mic' : 'Speaker'}
-          </span>
+            {option.label}
+          </button>
         {/each}
       </div>
-    {/if}
 
-    <button
-      class="pause"
-      disabled={isCaptureBusy}
-      title={isTranscribing ? 'Pause transcription' : 'Resume transcription'}
-      on:click={onToggleTranscription}
-    >
-      {captureTransition === 'starting'
-        ? 'Starting'
-        : captureTransition === 'stopping'
-          ? 'Pausing'
-          : isTranscribing
-            ? 'Pause'
-            : 'Resume'}
-    </button>
+      {#if isTranscribing && selectedCaptureMode === 'both'}
+        <!-- With Both, one lane can die while the status still says
+             transcribing; these dots keep per-stream liveness visible. -->
+        <div class="stream-health" aria-label="Capture status">
+          {#each streamsForCaptureMode(selectedCaptureMode) as stream (stream)}
+            <span
+              class="stream-dot"
+              class:dead={!activeStreams.has(stream)}
+              title={activeStreams.has(stream)
+                ? `${stream} capture is running`
+                : `${stream} capture is down`}
+            ></span>
+          {/each}
+        </div>
+      {/if}
 
-    <button
-      class="record"
-      class:recording={isRecordingSession}
-      disabled={isRecordingBusy || (!isTranscribing && !isRecordingSession)}
-      title="Save this conversation to Recordings"
-      on:click={onToggleRecordingSession}
+      <div class="menu-anchor">
+        <button
+          type="button"
+          class="pill-btn"
+          aria-haspopup="menu"
+          aria-expanded={openMenu === 'lang'}
+          disabled={languageControlsLocked}
+          on:click={(event) => toggleMenu('lang', event)}
+        >
+          {languagePillLabel} <span class="chev">▾</span>
+        </button>
+        {#if openMenu === 'lang'}
+          <nav class="menu">
+            <div class="mlabel">メイン(認識する言語)</div>
+            {#each installedLanguages as language (language.id)}
+              <button
+                type="button"
+                class="mi"
+                class:checked={language.id === mainLanguage}
+                on:click={() => {
+                  onLanguageChange('source', language.id);
+                  closeMenus();
+                }}
+              >
+                {languageControlLabel(language)}
+              </button>
+            {/each}
+            <div class="sep"></div>
+            <div class="mlabel">サブ(翻訳先)</div>
+            <button
+              type="button"
+              class="mi"
+              class:checked={subLanguage === ''}
+              on:click={() => {
+                onLanguageChange('target', '');
+                closeMenus();
+              }}
+            >
+              翻訳しない
+            </button>
+            {#each installedLanguages as language (language.id)}
+              <button
+                type="button"
+                class="mi"
+                class:checked={language.id === subLanguage}
+                on:click={() => {
+                  onLanguageChange('target', language.id);
+                  closeMenus();
+                }}
+              >
+                {languageControlLabel(language)}
+              </button>
+            {/each}
+            <div class="sep"></div>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onRefreshLanguages();
+                closeMenus();
+              }}
+            >
+              ↻ 言語を再検出
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                activeTab = 'settings';
+                closeMenus();
+              }}
+            >
+              ＋ 言語を追加…
+            </button>
+          </nav>
+        {/if}
+      </div>
+
+      <button
+        type="button"
+        class="pill-btn icon-only"
+        class:on={aiOpen}
+        title="Meeting AI パネル"
+        aria-pressed={aiOpen}
+        on:click={onToggleAiPanel}
+      >
+        ✦
+      </button>
+
+      <div class="menu-anchor">
+        <button
+          type="button"
+          class="pill-btn icon-only"
+          title="その他"
+          aria-haspopup="menu"
+          aria-expanded={openMenu === 'more'}
+          on:click={(event) => toggleMenu('more', event)}
+        >
+          …
+        </button>
+        {#if openMenu === 'more'}
+          <nav class="menu more-menu">
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onCopy();
+                closeMenus();
+              }}
+            >
+              文字起こしをコピー <span class="kbd">⇧⌘C</span>
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onSave();
+                closeMenus();
+              }}
+            >
+              ファイルへ保存… <span class="kbd">⌘S</span>
+            </button>
+            <div class="sep"></div>
+            <div class="mlabel">文字サイズ: {Math.round(transcriptFontScale * 100)}%</div>
+            <!-- stopPropagation keeps the menu open for repeated size taps;
+                 the window click handler would close it otherwise. -->
+            <button
+              type="button"
+              class="mi no-check"
+              disabled={!canIncreaseTranscriptFontScale(transcriptFontScale)}
+              on:click|stopPropagation={() =>
+                onFontScaleChange(increaseTranscriptFontScale(transcriptFontScale))}
+            >
+              大きく <span class="kbd">⌘+</span>
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              disabled={!canDecreaseTranscriptFontScale(transcriptFontScale)}
+              on:click|stopPropagation={() =>
+                onFontScaleChange(decreaseTranscriptFontScale(transcriptFontScale))}
+            >
+              小さく <span class="kbd">⌘−</span>
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click|stopPropagation={() => onFontScaleChange(DEFAULT_TRANSCRIPT_FONT_SCALE)}
+            >
+              標準サイズ <span class="kbd">⌘0</span>
+            </button>
+          </nav>
+        {/if}
+      </div>
+    </div>
+  {/if}
+
+  <button
+    type="button"
+    class="record-btn"
+    class:rec={isRecordingSession}
+    disabled={isRecordingBusy || (!isTranscribing && !isRecordingSession)}
+    title="この会話を録音として Recordings に保存"
+    on:click={onToggleRecordingSession}
+  >
+    <span class="dot"></span><span class="rec-label"
+      >{isRecordingSession ? formatRecordingTimer(recordingElapsed) : '録音'}</span
     >
-      <span></span>{isRecordingSession ? formatRecordingTimer(recordingElapsed) : 'Record'}
-    </button>
-  </div>
+  </button>
 </header>
 
 <style>
-  button,
-  select {
-    font: inherit;
-  }
-
   button {
+    font: inherit;
     cursor: pointer;
+    color: inherit;
+    background: none;
+    border: 0;
   }
 
-  button:focus-visible,
-  select:focus-visible {
-    outline: 3px solid rgba(0, 102, 204, 0.24);
+  button:focus-visible {
+    outline: 2px solid var(--blue-focus);
     outline-offset: 2px;
+    border-radius: 8px;
   }
 
   .toolbar {
-    display: grid;
-    align-items: center;
-    grid-template-columns: auto 1fr;
-    gap: 12px;
-    min-height: 54px;
-    padding: 8px 16px;
-    border-bottom: 1px solid var(--legacy-hairline);
-    background: rgba(245, 245, 247, 0.92);
-    backdrop-filter: blur(18px);
-  }
-
-  .toolbar-lead {
     display: flex;
     align-items: center;
     gap: 10px;
-  }
-
-  .toolbar-actions {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    justify-self: end;
-  }
-
-  .language-strip,
-  .capture-switch,
-  .tab-switch,
-  .record,
-  .pause {
-    border: 1px solid var(--legacy-hairline);
-    background: var(--legacy-canvas);
-  }
-
-  .capture-switch,
-  .tab-switch {
+    min-height: 52px;
+    padding: 8px 14px;
+    background: var(--pearl);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--divider);
     position: relative;
-    display: grid;
-    isolation: isolate;
-    overflow: hidden;
-    border-radius: 11px;
-    padding: 3px;
-    background: #e9e9ed;
+    z-index: 20;
   }
 
-  .capture-switch {
-    width: 238px;
-    grid-template-columns: repeat(3, 1fr);
+  .spacer {
+    flex: 1;
   }
 
-  .tab-switch {
-    width: 276px;
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .capture-switch::before {
-    position: absolute;
-    z-index: 0;
-    top: 3px;
-    bottom: 3px;
-    left: 3px;
-    width: calc((100% - 6px) / 3);
-    border: 1px solid rgba(0, 0, 0, 0.05);
-    border-radius: 8px;
-    background: var(--legacy-canvas);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-    content: '';
-    transform: translateX(var(--capture-pill-x, 0%));
-    transition:
-      transform 260ms cubic-bezier(0.22, 1, 0.36, 1),
-      background 260ms ease;
-  }
-
-  .capture-switch[data-mode='both'] {
-    --capture-pill-x: 100%;
-  }
-
-  .capture-switch[data-mode='speaker'] {
-    --capture-pill-x: 200%;
-  }
-
-  .capture-switch button,
-  .tab-switch button {
-    position: relative;
-    z-index: 1;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--ink-muted);
-    padding: 6px 10px;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0;
-    transition:
-      color 180ms ease,
-      opacity 180ms ease;
-  }
-
-  .capture-switch button:hover:not(:disabled),
-  .tab-switch button:hover {
-    color: var(--legacy-ink);
-  }
-
-  .capture-switch button.active,
-  .tab-switch button.active {
-    color: var(--legacy-ink);
-  }
-
-  .tab-switch button.active {
-    background: var(--legacy-canvas);
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
-  }
-
-  .capture-switch button:disabled {
-    cursor: wait;
-    opacity: 0.58;
-  }
-
-  .language-strip {
+  .live-tools {
     display: flex;
-    align-items: center;
     gap: 8px;
-    border-radius: 11px;
-    padding: 5px 9px;
+    align-items: center;
   }
 
-  .language-strip label {
-    display: grid;
-    gap: 1px;
+  .seg {
+    display: flex;
+    background: var(--seg-track);
+    border-radius: 9px;
+    padding: 2px;
   }
 
-  .language-strip label span {
-    padding-left: 1px;
-    color: var(--ink-muted);
-    font-size: 9px;
-    font-weight: 600;
-    letter-spacing: 0;
-    text-transform: uppercase;
-  }
-
-  .language-strip select {
-    width: 112px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--legacy-ink);
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .language-strip select:disabled {
-    cursor: default;
-    opacity: 0.56;
-  }
-
-  .refresh-languages {
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--ink-muted);
-    padding: 4px 6px;
-    font-size: 14px;
-  }
-
-  .refresh-languages:hover:not(:disabled) {
-    color: var(--apple-blue);
-  }
-
-  .refresh-languages:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-
-  .arrow {
-    color: var(--ink-muted);
+  .seg button {
+    padding: 5px 14px;
+    border-radius: 7px;
     font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    transition: all 0.18s ease;
   }
 
-  .pause {
-    border-radius: 999px;
-    color: var(--ink-muted);
-    padding: 8px 12px;
-    font-size: 12.5px;
+  .seg button.active {
+    background: var(--canvas);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
     font-weight: 600;
   }
 
-  .pause:hover:not(:disabled) {
-    color: var(--legacy-ink);
-  }
-
-  .pause:disabled {
+  .seg button:disabled {
     cursor: wait;
     opacity: 0.6;
   }
 
-  .record {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    border-radius: 999px;
-    border-color: rgba(255, 59, 48, 0.35);
-    color: var(--apple-red);
-    padding: 8px 12px;
-    font-size: 13px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-  }
-
-  .record span {
-    width: 10px;
-    height: 10px;
-    border: 2px solid var(--apple-red);
-    border-radius: 999px;
-  }
-
-  .record.recording {
-    border-color: var(--apple-red);
-    background: var(--apple-red);
-    color: white;
-  }
-
-  .record.recording span {
-    border-color: white;
-    border-radius: 3px;
-    background: white;
-  }
-
-  .record:disabled {
-    cursor: wait;
-    opacity: 0.74;
-  }
-
   .stream-health {
     display: flex;
-    gap: 8px;
+    gap: 5px;
   }
 
   .stream-dot {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    color: var(--ink-muted);
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .stream-dot::before {
-    content: '';
     width: 7px;
     height: 7px;
     border-radius: 50%;
-    background: #34c759;
+    background: var(--green);
   }
 
   .stream-dot.dead {
-    color: #b3261e;
-  }
-
-  .stream-dot.dead::before {
-    background: #b3261e;
+    background: var(--red);
     animation: stream-dead-pulse 1s ease-in-out infinite;
   }
 
@@ -447,66 +388,188 @@
     }
   }
 
-  @media (max-width: 1140px) {
-    .toolbar {
-      grid-template-columns: 1fr;
-      align-items: stretch;
+  .menu-anchor {
+    position: relative;
+  }
+
+  .pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    transition: all 0.18s ease;
+    white-space: nowrap;
+  }
+
+  .pill-btn:hover:not(:disabled) {
+    border-color: rgba(0, 102, 204, 0.35);
+  }
+
+  .pill-btn:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  .pill-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .pill-btn .chev {
+    font-size: 9px;
+    color: var(--muted);
+  }
+
+  .pill-btn.icon-only {
+    padding: 6px 10px;
+  }
+
+  .pill-btn.on {
+    background: var(--blue-soft);
+    border-color: transparent;
+    color: var(--blue);
+  }
+
+  .record-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 15px;
+    border-radius: 999px;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    transition: all 0.2s ease;
+  }
+
+  .record-btn .dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 3px solid var(--red);
+    transition: all 0.2s ease;
+  }
+
+  .record-btn:active:not(:disabled) {
+    transform: scale(0.96);
+  }
+
+  .record-btn:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+
+  .record-btn.rec {
+    background: var(--red);
+    border-color: var(--red);
+    color: #fff;
+  }
+
+  .record-btn.rec .dot {
+    border-color: #fff;
+    background: #fff;
+    border-radius: 2px;
+    width: 9px;
+    height: 9px;
+  }
+
+  .record-btn .rec-label {
+    font-variant-numeric: tabular-nums;
+  }
+
+  .menu {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    border-radius: 12px;
+    background: var(--menu-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-menu);
+    padding: 5px;
+    min-width: 210px;
+    z-index: 50;
+    animation: menuIn 0.16s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  @keyframes menuIn {
+    from {
+      opacity: 0;
+      transform: scale(0.97) translateY(-4px);
     }
 
-    .toolbar-actions {
-      justify-self: stretch;
-      justify-content: end;
-      flex-wrap: wrap;
+    to {
+      opacity: 1;
+      transform: none;
     }
   }
 
-  @media (max-width: 900px) {
-    .toolbar-lead {
-      flex-wrap: wrap;
-    }
-
-    .toolbar-actions {
-      display: grid;
-      grid-template-columns: 1fr auto auto;
-      justify-self: stretch;
-    }
-
-    .language-strip,
-    .capture-switch,
-    .record {
-      justify-self: stretch;
-    }
-
-    .capture-switch {
-      width: auto;
-      flex: 1 1 auto;
+  @media (prefers-reduced-motion: reduce) {
+    .menu {
+      animation: none;
     }
   }
 
-  @media (max-width: 640px) {
-    .toolbar-actions {
-      grid-template-columns: minmax(0, 1fr) auto;
-    }
+  .menu .mi {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 18px;
+    width: 100%;
+    padding: 7px 11px;
+    border-radius: 8px;
+    font-size: 13px;
+    text-align: left;
+    color: var(--ink);
+  }
 
-    .language-strip {
-      min-width: 0;
-      overflow: hidden;
-    }
+  .menu .mi:hover:not(:disabled) {
+    background: var(--blue);
+    color: #fff;
+  }
 
-    .language-strip label {
-      min-width: 0;
-      flex: 1 1 0;
-    }
+  .menu .mi:hover:not(:disabled) .kbd {
+    color: rgba(255, 255, 255, 0.75);
+  }
 
-    .language-strip select {
-      width: 100%;
-      min-width: 0;
-    }
+  .menu .mi:disabled {
+    opacity: 0.45;
+    cursor: default;
+  }
 
-    .record {
-      width: auto;
-      justify-self: end;
-      white-space: nowrap;
-    }
+  .menu .mi .kbd {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .menu .sep {
+    height: 1px;
+    background: var(--divider);
+    margin: 5px 8px;
+  }
+
+  .menu .mlabel {
+    padding: 6px 11px 2px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .menu .mi.checked::before {
+    content: '✓  ';
+  }
+
+  .menu .mi:not(.checked):not(.no-check) {
+    padding-left: 28px;
+  }
+
+  .menu .mi.no-check {
+    padding-left: 11px;
   }
 </style>
