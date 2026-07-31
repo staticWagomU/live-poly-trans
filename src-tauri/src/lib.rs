@@ -7,6 +7,7 @@ use std::{
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
     process::{Child, ChildStdin, Command, Stdio},
+    sync::atomic::{AtomicBool, Ordering},
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
@@ -18,6 +19,10 @@ const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 // finalize the m4a (moov atom) before we SIGKILL it.
 const HELPER_STOP_GRACE: Duration = Duration::from_secs(7);
 const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
+// How long start_recording_session waits for helpers to announce the stdin
+// control channel. Helpers announce right after capture setup, so in practice
+// this only delays a Record press that races the very first stream start.
+const CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageInfo {
@@ -40,6 +45,9 @@ pub struct StreamChild {
     /// still run one final inference on the pending utterance after stdin
     /// closes, so they get a longer grace than the builtin engine.
     pub stop_grace: Duration,
+    /// Set once the helper announces its stdin control channel; a helper
+    /// binary from before the channel never sets it.
+    pub control_ready: Arc<AtomicBool>,
 }
 
 pub fn stop_grace_for_engine(engine: Option<&str>) -> Duration {
@@ -241,12 +249,16 @@ pub fn read_json_lines(
     app: AppHandle,
     stdout: impl std::io::Read + Send + 'static,
     session_id: String,
+    control_ready: Arc<AtomicBool>,
 ) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
         for line in reader.lines().map_while(Result::ok) {
             match serde_json::from_str::<Value>(&line) {
                 Ok(mut value) => {
+                    if is_control_ready_event(&value) {
+                        control_ready.store(true, Ordering::Relaxed);
+                    }
                     attach_session_id(&mut value, &session_id);
                     if should_log_transcript_event(&value) {
                         eprintln!(
@@ -266,6 +278,11 @@ pub fn read_json_lines(
             }
         }
     });
+}
+
+pub fn is_control_ready_event(value: &Value) -> bool {
+    value.get("type").and_then(Value::as_str) == Some("status")
+        && value.get("state").and_then(Value::as_str) == Some("control-ready")
 }
 
 pub fn should_log_transcript_event(value: &Value) -> bool {
@@ -783,6 +800,85 @@ fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> 
     fs::write(dir.join("meta.json"), json).map_err(|error| error.to_string())
 }
 
+// MARK: recording session control
+
+pub fn start_recording_control_line(dir: &str) -> String {
+    serde_json::json!({ "cmd": "start-recording", "dir": dir }).to_string()
+}
+
+pub fn stop_recording_control_line() -> String {
+    serde_json::json!({ "cmd": "stop-recording" }).to_string()
+}
+
+/// Writes one control line to every running helper's stdin. Ok carries how
+/// many helpers got the line; Err lists the streams whose write failed.
+pub fn send_control_line_to_children(
+    children: &Mutex<HashMap<String, StreamChild>>,
+    line: &str,
+) -> Result<usize, String> {
+    let mut guard = children.lock().map_err(|error| error.to_string())?;
+    let mut written = 0;
+    let mut failures = Vec::new();
+
+    for (stream, entry) in guard.iter_mut() {
+        let Some(stdin) = entry.child.stdin.as_mut() else {
+            failures.push(format!("{stream}: stdin unavailable"));
+            continue;
+        };
+
+        match writeln!(stdin, "{line}").and_then(|_| stdin.flush()) {
+            Ok(()) => written += 1,
+            Err(error) => failures.push(format!("{stream}: {error}")),
+        }
+    }
+
+    if failures.is_empty() {
+        Ok(written)
+    } else {
+        Err(failures.join("\n"))
+    }
+}
+
+/// Blocks until every running helper has announced its stdin control
+/// channel. Distinguishes "helper still starting up" (wait) from "helper
+/// binary predates the control channel" (times out with a clear message).
+fn wait_for_control_ready(
+    children: &Mutex<HashMap<String, StreamChild>>,
+    timeout: Duration,
+) -> Result<(), String> {
+    let deadline = Instant::now() + timeout;
+
+    loop {
+        let pending: Vec<String> = {
+            let guard = children.lock().map_err(|error| error.to_string())?;
+            if guard.is_empty() {
+                return Err(
+                    "no capture is running; recording needs live transcription".to_string()
+                );
+            }
+
+            guard
+                .iter()
+                .filter(|(_, entry)| !entry.control_ready.load(Ordering::Relaxed))
+                .map(|(stream, _)| stream.clone())
+                .collect()
+        };
+
+        if pending.is_empty() {
+            return Ok(());
+        }
+
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "the running helper does not accept recording control ({}); the helper binary is outdated — rebuild it with `bun run build:helper`",
+                pending.join(", ")
+            ));
+        }
+
+        std::thread::sleep(Duration::from_millis(100));
+    }
+}
+
 /// Deletes one recording directory (audio, transcript, meta). The id is
 /// re-validated here because this is the only command that removes files.
 pub fn delete_recording_dir(root: &Path, id: &str) -> Result<(), String> {
@@ -982,8 +1078,9 @@ pub mod commands {
                 child.id()
             );
 
+            let control_ready = Arc::new(AtomicBool::new(false));
             if let Some(stdout) = child.stdout.take() {
-                read_json_lines(app.clone(), stdout, session_id.clone());
+                read_json_lines(app.clone(), stdout, session_id.clone(), control_ready.clone());
             }
 
             if let Some(stderr) = child.stderr.take() {
@@ -999,6 +1096,7 @@ pub mod commands {
                         session_id: session_id.clone(),
                         child,
                         stop_grace,
+                        control_ready,
                     },
                 );
 
@@ -1170,41 +1268,104 @@ pub mod commands {
             .map_err(|error| error.to_string())?
     }
 
+    fn create_recording_blocking(app: &AppHandle) -> Result<CreatedRecording, String> {
+        let id = format!("rec-{}", readable_timestamp());
+        let dir = recording_dir_for(app, &id)?;
+        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+
+        write_recording_meta(
+            &dir,
+            &RecordingMeta {
+                id: id.clone(),
+                started_at: chrono::Local::now().to_rfc3339(),
+                ended_at: None,
+            },
+        )?;
+
+        Ok(CreatedRecording {
+            id,
+            dir: dir.display().to_string(),
+        })
+    }
+
+    fn finalize_recording_blocking(app: &AppHandle, id: &str) -> Result<(), String> {
+        let dir = recording_dir_for(app, id)?;
+        let Some(mut meta) = read_recording_meta(&dir) else {
+            return Ok(());
+        };
+
+        meta.ended_at = Some(chrono::Local::now().to_rfc3339());
+        write_recording_meta(&dir, &meta)
+    }
+
     #[tauri::command]
     pub async fn create_recording(app: AppHandle) -> Result<CreatedRecording, String> {
+        tauri::async_runtime::spawn_blocking(move || create_recording_blocking(&app))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn finalize_recording(app: AppHandle, id: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || finalize_recording_blocking(&app, &id))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    /// Opens a recording session against the already-running capture: creates
+    /// the recording directory, then tells every live helper to start writing
+    /// audio + transcript into it. Capture is never restarted.
+    #[tauri::command]
+    pub async fn start_recording_session(
+        app: AppHandle,
+        state: State<'_, HelperSession>,
+    ) -> Result<CreatedRecording, String> {
+        let children = state.children.clone();
+
         tauri::async_runtime::spawn_blocking(move || {
-            let id = format!("rec-{}", readable_timestamp());
-            let dir = recording_dir_for(&app, &id)?;
-            fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            wait_for_control_ready(&children, CONTROL_READY_TIMEOUT)?;
+            let created = create_recording_blocking(&app)?;
 
-            write_recording_meta(
-                &dir,
-                &RecordingMeta {
-                    id: id.clone(),
-                    started_at: chrono::Local::now().to_rfc3339(),
-                    ended_at: None,
-                },
-            )?;
+            let line = start_recording_control_line(&created.dir);
+            if let Err(error) = send_control_line_to_children(&children, &line) {
+                // The dir stays on disk (it may already hold partial data from
+                // helpers that did get the line); mark it closed so it is not
+                // treated as in-progress forever.
+                let _ = finalize_recording_blocking(&app, &created.id);
+                return Err(format!("could not start recording: {error}"));
+            }
 
-            Ok(CreatedRecording {
-                id,
-                dir: dir.display().to_string(),
-            })
+            eprintln!(
+                "live-poly-trans tauri: recording-session-start id={} dir={}",
+                created.id, created.dir
+            );
+            Ok(created)
         })
         .await
         .map_err(|error| error.to_string())?
     }
 
+    /// Closes a recording session: helpers detach their recorders (keeping
+    /// capture running) and the meta gets its end timestamp. Helper write
+    /// failures are logged but do not fail the stop — a crashed helper's
+    /// audio is already on disk and the meta must still be closed.
     #[tauri::command]
-    pub async fn finalize_recording(app: AppHandle, id: String) -> Result<(), String> {
-        tauri::async_runtime::spawn_blocking(move || {
-            let dir = recording_dir_for(&app, &id)?;
-            let Some(mut meta) = read_recording_meta(&dir) else {
-                return Ok(());
-            };
+    pub async fn stop_recording_session(
+        app: AppHandle,
+        state: State<'_, HelperSession>,
+        id: String,
+    ) -> Result<(), String> {
+        let children = state.children.clone();
 
-            meta.ended_at = Some(chrono::Local::now().to_rfc3339());
-            write_recording_meta(&dir, &meta)
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Err(error) =
+                send_control_line_to_children(&children, &stop_recording_control_line())
+            {
+                eprintln!("live-poly-trans tauri: recording-session-stop-warning {error}");
+            }
+
+            eprintln!("live-poly-trans tauri: recording-session-stop id={id}");
+            finalize_recording_blocking(&app, &id)
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1437,6 +1598,8 @@ pub fn run() {
             commands::ai_ask,
             commands::create_recording,
             commands::finalize_recording,
+            commands::start_recording_session,
+            commands::stop_recording_session,
             commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
@@ -1523,6 +1686,35 @@ mod tests {
         assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/helper"
         )));
+    }
+
+    #[test]
+    fn recording_control_lines_match_the_helper_protocol() {
+        assert_eq!(
+            start_recording_control_line("/tmp/rec-1"),
+            r#"{"cmd":"start-recording","dir":"/tmp/rec-1"}"#
+        );
+        assert_eq!(stop_recording_control_line(), r#"{"cmd":"stop-recording"}"#);
+    }
+
+    #[test]
+    fn start_recording_control_line_escapes_special_characters() {
+        let line = start_recording_control_line(r#"/tmp/we"ird dir"#);
+        let value: Value = serde_json::from_str(&line).expect("control line is valid JSON");
+        assert_eq!(value["dir"], r#"/tmp/we"ird dir"#);
+    }
+
+    #[test]
+    fn control_ready_is_detected_only_for_its_status_event() {
+        assert!(is_control_ready_event(&serde_json::json!({
+            "type": "status", "stream": "mic", "state": "control-ready"
+        })));
+        assert!(!is_control_ready_event(&serde_json::json!({
+            "type": "status", "stream": "mic", "state": "language-ready"
+        })));
+        assert!(!is_control_ready_event(&serde_json::json!({
+            "type": "transcript", "state": "control-ready"
+        })));
     }
 
     #[test]

@@ -40,7 +40,7 @@
       `{"cmd":"stop-recording"}` の JSON 行を受けて AudioRecorder を動的に開始/停止。
       ストリーム再起動なしで録音を出し入れする(現状は起動引数 recordingDir 固定)。
       TDD: CommandLineOptionsTests に倣い制御行パーサを TestSupport でテスト
-- [ ] 1-2. 【Rust】`start_recording_session` / `stop_recording_session` コマンド新設:
+- [x] 1-2. 【Rust】`start_recording_session` / `stop_recording_session` コマンド新設:
       create_recording → 稼働中 helper 全プロセスへ制御行送付 → finalize_recording。
       helper が制御未対応(旧バイナリ)の場合はエラーで明示
 - [ ] 1-3. 【Web】文字起こしと録音の状態分離: `isTranscribing`(常時ON基調)と
