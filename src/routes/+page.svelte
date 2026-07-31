@@ -44,6 +44,7 @@
   } from '$lib/aiContext';
   import AppToolbar from '$lib/AppToolbar.svelte';
   import LiveView from '$lib/LiveView.svelte';
+  import MimiView from '$lib/MimiView.svelte';
   import RecordingsView from '$lib/RecordingsView.svelte';
   import SettingsView from '$lib/SettingsView.svelte';
   import {
@@ -133,6 +134,12 @@
   let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
   let aiOpen = false;
   let aiUnavailable = false;
+  let mimiActive = false;
+  let mimiPreviousMode: CaptureMode = 'both';
+  let mimiPreviousRunning = false;
+  let mimiStartCount = 0;
+  let pttHeld = false;
+  let pttReconciling = false;
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');
@@ -147,6 +154,13 @@
       : selectedCaptureMode === 'mic'
         ? 'Mic'
         : 'Speaker';
+  // Only utterances spoken after entering the mode; translations and
+  // speaker labels are intentionally not shown there.
+  $: mimiLines = mimiActive
+    ? [...messages.slice(mimiStartCount), ...interimMessages]
+        .filter((message) => message.role === 'self')
+        .map((message) => message.text)
+    : [];
 
   onMount(() => {
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
@@ -385,21 +399,12 @@
     }
   }
 
-  /// Stop reinterpreted as pause: capture goes quiet but the conversation,
-  /// summary, and (after confirmation) any recording session survive.
-  async function pauseTranscription() {
+  /// Stops capture without any user interaction. Interim (unconfirmed)
+  /// captions are discarded on purpose — in push-to-talk this prevents a
+  /// half-heard phrase from lingering as if it were said.
+  async function pauseCapture() {
     if (isCaptureBusy || !isTranscribing) {
       return;
-    }
-
-    if (recordingSession) {
-      const alsoStopRecording = window.confirm(
-        'Pausing also stops the current recording. The recording will be saved to Recordings. Continue?'
-      );
-      if (!alsoStopRecording) {
-        return;
-      }
-      await stopRecordingSession();
     }
 
     appError = null;
@@ -416,11 +421,104 @@
     captureTransition = null;
   }
 
+  /// Stop reinterpreted as pause: capture goes quiet but the conversation,
+  /// summary, and (after confirmation) any recording session survive.
+  async function pauseTranscription() {
+    if (isCaptureBusy || !isTranscribing) {
+      return;
+    }
+
+    if (recordingSession) {
+      const alsoStopRecording = window.confirm(
+        '一時停止すると録音も終了します。録音は Recordings に保存されます。続けますか?'
+      );
+      if (!alsoStopRecording) {
+        return;
+      }
+      await stopRecordingSession();
+    }
+
+    await pauseCapture();
+  }
+
   async function toggleTranscription() {
     if (isTranscribing) {
       await pauseTranscription();
     } else {
       await startTranscription();
+    }
+  }
+
+  /// Face-to-face (mimi) mode: mic only, push-to-talk. Speaker capture is
+  /// stopped on entry so the other person reading captions aloud cannot be
+  /// re-transcribed into an endless loop; the previous source configuration
+  /// comes back on exit.
+  async function enterMimi() {
+    if (mimiActive) {
+      return;
+    }
+
+    mimiPreviousMode = captureMode;
+    mimiPreviousRunning = isTranscribing;
+    mimiStartCount = messages.length;
+    pttHeld = false;
+    mimiActive = true;
+    activeTab = 'live';
+    captureMode = 'mic';
+
+    if (recordingSession) {
+      await stopRecordingSession();
+    }
+    await pauseCapture();
+  }
+
+  async function exitMimi() {
+    if (!mimiActive) {
+      return;
+    }
+
+    mimiActive = false;
+    pttHeld = false;
+    captureMode = mimiPreviousMode;
+    await pauseCapture();
+    if (mimiPreviousRunning) {
+      await startTranscription();
+    }
+  }
+
+  function setPtt(held: boolean) {
+    if (!mimiActive) {
+      return;
+    }
+
+    pttHeld = held;
+    void reconcilePtt();
+  }
+
+  /// Press/release races capture start/stop (helper spawn takes a moment).
+  /// Instead of acting on each event, converge capture state onto the
+  /// current held state until they match.
+  async function reconcilePtt() {
+    if (pttReconciling) {
+      return;
+    }
+
+    pttReconciling = true;
+    try {
+      while (mimiActive && pttHeld !== isTranscribing) {
+        if (isCaptureBusy) {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+          continue;
+        }
+
+        if (pttHeld) {
+          await startTranscription();
+        } else {
+          await pauseCapture();
+        }
+      }
+    } finally {
+      pttReconciling = false;
     }
   }
 
@@ -827,7 +925,7 @@
 <svelte:window on:keydown={handleGlobalKeydown} />
 
 <main class="stage">
-  <section class="window" aria-label="LivePolyTrans">
+  <section class="window" aria-label="LivePolyTrans" style="position: relative;">
     <AppToolbar
       bind:activeTab
       {selectedCaptureMode}
@@ -850,7 +948,17 @@
       onCopy={copyTranscript}
       onSave={saveTranscript}
       onFontScaleChange={setTranscriptFontScale}
+      onEnterMimi={() => void enterMimi()}
     />
+
+    {#if mimiActive}
+      <MimiView
+        lines={mimiLines}
+        {pttHeld}
+        onPttChange={setPtt}
+        onExit={() => void exitMimi()}
+      />
+    {/if}
 
     <div class="content-shell">
       <div class="app-alert-slot">

@@ -31,6 +31,7 @@
   export let onCopy: () => void;
   export let onSave: () => void;
   export let onFontScaleChange: (scale: number) => void;
+  export let onEnterMimi: () => void;
 
   const captureModeOptions: Array<{ mode: CaptureMode; label: string }> = [
     { mode: 'speaker', label: 'Speaker' },
@@ -230,6 +231,17 @@
         </button>
         {#if openMenu === 'more'}
           <nav class="menu more-menu">
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onEnterMimi();
+                closeMenus();
+              }}
+            >
+              👂 対面モードへ切り替え
+            </button>
+            <div class="sep"></div>
             <button
               type="button"
               class="mi no-check"
