@@ -1,0 +1,1527 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — UI Redesign Mockup</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --pearl: rgba(255, 255, 255, 0.72);
+    --menu-bg: rgba(252, 252, 253, 0.92);
+    --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.16);
+    --fs: 1;
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+    --menu-bg: rgba(40, 40, 42, 0.94);
+    --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.55);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    display: grid;
+    place-items: center;
+    min-height: 100vh;
+    padding: 28px 16px;
+    transition: background 0.3s ease;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+  button:focus-visible { outline: 2px solid var(--blue-focus); outline-offset: 2px; border-radius: 8px; }
+
+  /* ===== window chrome ===== */
+  .window {
+    width: min(1080px, 96vw);
+    height: min(680px, 86vh);
+    background: var(--canvas);
+    border-radius: 12px;
+    border: 1px solid var(--hairline);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+    display: grid;
+    grid-template-rows: auto 1fr;
+    overflow: hidden;
+    position: relative;
+  }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding: 8px 14px;
+    background: var(--pearl);
+    backdrop-filter: blur(20px) saturate(180%);
+    border-bottom: 1px solid var(--divider);
+    position: relative;
+    z-index: 20;
+  }
+  .traffic { display: flex; gap: 8px; margin-right: 4px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic span:nth-child(1) { background: #ff5f57; }
+  .traffic span:nth-child(2) { background: #febc2e; }
+  .traffic span:nth-child(3) { background: #28c840; }
+
+  .seg {
+    display: flex;
+    background: rgba(120, 120, 128, 0.14);
+    border-radius: 9px;
+    padding: 2px;
+  }
+  .seg button {
+    padding: 5px 14px;
+    border-radius: 7px;
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink-2);
+    transition: all 0.18s ease;
+  }
+  .seg button.active {
+    background: var(--canvas);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    font-weight: 600;
+  }
+  .seg.icon-seg button { padding: 5px 11px; display: flex; align-items: center; gap: 5px; }
+
+  .spacer { flex: 1; }
+
+  .pill-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 13px;
+    border-radius: 999px;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--ink);
+    transition: all 0.18s ease;
+    white-space: nowrap;
+  }
+  .pill-btn:hover { border-color: rgba(0, 102, 204, 0.35); }
+  .pill-btn:active { transform: scale(0.96); }
+  .pill-btn .chev { font-size: 9px; color: var(--muted); }
+  .pill-btn.icon-only { padding: 6px 10px; }
+  .pill-btn.on { background: var(--blue-soft); border-color: transparent; color: var(--blue); }
+
+  .record-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 7px 15px;
+    border-radius: 999px;
+    background: var(--canvas);
+    border: 1px solid var(--hairline);
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--ink);
+    transition: all 0.2s ease;
+  }
+  .record-btn .dot {
+    width: 12px; height: 12px; border-radius: 50%;
+    border: 3px solid var(--red);
+    transition: all 0.2s ease;
+  }
+  .record-btn:active { transform: scale(0.96); }
+  .record-btn.rec { background: var(--red); border-color: var(--red); color: #fff; }
+  .record-btn.rec .dot { border-color: #fff; background: #fff; border-radius: 2px; width: 9px; height: 9px; }
+
+  /* ===== views ===== */
+  .view { display: none; min-height: 0; }
+  .view.active { display: grid; }
+
+  /* ===== LIVE ===== */
+  #view-live { grid-template-columns: minmax(0, 1fr) 0px; transition: grid-template-columns 0.3s cubic-bezier(0.25, 0.1, 0.25, 1); }
+  #view-live.ai-open { grid-template-columns: minmax(0, 1fr) 300px; }
+  .captions-wrap { position: relative; display: grid; grid-template-rows: 1fr auto; min-height: 0; }
+  .captions {
+    overflow-y: auto;
+    padding: 34px 44px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: calc(20px * var(--fs));
+    scroll-behavior: smooth;
+  }
+  .cap {
+    max-width: 760px;
+    animation: fadeUp 0.35s cubic-bezier(0.25, 0.1, 0.25, 1);
+    border-left: 2px solid transparent;
+    padding-left: 14px;
+    margin-left: -16px;
+  }
+  .cap.in-rec { border-left-color: rgba(255, 59, 48, 0.45); }
+  .rec-marker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--red);
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    animation: fadeUp 0.3s ease;
+  }
+  .rec-marker::before, .rec-marker::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: rgba(255, 59, 48, 0.3);
+  }
+  .rec-marker.end { color: var(--muted); }
+  .rec-marker.end::before, .rec-marker.end::after { background: var(--divider); }
+  .cap .who {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 11px; font-weight: 600; color: var(--muted);
+    letter-spacing: 0.02em; margin-bottom: 5px;
+  }
+  .cap .who i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+  .cap.mic .who i { background: var(--blue); }
+  .cap.mic .who { color: var(--blue); }
+  .cap .txt {
+    margin: 0;
+    font-size: calc(19px * var(--fs));
+    line-height: 1.45;
+    font-weight: 500;
+    letter-spacing: -0.01em;
+  }
+  .cap .sub {
+    margin: 4px 0 0;
+    font-size: calc(14.5px * var(--fs));
+    line-height: 1.45;
+    color: var(--muted);
+    font-weight: 400;
+  }
+  .cap.interim .txt, .cap.interim .sub { opacity: 0.45; }
+  .cap.interim .txt::after {
+    content: '';
+    display: inline-block;
+    width: 3px; height: 1em;
+    background: var(--ink);
+    margin-left: 3px;
+    vertical-align: text-bottom;
+    animation: blink 1s step-end infinite;
+  }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: none; } }
+
+  .empty {
+    margin: auto;
+    text-align: center;
+    max-width: 420px;
+    padding: 40px 20px;
+  }
+  .empty .ring {
+    width: 64px; height: 64px; border-radius: 50%;
+    background: var(--blue-soft);
+    display: grid; place-items: center;
+    margin: 0 auto 18px;
+    font-size: 26px;
+  }
+  .empty.listening .ring { background: rgba(52, 199, 89, 0.13); }
+  .empty.listening .ring span {
+    width: 18px; height: 18px; border-radius: 50%;
+    background: var(--green);
+    animation: pulse 1.5s ease-out infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.35); }
+    100% { box-shadow: 0 0 0 20px rgba(52, 199, 89, 0); }
+  }
+  .empty h2 { margin: 0 0 6px; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; }
+  .empty p { margin: 0; font-size: 14px; color: var(--muted); line-height: 1.55; }
+
+  .live-footer {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 16px;
+    border-top: 1px solid var(--divider);
+    background: var(--canvas);
+    min-height: 40px;
+  }
+  .status-lamp { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+  .status-lamp i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); opacity: 0.5; }
+  .status-lamp.on i { background: var(--green); opacity: 1; }
+  .quiet-btn {
+    padding: 5px 11px;
+    border-radius: 7px;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink-2);
+    transition: background 0.15s ease;
+  }
+  .quiet-btn:hover:not(:disabled) { background: rgba(120, 120, 128, 0.12); color: var(--ink); }
+  .quiet-btn:disabled { opacity: 0.4; cursor: default; }
+  .quiet-btn.danger:hover { background: rgba(255, 59, 48, 0.1); color: var(--red); }
+  .quiet-btn.arm { background: var(--red); color: #fff; }
+
+  .jump {
+    position: absolute;
+    right: 20px; bottom: 56px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    background: var(--menu-bg);
+    backdrop-filter: blur(16px);
+    border: 1px solid var(--hairline);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.14);
+    font-size: 12px; font-weight: 600; color: var(--blue);
+    display: none;
+  }
+  .jump.show { display: block; }
+
+  /* ===== AI panel ===== */
+  .ai-panel {
+    border-left: 1px solid var(--divider);
+    background: var(--parchment);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    padding: 18px 16px;
+    min-width: 300px;
+  }
+  #view-live:not(.ai-open) .ai-panel { display: none; }
+  .ai-panel h3 {
+    margin: 0;
+    font-size: 12px; font-weight: 600;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    display: flex; justify-content: space-between; align-items: center;
+  }
+  .ai-card {
+    background: var(--canvas);
+    border: 1px solid var(--divider);
+    border-radius: 12px;
+    padding: 12px 14px;
+    font-size: 13px;
+    line-height: 1.55;
+  }
+  .ai-card.placeholder { color: var(--muted); }
+  .ai-ask { margin-top: auto; display: grid; gap: 8px; }
+  .ai-ask textarea {
+    resize: none;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 9px 11px;
+    font: inherit;
+    font-size: 13px;
+  }
+  .ai-q {
+    justify-self: end;
+    background: var(--blue);
+    color: #fff;
+    border-radius: 13px 13px 4px 13px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+    max-width: 88%;
+  }
+  .ai-a {
+    justify-self: start;
+    background: var(--canvas);
+    border: 1px solid var(--divider);
+    border-radius: 13px 13px 13px 4px;
+    padding: 7px 11px;
+    font-size: 12.5px;
+    max-width: 92%;
+    line-height: 1.5;
+  }
+  .ai-turns { display: grid; gap: 8px; }
+
+  /* ===== menus ===== */
+  .menu {
+    position: absolute;
+    top: 48px;
+    border-radius: 12px;
+    background: var(--menu-bg);
+    backdrop-filter: blur(24px) saturate(180%);
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-menu);
+    padding: 5px;
+    min-width: 210px;
+    display: none;
+    z-index: 50;
+    animation: menuIn 0.16s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+  .menu.show { display: block; }
+  @keyframes menuIn { from { opacity: 0; transform: scale(0.97) translateY(-4px); } to { opacity: 1; transform: none; } }
+  .menu .mi {
+    display: flex; align-items: center; justify-content: space-between; gap: 18px;
+    width: 100%;
+    padding: 7px 11px;
+    border-radius: 8px;
+    font-size: 13px;
+    text-align: left;
+  }
+  .menu .mi:hover { background: var(--blue); color: #fff; }
+  .menu .mi:hover .kbd { color: rgba(255,255,255,0.75); }
+  .menu .mi.danger { color: var(--red); }
+  .menu .mi.danger:hover { background: var(--red); color: #fff; }
+  .menu .mi .kbd { font-size: 12px; color: var(--muted); }
+  .menu .sep { height: 1px; background: var(--divider); margin: 5px 8px; }
+  .menu .mlabel { padding: 6px 11px 2px; font-size: 11px; color: var(--muted); }
+  .menu .mi.checked::before { content: '✓  '; }
+  .menu .mi:not(.checked) { padding-left: 28px; }
+  .menu .mi.no-check { padding-left: 11px; }
+
+  /* ===== RECORDINGS ===== */
+  #view-recordings { grid-template-columns: 240px minmax(0, 1fr); }
+  .rec-side {
+    border-right: 1px solid var(--divider);
+    background: var(--parchment);
+    overflow-y: auto;
+    padding: 12px 10px;
+  }
+  .rec-side .group { font-size: 11px; font-weight: 600; color: var(--muted); padding: 10px 8px 5px; }
+  .rec-item {
+    width: 100%;
+    text-align: left;
+    padding: 9px 10px;
+    border-radius: 9px;
+    display: grid;
+    gap: 2px;
+  }
+  .rec-item:hover { background: rgba(120, 120, 128, 0.1); }
+  .rec-item.active { background: var(--blue); color: #fff; }
+  .rec-item .t { font-size: 13px; font-weight: 600; }
+  .rec-item .m { font-size: 11.5px; color: var(--muted); display: flex; justify-content: space-between; }
+  .rec-item.active .m { color: rgba(255, 255, 255, 0.75); }
+  .rec-detail { overflow-y: auto; padding: 26px 32px; position: relative; }
+  .rec-detail h2 { margin: 0 0 3px; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
+  .rec-detail .meta { font-size: 12.5px; color: var(--muted); margin-bottom: 20px; }
+  .rec-head-row { display: flex; align-items: start; justify-content: space-between; gap: 12px; }
+  .player {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .play-btn {
+    width: 42px; height: 42px;
+    border-radius: 50%;
+    background: var(--parchment);
+    border: 1px solid var(--divider);
+    display: grid; place-items: center;
+    font-size: 15px;
+    flex: 0 0 auto;
+    transition: transform 0.15s ease;
+  }
+  .play-btn:active { transform: scale(0.94); }
+  .wave { flex: 1; height: 44px; display: flex; align-items: center; gap: 1.5px; cursor: pointer; position: relative; }
+  .trim-shade {
+    position: absolute;
+    top: 0; bottom: 0;
+    background: rgba(28, 28, 30, 0.32);
+    border-radius: 3px;
+    pointer-events: none;
+    z-index: 3;
+  }
+  [data-theme='dark'] .trim-shade { background: rgba(0, 0, 0, 0.55); }
+  .trim-handle {
+    position: absolute;
+    top: -5px; bottom: -5px;
+    width: 14px;
+    border-radius: 5px;
+    background: var(--blue);
+    cursor: ew-resize;
+    z-index: 5;
+    transform: translateX(-50%);
+    display: grid;
+    place-items: center;
+    touch-action: none;
+  }
+  .trim-handle::after {
+    content: '';
+    width: 2px; height: 14px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.85);
+  }
+  .trim-bar {
+    display: none;
+    align-items: center;
+    gap: 10px;
+    margin: -10px 0 20px;
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+  .trim-bar.show { display: flex; }
+  .trim-bar #trimRange { font-variant-numeric: tabular-nums; color: var(--blue); font-weight: 600; }
+  .btn-apply {
+    padding: 6px 15px;
+    border-radius: 999px;
+    background: var(--blue);
+    color: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: transform 0.15s ease;
+  }
+  .btn-apply:active { transform: scale(0.95); }
+  .wave i { flex: 1; background: rgba(120, 120, 128, 0.35); border-radius: 1px; min-height: 2px; }
+  .wave i.played { background: var(--blue); }
+  .wave-time { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rec-transcript h3 { font-size: 15px; font-weight: 600; margin: 0 0 10px; }
+  .tr-row {
+    display: grid;
+    grid-template-columns: 52px 1fr;
+    gap: 12px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    font-size: 13.5px;
+    line-height: 1.5;
+    cursor: pointer;
+  }
+  .tr-row:hover { background: var(--parchment); }
+  .tr-row.now { background: var(--blue-soft); }
+  .tr-row .ts { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; padding-top: 2px; }
+  .tr-row .sub { color: var(--muted); font-size: 12.5px; margin-top: 2px; }
+
+  /* ===== SETTINGS ===== */
+  #view-settings { grid-template-columns: 200px minmax(0, 1fr); }
+  .set-side {
+    border-right: 1px solid var(--divider);
+    background: var(--parchment);
+    padding: 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .set-side button {
+    display: flex; align-items: center; gap: 9px;
+    padding: 8px 11px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 500;
+    text-align: left;
+  }
+  .set-side button:hover { background: rgba(120, 120, 128, 0.1); }
+  .set-side button.active { background: var(--blue); color: #fff; font-weight: 600; }
+  .set-pane { overflow-y: auto; padding: 26px 32px; display: none; }
+  .set-pane.active { display: block; }
+  .set-pane h2 { margin: 0 0 4px; font-size: 22px; font-weight: 600; letter-spacing: -0.015em; }
+  .set-pane .lede { font-size: 13px; color: var(--muted); margin: 0 0 22px; line-height: 1.5; }
+  .set-group { margin-bottom: 26px; }
+  .set-group > h3 { font-size: 13px; font-weight: 600; color: var(--muted); margin: 0 0 8px 4px; }
+  .set-card {
+    background: var(--parchment);
+    border-radius: 12px;
+    overflow: hidden;
+  }
+  [data-theme='dark'] .set-card { background: #2c2c2e; }
+  .set-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 11px 16px;
+    font-size: 13.5px;
+  }
+  .set-row + .set-row { border-top: 1px solid var(--divider); }
+  .set-row .d { font-size: 12px; color: var(--muted); margin-top: 2px; line-height: 1.45; }
+  .switch {
+    width: 42px; height: 26px;
+    border-radius: 999px;
+    background: rgba(120, 120, 128, 0.28);
+    position: relative;
+    transition: background 0.22s ease;
+    flex: 0 0 auto;
+  }
+  .switch::after {
+    content: '';
+    position: absolute;
+    top: 2px; left: 2px;
+    width: 22px; height: 22px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    transition: transform 0.22s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+  .switch.on { background: var(--green); }
+  .switch.on::after { transform: translateX(16px); }
+  .tag { font-size: 11.5px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 6px; padding: 2px 7px; }
+  .tag.ok { color: var(--green); border-color: rgba(52, 199, 89, 0.4); }
+  .link-btn { color: var(--blue); font-size: 13px; font-weight: 500; }
+  .radio-dot {
+    width: 18px; height: 18px; border-radius: 50%;
+    border: 1.5px solid var(--hairline);
+    display: inline-grid; place-items: center;
+    flex: 0 0 auto;
+  }
+  .radio-dot.on { border-color: var(--blue); }
+  .radio-dot.on::after { content: ''; width: 9px; height: 9px; border-radius: 50%; background: var(--blue); }
+  .set-row.selectable { cursor: pointer; }
+  .set-row .name-col { display: flex; align-items: center; gap: 11px; }
+
+  /* recordings: upload + 再処理 */
+  .upload-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    width: calc(100% - 8px);
+    margin: 4px 4px 10px;
+    padding: 9px 11px;
+    border-radius: 9px;
+    border: 1px dashed var(--hairline);
+    color: var(--blue);
+    font-size: 12.5px;
+    font-weight: 600;
+    transition: all 0.18s ease;
+  }
+  .upload-btn:hover { background: var(--blue-soft); border-color: rgba(0, 102, 204, 0.35); }
+  .tr-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
+  .tr-head h3 { margin: 0; }
+  .proc { display: none; margin: 4px 0 16px; }
+  .proc.show { display: block; }
+  .proc .stage { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
+  .proc .bar { height: 4px; border-radius: 4px; background: var(--divider); overflow: hidden; }
+  .proc .bar i { display: block; height: 100%; width: 0%; background: var(--blue); transition: width 0.6s cubic-bezier(0.25, 0.1, 0.25, 1); }
+  .spk { display: inline-flex; align-items: center; gap: 5px; font-weight: 600; font-size: 12px; }
+  .spk i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); }
+
+  /* 対面モード (mimi) */
+  .mimi {
+    position: absolute;
+    inset: 0;
+    z-index: 45;
+    display: none;
+    grid-template-rows: auto 1fr auto;
+    background: var(--canvas);
+    color: var(--ink);
+    --mfs: 1;
+  }
+  .mimi.show { display: grid; animation: fadeUp 0.25s ease; }
+  .mimi.invert { background: #000; color: #fff; }
+  .mimi-top {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--divider);
+  }
+  .mimi.invert .mimi-top, .mimi.invert .mimi-foot { border-color: rgba(255, 255, 255, 0.18); }
+  .mimi-badge { font-size: 13px; font-weight: 600; color: var(--muted); }
+  .mimi.invert .mimi-badge { color: rgba(255, 255, 255, 0.6); }
+  .mimi-ctl {
+    min-width: 52px;
+    min-height: 44px;
+    padding: 8px 14px;
+    border-radius: 11px;
+    border: 1px solid var(--hairline);
+    background: transparent;
+    font-size: 15px;
+    font-weight: 600;
+  }
+  .mimi.invert .mimi-ctl { border-color: rgba(255, 255, 255, 0.35); color: #fff; }
+  .mimi-ctl:active { transform: scale(0.95); }
+  .mimi-ctl.exit { color: var(--red); }
+  .mimi-body {
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    gap: calc(18px * var(--mfs));
+    padding: 24px 40px 28px;
+  }
+  .mimi-hint { margin: auto; font-size: 20px; color: var(--muted); text-align: center; }
+  .mimi.invert .mimi-hint { color: rgba(255, 255, 255, 0.5); }
+  .mimi-line { animation: fadeUp 0.3s ease; }
+  .mimi-line p {
+    margin: 0;
+    font-size: calc(26px * var(--mfs));
+    line-height: 1.4;
+    font-weight: 600;
+    letter-spacing: 0;
+    opacity: 0.42;
+    transition: font-size 0.25s ease, opacity 0.25s ease;
+  }
+  .mimi-line:last-child p {
+    font-size: calc(48px * var(--mfs));
+    opacity: 1;
+  }
+  .mimi-foot { padding: 12px 16px 16px; border-top: 1px solid var(--divider); }
+  .mimi-ptt {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 64px;
+    border-radius: 16px;
+    border: 1px solid var(--hairline);
+    background: var(--parchment);
+    color: var(--ink);
+    font-size: 17px;
+    font-weight: 600;
+    user-select: none;
+    -webkit-user-select: none;
+    touch-action: none;
+    transition: all 0.15s ease;
+  }
+  .mimi-ptt .ptt-dot {
+    width: 14px; height: 14px;
+    border-radius: 50%;
+    background: var(--muted);
+    opacity: 0.5;
+    transition: all 0.15s ease;
+  }
+  .mimi-ptt.hold {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+    transform: scale(0.99);
+  }
+  .mimi-ptt.hold .ptt-dot {
+    background: #fff;
+    opacity: 1;
+    animation: pulse 1.2s ease-out infinite;
+  }
+  .mimi.invert .mimi-ptt {
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.3);
+    color: #fff;
+  }
+  .mimi.invert .mimi-ptt.hold { background: var(--green); border-color: var(--green); }
+
+  /* toast */
+  .toast {
+    position: absolute;
+    left: 50%; bottom: 18px;
+    transform: translateX(-50%) translateY(8px);
+    background: var(--menu-bg);
+    backdrop-filter: blur(18px) saturate(180%);
+    border: 1px solid var(--hairline);
+    box-shadow: var(--shadow-menu);
+    border-radius: 999px;
+    padding: 8px 18px;
+    font-size: 12.5px;
+    font-weight: 500;
+    opacity: 0;
+    pointer-events: none;
+    transition: all 0.25s cubic-bezier(0.25, 0.1, 0.25, 1);
+    z-index: 60;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  .record-btn #recLabel { font-variant-numeric: tabular-nums; }
+
+  /* demo bar */
+  .demo-bar {
+    display: flex; gap: 10px; align-items: center;
+    margin-top: 14px;
+    font-size: 12px; color: var(--muted);
+  }
+  .demo-bar button {
+    padding: 6px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas);
+    font-size: 12px;
+    font-weight: 500;
+  }
+</style>
+</head>
+<body>
+<div class="window" id="win">
+  <header class="toolbar">
+    <div class="traffic"><span></span><span></span><span></span></div>
+
+    <div class="seg" id="tabSeg" role="tablist">
+      <button class="active" data-view="live" role="tab">Live</button>
+      <button data-view="recordings" role="tab">Recordings</button>
+      <button data-view="settings" role="tab">Settings</button>
+    </div>
+
+    <div class="spacer"></div>
+
+    <!-- Live専用コントロール -->
+    <div id="liveTools" style="display:flex; gap:8px; align-items:center;">
+      <div class="seg" id="srcSeg" title="文字起こしする音源">
+        <button data-src="speaker">Speaker</button>
+        <button class="active" data-src="both">Both</button>
+        <button data-src="mic">Mic</button>
+      </div>
+
+      <button class="pill-btn" id="langBtn">
+        Japanese → English <span class="chev">▾</span>
+      </button>
+
+      <button class="pill-btn icon-only" id="aiToggle" title="Meeting AI パネル">✦</button>
+      <button class="pill-btn icon-only" id="moreBtn" title="その他">…</button>
+    </div>
+
+    <button class="record-btn" id="recBtn" title="この会話を録音として Recordings に保存">
+      <span class="dot"></span><span id="recLabel">録音</span>
+    </button>
+
+    <!-- 言語メニュー -->
+    <nav class="menu" id="langMenu" style="right: 150px;">
+      <div class="mlabel">メイン(認識する言語)</div>
+      <button class="mi checked">Japanese</button>
+      <button class="mi">English</button>
+      <div class="sep"></div>
+      <div class="mlabel">サブ(翻訳先)</div>
+      <button class="mi">翻訳しない</button>
+      <button class="mi checked">English</button>
+      <div class="sep"></div>
+      <button class="mi no-check" onclick="go('settings')">＋ 言語を追加…</button>
+    </nav>
+
+    <!-- …メニュー -->
+    <nav class="menu" id="moreMenu" style="right: 108px;">
+      <button class="mi no-check" id="miMimi">👂 対面モードへ切り替え</button>
+      <div class="sep"></div>
+      <button class="mi no-check" id="miCopy">文字起こしをコピー <span class="kbd">⇧⌘C</span></button>
+      <button class="mi no-check" id="miSave">ファイルへ保存… <span class="kbd">⌘S</span></button>
+      <div class="sep"></div>
+      <div class="mlabel">文字サイズ: <span id="fsLabel">100%</span></div>
+      <button class="mi no-check" id="miBigger">大きく <span class="kbd">⌘+</span></button>
+      <button class="mi no-check" id="miSmaller">小さく <span class="kbd">⌘−</span></button>
+      <button class="mi no-check" id="miReset">標準サイズ <span class="kbd">⌘0</span></button>
+      <div class="sep"></div>
+      <button class="mi no-check" id="miTheme">ダークモード切替(デモ)</button>
+    </nav>
+  </header>
+
+  <!-- ============ LIVE ============ -->
+  <section class="view active" id="view-live">
+    <div class="captions-wrap">
+      <div class="captions" id="captions">
+        <div class="empty listening" id="emptyState">
+          <div class="ring"><span></span></div>
+          <h2>音声を待っています</h2>
+          <p>アプリを開くと自動で文字起こしが始まります。メイン言語の本文の下にサブ言語の訳文が流れます。残したい会話は「録音」を押すと Recordings に保存されます。</p>
+        </div>
+      </div>
+      <button class="jump" id="jumpBtn">↓ 最新へ</button>
+      <footer class="live-footer">
+        <div class="status-lamp on" id="liveStatus"><i></i><span id="liveStatusText">文字起こし中 · Speaker + Mic</span></div>
+        <button class="quiet-btn" id="pauseBtn">一時停止</button>
+        <div class="spacer"></div>
+        <button class="quiet-btn" id="ftCopy" disabled>コピー</button>
+        <button class="quiet-btn" id="ftSaveT" disabled>保存</button>
+        <button class="quiet-btn danger" id="ftClear" disabled>クリア</button>
+      </footer>
+    </div>
+
+    <!-- AIパネル -->
+    <aside class="ai-panel" id="aiPanel">
+      <h3>要約 <button class="link-btn" style="font-size:12px;">更新</button></h3>
+      <div class="ai-card placeholder" id="aiSummary">録音が進むと、会話の要約が自動でここに表示されます。</div>
+      <h3>質問</h3>
+      <div class="ai-turns" id="aiTurns"></div>
+      <div class="ai-ask">
+        <textarea rows="2" id="aiInput" placeholder="この会議について質問…"></textarea>
+      </div>
+    </aside>
+  </section>
+
+  <!-- ============ RECORDINGS ============ -->
+  <section class="view" id="view-recordings">
+    <aside class="rec-side">
+      <button class="upload-btn" id="uploadBtn">＋ 音声ファイルを読み込む</button>
+      <div id="recList"></div>
+    </aside>
+    <div class="rec-detail">
+      <div class="rec-head-row">
+        <div>
+          <h2 id="rdTitle">7月30日 16:59</h2>
+          <p class="meta">1:03:31 · Speaker + Mic · このMacに保存</p>
+        </div>
+        <div style="position:relative;">
+          <button class="pill-btn" id="actionsBtn">アクション <span class="chev">▾</span></button>
+          <nav class="menu" id="actionsMenu" style="right:0; top: 38px;">
+            <button class="mi no-check">書き出し: Mic 音声…</button>
+            <button class="mi no-check">書き出し: Speaker 音声…</button>
+            <button class="mi no-check">書き出し: ミックス音声…</button>
+            <div class="sep"></div>
+            <button class="mi no-check" id="miTrim">✂︎ トリム…</button>
+            <div class="sep"></div>
+            <button class="mi no-check danger">削除…</button>
+          </nav>
+        </div>
+      </div>
+      <div class="player">
+        <button class="play-btn" id="playBtn">▶</button>
+        <div class="wave" id="wave"></div>
+        <span class="wave-time" id="waveTime">00:00 / 1:03:31</span>
+      </div>
+      <div class="trim-bar" id="trimBar">
+        <span style="font-weight:600; color:var(--ink);">✂︎ トリム</span>
+        <span id="trimRange">0:00 – 0:00</span>
+        <span>選択した範囲だけを残します</span>
+        <div class="spacer"></div>
+        <button class="quiet-btn" id="trimCancel">キャンセル</button>
+        <button class="btn-apply" id="trimApply">適用</button>
+      </div>
+      <div class="rec-transcript">
+        <div class="tr-head">
+          <h3>文字起こし</h3>
+          <div style="position:relative;">
+            <button class="pill-btn" id="trBtn">再処理 <span class="chev">▾</span></button>
+            <nav class="menu" id="trMenu" style="right:0; top: 38px;">
+              <div class="mlabel">エンジンを選んで処理し直す</div>
+              <button class="mi no-check" data-eng="builtin">Apple 内蔵 — 高速</button>
+              <button class="mi no-check" data-eng="whisper">Whisper large-v3-turbo — 高精度</button>
+              <div class="sep"></div>
+              <button class="mi no-check" data-eng="whisperx">WhisperX — 話者分離つき</button>
+            </nav>
+          </div>
+        </div>
+        <div class="proc" id="proc">
+          <div class="stage" id="procStage"></div>
+          <div class="bar"><i id="procBar"></i></div>
+        </div>
+        <div id="trList"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ SETTINGS ============ -->
+  <section class="view" id="view-settings">
+    <aside class="set-side">
+      <button class="active" data-pane="general">⚙︎ 一般</button>
+      <button data-pane="model">🧠 認識モデル</button>
+      <button data-pane="langs">🌐 言語</button>
+    </aside>
+
+    <div class="set-pane active" id="pane-general">
+      <h2>一般</h2>
+      <p class="lede">録音と文字起こしの基本設定。</p>
+      <div class="set-group">
+        <h3>文字起こし</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>起動時に自動で開始<div class="d">アプリを開くとすぐに文字起こしを始めます。オフの場合は一時停止状態で起動します。</div></div>
+            <button class="switch on" data-sw></button>
+          </div>
+        </div>
+      </div>
+      <div class="set-group">
+        <h3>録音</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>録音に音声ファイルを含める<div class="d">オフにすると「録音」は文字起こしテキストのみを保存します(音声は残しません)。</div></div>
+            <button class="switch on" data-sw></button>
+          </div>
+          <div class="set-row">
+            <div>保存先<div class="d">~/Library/Application Support/LivePolyTrans/recordings</div></div>
+            <button class="link-btn">Finderで表示</button>
+          </div>
+        </div>
+      </div>
+      <div class="set-group">
+        <h3>Meeting AI</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>自動要約<div class="d">発話が一段落するたびに要約を更新します。</div></div>
+            <button class="switch on" data-sw></button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-pane" id="pane-model">
+      <h2>認識モデル</h2>
+      <p class="lede">ライブ文字起こしと録音に使うエンジンを選びます。録音後の再処理では、これに加えて WhisperX(話者分離つき)を Recordings 画面から使えます。</p>
+      <div class="set-card">
+        <div class="set-row selectable" data-radio>
+          <div class="name-col"><span class="radio-dot on"></span>
+            <div>Apple 内蔵<div class="d">話しながらリアルタイムに文字が出ます。下の言語パックを使用。</div></div>
+          </div>
+          <span class="tag ok">推奨</span>
+        </div>
+        <div class="set-row selectable" data-radio>
+          <div class="name-col"><span class="radio-dot"></span>
+            <div>Whisper — large-v3-turbo<div class="d">1.5 GB · 発話の区切りごとに変換(数秒の遅れ)。精度重視。</div></div>
+          </div>
+          <span class="tag">superwhisper</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="set-pane" id="pane-langs">
+      <h2>言語</h2>
+      <p class="lede">オンデバイスの言語パックを管理します。<button class="link-btn" id="reloadLang">↻ 再検出</button></p>
+      <div class="set-group">
+        <h3>インストール済み</h3>
+        <div class="set-card">
+          <div class="set-row"><div>Japanese<div class="d">ja-JP</div></div><span class="tag ok">Ready</span></div>
+          <div class="set-row"><div>English<div class="d">en-US</div></div><span class="tag ok">Ready</span></div>
+        </div>
+      </div>
+      <div class="set-group">
+        <h3>追加できる言語</h3>
+        <div class="set-card">
+          <div class="set-row"><div>Chinese (Simplified)<div class="d">zh-CN</div></div><button class="link-btn">追加</button></div>
+          <div class="set-row"><div>Korean<div class="d">ko-KR</div></div><button class="link-btn">追加</button></div>
+          <div class="set-row"><div>French<div class="d">fr-FR</div></div><button class="link-btn">追加</button></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============ 対面モード (mimi) ============ -->
+  <section class="mimi" id="mimi">
+    <header class="mimi-top">
+      <span class="mimi-badge">👂 対面モード · マイクのみ</span>
+      <div class="spacer"></div>
+      <button class="mimi-ctl" id="mimiSmaller" title="文字を小さく">A−</button>
+      <button class="mimi-ctl" id="mimiBigger" title="文字を大きく">A＋</button>
+      <button class="mimi-ctl" id="mimiInvert" title="白黒反転">◐ 反転</button>
+      <button class="mimi-ctl exit" id="mimiExit">終了</button>
+    </header>
+    <div class="mimi-body" id="mimiBody">
+      <p class="mimi-hint">下のボタンを押しながらマイクに向かって話すと、ここに大きな文字で表示されます</p>
+    </div>
+    <footer class="mimi-foot">
+      <button class="mimi-ptt" id="mimiPtt">
+        <span class="ptt-dot"></span><span id="pttLabel">押しながら話す(スペースキーでも可)</span>
+      </button>
+    </footer>
+  </section>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<div class="demo-bar">
+  <span>デモ操作:</span>
+  <button id="demoFeed">▶ 会話を続ける</button>
+  <span>開くと自動で文字起こしが始まります。「録音」で保存セッション開始。</span>
+</div>
+
+<script>
+  const $ = (s) => document.querySelector(s);
+  const $$ = (s) => [...document.querySelectorAll(s)];
+
+  /* ---- タブ切替 ---- */
+  function go(view) {
+    $$('#tabSeg button').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+    $$('.view').forEach((v) => v.classList.toggle('active', v.id === 'view-' + view));
+    $('#liveTools').style.display = view === 'live' ? 'flex' : 'none';
+    closeMenus();
+  }
+  $$('#tabSeg button').forEach((b) => b.addEventListener('click', () => go(b.dataset.view)));
+
+  /* ---- メニュー開閉 ---- */
+  const menus = ['langMenu', 'moreMenu', 'actionsMenu', 'trMenu'];
+  function closeMenus() { menus.forEach((id) => $('#' + id).classList.remove('show')); }
+  function toggleMenu(id) {
+    const m = $('#' + id);
+    const wasOpen = m.classList.contains('show');
+    closeMenus();
+    if (!wasOpen) m.classList.add('show');
+  }
+  $('#langBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('langMenu'); });
+  $('#moreBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('moreMenu'); });
+  $('#actionsBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('actionsMenu'); });
+  $('#trBtn').addEventListener('click', (e) => { e.stopPropagation(); toggleMenu('trMenu'); });
+  document.addEventListener('click', closeMenus);
+  menus.forEach((id) => $('#' + id).addEventListener('click', (e) => e.stopPropagation()));
+
+  /* ---- 音源セグメント ---- */
+  let src = 'both';
+  $$('#srcSeg button').forEach((b) => b.addEventListener('click', () => {
+    src = b.dataset.src;
+    $$('#srcSeg button').forEach((x) => x.classList.toggle('active', x === b));
+    syncStatus();
+  }));
+
+  /* ---- AIパネル ---- */
+  $('#aiToggle').addEventListener('click', () => {
+    $('#view-live').classList.toggle('ai-open');
+    $('#aiToggle').classList.toggle('on');
+  });
+
+  /* ---- 文字サイズ ---- */
+  let fs = 1;
+  function setFs(v) {
+    fs = Math.min(1.6, Math.max(0.8, v));
+    document.documentElement.style.setProperty('--fs', fs);
+    $('#fsLabel').textContent = Math.round(fs * 100) + '%';
+  }
+  $('#miBigger').addEventListener('click', () => setFs(fs + 0.1));
+  $('#miSmaller').addEventListener('click', () => setFs(fs - 0.1));
+  $('#miReset').addEventListener('click', () => setFs(1));
+  $('#miTheme').addEventListener('click', () => {
+    const b = document.body;
+    b.dataset.theme = b.dataset.theme === 'dark' ? '' : 'dark';
+  });
+
+  /* ---- 常時文字起こし + 録音セッション ---- */
+  let paused = false;
+  let feedTimer = null;
+  let sessionOn = false;
+  let sessionSec = 0;
+  let sessionTimer = null;
+
+  const srcLabel = () => (src === 'both' ? 'Speaker + Mic' : src === 'mic' ? 'Mic' : 'Speaker');
+  function syncStatus() {
+    $('#liveStatus').classList.toggle('on', !paused);
+    $('#liveStatusText').textContent = paused ? '一時停止中' : '文字起こし中 · ' + srcLabel();
+  }
+
+  function togglePause() {
+    paused = !paused;
+    $('#pauseBtn').textContent = paused ? '再開' : '一時停止';
+    if (paused) stopFeed(); else startFeed();
+    syncStatus();
+  }
+  $('#pauseBtn').addEventListener('click', togglePause);
+
+  const fmt = (s) => Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  function toast(msg) {
+    const t = $('#toast');
+    t.textContent = msg;
+    t.classList.add('show');
+    setTimeout(() => t.classList.remove('show'), 2600);
+  }
+  function addSavedRecording(dur) {
+    const now = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    $('#recList').insertAdjacentHTML('afterbegin',
+      `<div class="group">たった今</div><button class="rec-item"><span class="t">今日 ${now}</span><span class="m"><span>${dur}</span></span></button>`);
+  }
+  function setSession(on) {
+    sessionOn = on;
+    $('#recBtn').classList.toggle('rec', on);
+    const now = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    if (on) {
+      sessionSec = 0;
+      $('#recLabel').textContent = '0:00';
+      sessionTimer = setInterval(() => {
+        sessionSec++;
+        $('#recLabel').textContent = fmt(sessionSec);
+      }, 1000);
+      $('#captions').insertAdjacentHTML('beforeend',
+        `<div class="rec-marker">⏺ 録音開始 ${now}</div>`);
+      scrollBottom();
+      toast('録音を開始しました — 文字起こしはそのまま続きます');
+    } else {
+      clearInterval(sessionTimer);
+      $('#recLabel').textContent = '録音';
+      $('#captions').insertAdjacentHTML('beforeend',
+        `<div class="rec-marker end">⏹ 録音終了 ${now} · ${fmt(sessionSec)}</div>`);
+      scrollBottom();
+      addSavedRecording(fmt(sessionSec));
+      toast('Recordings に保存しました');
+    }
+  }
+  $('#recBtn').addEventListener('click', () => setSession(!sessionOn));
+
+  /* ---- デモ字幕フィード ---- */
+  const script = [
+    ['speaker', '相手', 'しかも必要になってくると、あの、思いますので', 'And I think it will become necessary as well'],
+    ['mic', '自分', 'はい、必要なんだと思います。なので、どの段階で導入するかを決めたいです', 'Yes, I think it is necessary. So I want to decide at which stage to introduce it'],
+    ['speaker', '相手', '来月のリリースまでに間に合いますか?', 'Can we make it before next month’s release?'],
+    ['mic', '自分', 'スコープを絞れば間に合うと思います。まず字幕まわりだけ先行させましょう', 'If we narrow the scope, I think we can make it. Let’s ship the captions part first'],
+    ['speaker', '相手', 'わかりました。では設定画面は次のスプリントに回しましょう', 'Got it. Then let’s push the settings screen to the next sprint']
+  ];
+  let idx = 0;
+  let interimEl = null;
+
+  function addCaption([role, who, txt, sub]) {
+    const empty = $('#emptyState');
+    if (empty) empty.remove();
+    const cap = document.createElement('div');
+    cap.className = 'cap ' + role + ' interim' + (sessionOn ? ' in-rec' : '');
+    cap.innerHTML = `<div class="who"><i></i>${who}</div>
+      <p class="txt"></p><p class="sub"></p>`;
+    $('#captions').appendChild(cap);
+    interimEl = cap;
+    const mimiLine = mimiOpen() && ptt ? mimiAdd() : null;
+
+    // 逐次表示(インテリム→確定)のシミュレーション
+    let i = 0;
+    const typer = setInterval(() => {
+      i += 3;
+      cap.querySelector('.txt').textContent = txt.slice(0, i);
+      if (mimiLine) mimiLine.querySelector('p').textContent = txt.slice(0, i);
+      scrollBottom();
+      if (i >= txt.length) {
+        clearInterval(typer);
+        setTimeout(() => {
+          cap.classList.remove('interim');
+          cap.querySelector('.sub').textContent = sub;
+          interimEl = null;
+          scrollBottom();
+          enableFooter();
+        }, 500);
+      }
+    }, 60);
+  }
+
+  function scrollBottom() {
+    const c = $('#captions');
+    const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+    if (stick) c.scrollTop = c.scrollHeight;
+    $('#jumpBtn').classList.toggle('show', !stick);
+  }
+  $('#captions').addEventListener('scroll', () => {
+    const c = $('#captions');
+    const stick = c.scrollHeight - c.scrollTop - c.clientHeight < 120;
+    $('#jumpBtn').classList.toggle('show', !stick);
+  });
+  $('#jumpBtn').addEventListener('click', () => {
+    const c = $('#captions');
+    c.scrollTop = c.scrollHeight;
+  });
+
+  function startFeed() {
+    stopFeed();
+    feedTimer = setInterval(() => {
+      if (interimEl || paused) return;
+      addCaption(script[idx % script.length]);
+      idx++;
+      if (idx === 3) demoSummary();
+    }, 2800);
+  }
+  function stopFeed() { if (feedTimer) { clearInterval(feedTimer); feedTimer = null; } }
+  $('#demoFeed').addEventListener('click', () => { if (paused) togglePause(); else startFeed(); });
+
+  // 起動と同時に文字起こしが走り出す(=アプリの新しい基本動作)
+  syncStatus();
+  setTimeout(startFeed, 1400);
+
+  function enableFooter() {
+    ['ftCopy', 'ftSaveT', 'ftClear'].forEach((id) => ($('#' + id).disabled = false));
+  }
+
+  /* ---- クリア(2度押し確認) ---- */
+  let armed = false;
+  $('#ftClear').addEventListener('click', () => {
+    if (!armed) {
+      armed = true;
+      $('#ftClear').textContent = '本当にクリア?';
+      $('#ftClear').classList.add('arm');
+      setTimeout(() => { armed = false; $('#ftClear').textContent = 'クリア'; $('#ftClear').classList.remove('arm'); }, 3500);
+      return;
+    }
+    $('#captions').innerHTML = '';
+    idx = 0;
+    armed = false;
+    $('#ftClear').textContent = 'クリア';
+    $('#ftClear').classList.remove('arm');
+    ['ftCopy', 'ftSaveT', 'ftClear'].forEach((id) => ($('#' + id).disabled = true));
+  });
+
+  /* ---- AI要約・質問デモ ---- */
+  function demoSummary() {
+    const s = $('#aiSummary');
+    s.classList.remove('placeholder');
+    s.textContent = '導入の必要性で合意。リリースに間に合わせるため、スコープを字幕機能に絞って先行実装し、設定画面は次スプリントに延期する方針。';
+  }
+  $('#aiInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      const q = e.target.value.trim();
+      if (!q) return;
+      e.target.value = '';
+      const turns = $('#aiTurns');
+      turns.insertAdjacentHTML('beforeend', `<div class="ai-q">${q}</div>`);
+      setTimeout(() => {
+        turns.insertAdjacentHTML('beforeend', `<div class="ai-a">(デモ回答) 会話ログを踏まえると、字幕機能を先行させる合意が取れています。</div>`);
+      }, 700);
+    }
+  });
+
+  /* ---- Recordings デモデータ ---- */
+  const recs = [
+    ['昨日', [['7月30日 16:59', '1:03:31', true]]],
+    ['過去30日', [
+      ['ホームさん', '36:30', false],
+      ['ツインホーム 山下さん電話', '04:19', false],
+      ['マネジメント研修', '1:00:52', false]
+    ]]
+  ];
+  const list = $('#recList');
+  recs.forEach(([g, items]) => {
+    list.insertAdjacentHTML('beforeend', `<div class="group">${g}</div>`);
+    items.forEach(([t, d, active]) => {
+      list.insertAdjacentHTML('beforeend',
+        `<button class="rec-item ${active ? 'active' : ''}"><span class="t">${t}</span><span class="m"><span>${d}</span></span></button>`);
+    });
+  });
+  list.addEventListener('click', (e) => {
+    const item = e.target.closest('.rec-item');
+    if (!item) return;
+    $$('.rec-item').forEach((x) => x.classList.remove('active'));
+    item.classList.add('active');
+    $('#rdTitle').textContent = item.querySelector('.t').textContent;
+  });
+
+  /* ---- 波形 ---- */
+  const wave = $('#wave');
+  for (let i = 0; i < 90; i++) {
+    const bar = document.createElement('i');
+    bar.style.height = 8 + Math.abs(Math.sin(i * 0.7) * Math.cos(i * 0.23)) * 30 + 'px';
+    wave.appendChild(bar);
+  }
+  let playing = false;
+  let playPos = 0;
+  let playTimer = null;
+  $('#playBtn').addEventListener('click', () => {
+    playing = !playing;
+    $('#playBtn').textContent = playing ? '❚❚' : '▶';
+    if (playing) {
+      playTimer = setInterval(() => {
+        playPos = (playPos + 1) % 90;
+        $$('#wave i').forEach((b, i) => b.classList.toggle('played', i <= playPos));
+        highlightTr(playPos);
+      }, 120);
+    } else clearInterval(playTimer);
+  });
+  wave.addEventListener('click', (e) => {
+    const r = wave.getBoundingClientRect();
+    playPos = Math.floor(((e.clientX - r.left) / r.width) * 90);
+    $$('#wave i').forEach((b, i) => b.classList.toggle('played', i <= playPos));
+    highlightTr(playPos);
+  });
+
+  /* ---- Recordings 文字起こし ---- */
+  const trData = [
+    ['00:12', '相手', 'しかも必要になってくると思いますので', 'And I think it will become necessary'],
+    ['00:19', '自分', 'はい、必要なんだと思います', 'Yes, I think it is necessary'],
+    ['00:31', '相手', '来月のリリースまでに間に合いますか?', 'Can we make it before the release?'],
+    ['00:44', '自分', 'スコープを絞れば間に合うと思います', 'If we narrow the scope, we can make it'],
+    ['01:02', '相手', 'では設定画面は次のスプリントに回しましょう', 'Let’s push the settings screen to the next sprint']
+  ];
+  const dzData = [
+    ['00:12.4', '話者 1', 'しかも必要になってくると思いますので', 'And I think it will become necessary'],
+    ['00:19.1', '話者 2', 'はい、必要なんだと思います', 'Yes, I think it is necessary'],
+    ['00:31.8', '話者 1', '来月のリリースまでに間に合いますか?', 'Can we make it before the release?'],
+    ['00:44.2', '話者 2', 'スコープを絞れば間に合うと思います', 'If we narrow the scope, we can make it'],
+    ['01:02.6', '話者 1', 'では設定画面は次のスプリントに回しましょう', 'Let’s push the settings screen to the next sprint']
+  ];
+  const spkColor = { '話者 1': '#af52de', '話者 2': 'var(--blue)' };
+  const trList = $('#trList');
+  function renderTr(rows, diarized) {
+    trList.innerHTML = '';
+    rows.forEach(([ts, who, txt, sub], i) => {
+      const label = diarized
+        ? `<span class="spk"><i style="background:${spkColor[who] ?? 'var(--muted)'}"></i>${who}</span>`
+        : `<strong style="font-weight:600; font-size:12px; color:var(--muted);">${who}</strong>`;
+      trList.insertAdjacentHTML('beforeend',
+        `<div class="tr-row" data-i="${i}"><span class="ts">${ts}</span><div>${label}<div>${txt}</div><div class="sub">${sub}</div></div></div>`);
+    });
+  }
+  renderTr(trData, false);
+
+  /* ---- 外部音声の読み込み ---- */
+  let uploadN = 0;
+  $('#uploadBtn').addEventListener('click', () => {
+    uploadN++;
+    $('#recList').insertAdjacentHTML('afterbegin',
+      `<div class="group">読み込んだファイル</div><button class="rec-item"><span class="t">voice-memo-073${uploadN}.m4a</span><span class="m"><span>12:04</span><span>外部</span></span></button>`);
+    toast('読み込みました — 「再処理」から文字起こしできます');
+  });
+
+  /* ---- 再処理(エンジン選択) ---- */
+  const stages = [
+    ['1/3 文字起こし (Whisper large-v3)…', 33],
+    ['2/3 タイムスタンプ補正 (alignment)…', 66],
+    ['3/3 話者分離 (diarization)…', 100]
+  ];
+  let procTimer = null;
+  $$('#trMenu [data-eng]').forEach((mi) => mi.addEventListener('click', () => {
+    closeMenus();
+    const eng = mi.dataset.eng;
+    if (eng !== 'whisperx') {
+      renderTr(trData, false);
+      toast((eng === 'builtin' ? 'Apple 内蔵' : 'Whisper') + ' で再処理しました');
+      return;
+    }
+    // WhisperX: 3段階パイプラインのシミュレーション
+    if (procTimer) clearInterval(procTimer);
+    const proc = $('#proc');
+    proc.classList.add('show');
+    let step = 0;
+    const tick = () => {
+      $('#procStage').textContent = 'WhisperX ' + stages[step][0];
+      $('#procBar').style.width = stages[step][1] + '%';
+      step++;
+      if (step >= stages.length) {
+        clearInterval(procTimer);
+        procTimer = null;
+        setTimeout(() => {
+          proc.classList.remove('show');
+          $('#procBar').style.width = '0%';
+          renderTr(dzData, true);
+          toast('WhisperX の処理が完了しました — 話者を自動で分離しました');
+        }, 900);
+      }
+    };
+    tick();
+    procTimer = setInterval(tick, 1300);
+  }));
+  function highlightTr(pos) {
+    const active = Math.min(trData.length - 1, Math.floor((pos / 90) * trData.length));
+    $$('.tr-row').forEach((r, i) => r.classList.toggle('now', i === active));
+  }
+  trList.addEventListener('click', (e) => {
+    const row = e.target.closest('.tr-row');
+    if (!row) return;
+    const i = +row.dataset.i;
+    playPos = Math.floor((i / trData.length) * 90) + 4;
+    $$('#wave i').forEach((b, j) => b.classList.toggle('played', j <= playPos));
+    $$('.tr-row').forEach((r, j) => r.classList.toggle('now', j === i));
+  });
+
+  /* ---- 対面モード (mimi) ---- */
+  let mfs = 1;
+  const mimiOpen = () => $('#mimi').classList.contains('show');
+  function mimiAdd() {
+    $('#mimi .mimi-hint')?.remove();
+    const el = document.createElement('div');
+    el.className = 'mimi-line';
+    el.innerHTML = `<p></p>`;
+    const body = $('#mimiBody');
+    body.appendChild(el);
+    while (body.children.length > 3) body.firstChild.remove();
+    body.scrollTop = body.scrollHeight;
+    return el;
+  }
+  $('#miMimi').addEventListener('click', () => { closeMenus(); $('#mimi').classList.add('show'); });
+  $('#mimiExit').addEventListener('click', () => $('#mimi').classList.remove('show'));
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && mimiOpen()) $('#mimi').classList.remove('show');
+  });
+  $('#mimiInvert').addEventListener('click', () => $('#mimi').classList.toggle('invert'));
+  function setMfs(v) {
+    mfs = Math.min(2.2, Math.max(0.7, v));
+    $('#mimi').style.setProperty('--mfs', mfs);
+  }
+  $('#mimiBigger').addEventListener('click', () => setMfs(mfs + 0.15));
+  $('#mimiSmaller').addEventListener('click', () => setMfs(mfs - 0.15));
+
+  /* プッシュトゥトーク: 押している間だけ聞き取る
+     (相手が画面の文字を音読しても、ボタンを離していれば拾わない) */
+  let ptt = false;
+  function setPtt(on) {
+    if (ptt === on || !mimiOpen()) return;
+    ptt = on;
+    $('#mimiPtt').classList.toggle('hold', on);
+    $('#pttLabel').textContent = on ? '聞き取り中… 離すと止まります' : '押しながら話す(スペースキーでも可)';
+    if (on && !interimEl) {
+      // デモ: 押した瞬間に次の発話が流れる
+      addCaption(script[idx % script.length]);
+      idx++;
+    }
+  }
+  const pttEl = $('#mimiPtt');
+  pttEl.addEventListener('pointerdown', (e) => { e.preventDefault(); setPtt(true); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) =>
+    pttEl.addEventListener(ev, () => setPtt(false)));
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && mimiOpen() && !e.repeat) { e.preventDefault(); setPtt(true); }
+  });
+  document.addEventListener('keyup', (e) => {
+    if (e.code === 'Space' && mimiOpen()) { e.preventDefault(); setPtt(false); }
+  });
+
+  /* ---- トリム ---- */
+  const waveEl = $('#wave');
+  const DUR = 3811; // 1:03:31 相当(デモ)
+  let trimOn = false;
+  let tL = 15;
+  let tR = 78;
+  let dragging = null;
+  const fmtT = (s) => {
+    s = Math.round(s);
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    const x = String(s % 60).padStart(2, '0');
+    return h ? `${h}:${String(m).padStart(2, '0')}:${x}` : `${m}:${x}`;
+  };
+  function trimUI() {
+    $('#shadeL').style.width = tL + '%';
+    $('#shadeR').style.left = tR + '%';
+    $('#hL').style.left = tL + '%';
+    $('#hR').style.left = tR + '%';
+    $('#trimRange').textContent = fmtT((DUR * tL) / 100) + ' – ' + fmtT((DUR * tR) / 100);
+    const bars = $$('#wave i');
+    bars.forEach((b, i) => {
+      const p = (i / bars.length) * 100;
+      b.style.opacity = p < tL || p > tR ? 0.25 : 1;
+    });
+  }
+  function enterTrim() {
+    if (trimOn) return;
+    trimOn = true;
+    waveEl.insertAdjacentHTML('beforeend',
+      '<div class="trim-shade" id="shadeL" style="left:0"></div>' +
+      '<div class="trim-shade" id="shadeR" style="right:0"></div>' +
+      '<div class="trim-handle" id="hL" data-h="l"></div>' +
+      '<div class="trim-handle" id="hR" data-h="r"></div>');
+    $('#trimBar').classList.add('show');
+    trimUI();
+    [$('#hL'), $('#hR')].forEach((h) =>
+      h.addEventListener('pointerdown', (e) => { dragging = h.dataset.h; e.preventDefault(); }));
+  }
+  function exitTrim() {
+    trimOn = false;
+    ['shadeL', 'shadeR', 'hL', 'hR'].forEach((id) => $('#' + id)?.remove());
+    $('#trimBar').classList.remove('show');
+    $$('#wave i').forEach((b) => (b.style.opacity = 1));
+  }
+  window.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const r = waveEl.getBoundingClientRect();
+    const p = Math.min(100, Math.max(0, ((e.clientX - r.left) / r.width) * 100));
+    if (dragging === 'l') tL = Math.min(p, tR - 4);
+    else tR = Math.max(p, tL + 4);
+    trimUI();
+  });
+  window.addEventListener('pointerup', () => (dragging = null));
+  $('#miTrim').addEventListener('click', () => { closeMenus(); enterTrim(); });
+  $('#trimCancel').addEventListener('click', exitTrim);
+  $('#trimApply').addEventListener('click', () => {
+    const bars = $$('#wave i');
+    const n = bars.length;
+    bars.forEach((b, i) => {
+      const p = (i / n) * 100;
+      if (p < tL || p > tR) b.remove();
+    });
+    const newDur = (DUR * (tR - tL)) / 100;
+    $('#waveTime').textContent = '00:00 / ' + fmtT(newDur);
+    exitTrim();
+    toast('トリムしました — ' + fmtT(newDur) + ' に短縮');
+  });
+
+  /* ---- Settings ---- */
+  $$('.set-side button').forEach((b) => b.addEventListener('click', () => {
+    $$('.set-side button').forEach((x) => x.classList.toggle('active', x === b));
+    $$('.set-pane').forEach((p) => p.classList.toggle('active', p.id === 'pane-' + b.dataset.pane));
+  }));
+  $$('[data-sw]').forEach((sw) => sw.addEventListener('click', () => sw.classList.toggle('on')));
+  $$('[data-radio]').forEach((row) => row.addEventListener('click', () => {
+    const card = row.parentElement;
+    card.querySelectorAll('.radio-dot').forEach((d) => d.classList.remove('on'));
+    row.querySelector('.radio-dot').classList.add('on');
+  }));
+</script>
+</body>
+</html>

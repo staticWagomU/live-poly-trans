@@ -1,88 +1,137 @@
-# LivePolyTrans 改善 + 録音機能追加 実装計画
+# LivePolyTrans UI再編成 実装計画
 
-対象: 問題点 1-1〜1-6 / 2-1〜2-8(2-2は現行デバウンス維持)/ 3の可能な範囲 / 4、
-および録音機能の新規追加。
+仕様の正: `mockups/ui-redesign.html`(2026-07-31 ユーザー合意済み)。
+旧「安定化+UX改善」計画は完了分を除き本計画に吸収した(旧本文は git 履歴参照)。
 
-## 方針
+## 合意済みの設計判断
 
-言語採用判定をSwiftヘルパー内へ移動し「1発話=1イベント」で出力する。
-これにより interim のチラつき(1-1)・二重バブル(1-2)・AIコンテキスト汚染(2-7)を
-根本から解消する。AIは常駐サーバー化してモデルロードを1回にする(2-1)。
+1. **動作モデル**: 起動と同時に文字起こし開始(常時字幕)。「録音」ボタンは
+   保存セッションの開始/終了であり、文字起こしは録音と独立して流れ続ける
+2. **Live画面**: チャットバブル廃止 → 字幕行(メイン言語の大きな本文+サブ言語の訳文)。
+   話者は色ドット付きラベル(自分=青/相手=グレー、diarization後はN話者色分け)
+3. **ツールバー**: Speaker/Both/Mic セグメント・言語ピル(Main→Sub統合メニュー)・
+   ✦(AIパネル開閉)・…メニュー(文字サイズ⌘+/-、コピー、保存)・録音ボタン(録音中はタイマー表示)
+4. **フッター**: 文字起こしステータス+一時停止 | コピー/保存/クリア(2度押し確認)。
+   「音声も保存」トグルは廃止(設定の「録音に音声ファイルを含める」へ)
+5. **録音範囲の可視化**: 字幕ストリームに ⏺開始/⏹終了マーカー+録音中字幕に赤レール
+6. **エンジン2段構え**: ライブ=Apple内蔵/Whisper。録音後の再処理=+WhisperX
+   (transcription + alignment + diarization)
+7. **Recordings**: 外部音声アップロード(スマホ/ボイスレコーダー)、再処理メニュー、
+   トリム(kanary式・波形ハンドル)、書き出し、削除
+8. **対面モード(mimi)**: 耳の不自由な方・ご高齢の方向けの全画面特大字幕モード。
+   ポケトークmimi型。最新発話を特大表示+高コントラスト反転。
+   **プッシュトゥトーク方式**: ボタン(またはスペースキー)を押している間だけ聞き取る。
+   理由: 相手が画面の文字を音読する→それが再度文字起こしされる無限ループを防ぐため。
+   **マイク音声のみを扱い、話者ラベルは表示しない**(スピーカー捕捉はモード中停止)。
+   キーボード返答は不要(ユーザー確認済み)。このモードでは訳文非表示
 
-## Phase 1: Swift — 言語アービトレーション(1-1, 1-2)
+## Phase 0: Tidy First(構造整理のみ、挙動変更なし)
 
-- [x] `TranscriptArbitration.swift`: 純粋関数コア
-  - 時間範囲オーバーラップによる言語間セグメント対応付け(250ms開始時刻比較を廃止)
-  - スコアリング: confidence(重み付き) + NL言語判定一致 + 文字種フィットネス + 密度
-  - 勝者テキストの結合(同言語の連続finalを時間順に連結)
-- [x] `TranscriptArbiter` actor: volatile/finalの集約と単一イベント出力
-  - volatile: 両言語の最新候補から勝者1件のみ emit(レーンはstream単位)
-  - final: 反対言語の同区間finalを最大1.2s待って判定、勝者のみ emit
-- [x] `emitResults` をアービター経由に変更。stdout出力は EventEmitter で直列化
-- [x] テスト(TestSupportハーネスに追加)
+- [ ] 0-1. `+page.svelte`(2046行)の分割: `LiveView.svelte` を新設し、
+      ツールバー/字幕スレッド/AIパネルを子コンポーネント化。既存テストが緑のまま
+- [ ] 0-2. デザイントークンを `src/lib/theme.css` に集約(モックの CSS 変数を移植)。
+      ライト/ダーク両セット定義(`prefers-color-scheme`、旧計画4-7を吸収)
+- [ ] 0-3. キャプチャ状態(activeStreams/sessionIds/restart)を `src/lib/captureState.ts`
+      に純関数として抽出+単体テスト(Phase 1 の土台)
 
-## Phase 2: Swift — 安定化(1-3, 1-4, 1-6, 1-7)
+## Phase 1: 動作モデル転換(最重要・リスク最大)
 
-- [x] 翻訳の非同期化: finalは trans=null で即emit、翻訳完了時に
-      `{type:"translation", stream, segmentId, trans}` を追送(1-3)
-- [x] AudioSilenceGate: 破棄開始を2.5sに延長しfinalize用の無音を確保(1-4)
-- [x] `translation skipped` 等の非致命ログを debug プレフィックスへ(1-6)
-- [x] 言語パック未インストール時に AssetInventory でダウンロード試行、
-      `{type:"status"}` イベントで進捗通知(1-7)
+- [ ] 1-1. 【Swift】helper に stdin 制御チャネル追加: `{"cmd":"start-recording","dir":…}` /
+      `{"cmd":"stop-recording"}` の JSON 行を受けて AudioRecorder を動的に開始/停止。
+      ストリーム再起動なしで録音を出し入れする(現状は起動引数 recordingDir 固定)。
+      TDD: CommandLineOptionsTests に倣い制御行パーサを TestSupport でテスト
+- [ ] 1-2. 【Rust】`start_recording_session` / `stop_recording_session` コマンド新設:
+      create_recording → 稼働中 helper 全プロセスへ制御行送付 → finalize_recording。
+      helper が制御未対応(旧バイナリ)の場合はエラーで明示
+- [ ] 1-3. 【Web】文字起こしと録音の状態分離: `isTranscribing`(常時ON基調)と
+      `recordingSession`(id/開始時刻/経過秒)を別管理。captureState.ts に純関数+テスト
+- [ ] 1-4. 【Web】起動時自動開始: onMount で権限確認 → start。失敗時(マイク/画面収録
+      未許可)は平易な文言で案内(旧計画2-2を吸収)。設定「起動時に自動で開始」
+      (localStorage、デフォルトON)がOFFなら一時停止状態で起動
+- [ ] 1-5. 【Web】一時停止/再開: stop_all_sessions を「pause」として再解釈し、
+      フッターのステータス+ボタンに接続。録音セッション中の一時停止は録音も止まる旨を確認ダイアログ
+- [ ] 1-6. 【Web】録音マーカー: ChatMessage 列に marker アイテム(recording-start/stop、
+      タイムスタンプ)を挿入。transcripts.ts に型追加+表示テスト。録音中フラグを
+      メッセージに付与し赤レール描画
+- [ ] 1-7. 録音停止 → トースト表示+ Recordings リストへ反映(list_recordings 再取得)
 
-## Phase 3: Swift — AI常駐サーバー(2-1, 2-4, 2-5, 2-6)
+## Phase 2: Live画面の刷新(モック準拠)
 
-- [x] `--ai-server`: stdin/stdout JSONL のリクエストループ
-      `{id, command, question?, language?, previousSummary?, history?, transcript}`
-- [x] prewarm + プロセス常駐でモデルロードを初回のみに
-- [x] サマリープロンプト: previousSummary を受けた差分更新(ローリングサマリー)
-- [x] ask/suggest の応答言語を language パラメータ化(日本語ハードコード廃止)
-- [x] ask にチャット履歴(直近ターン)を含める
-- [x] 旧ワンショットAIフラグと死にコードの削除(2-8)
+- [ ] 2-1. 字幕行コンポーネント: transcriptDisplay.ts はそのまま流用し、表示のみ
+      バブル→字幕行へ(メイン19px/サブ14.5px、interim はカーソル点滅+減光)
+- [ ] 2-2. ツールバー再構成: タブセグメント/音源セグメント/言語ピル/✦/…/録音ボタン。
+      言語ピルは Main・Sub を1メニューに統合(「翻訳しない」= sub なし選択肢を新設)
+- [ ] 2-3. …メニュー実装: 文字サイズ(⌘+/⌘−/⌘0)、コピー(⇧⌘C)、保存(⌘S)。
+      キーボードショートカット登録(旧計画4-8を吸収)
+- [ ] 2-4. AIパネルの折りたたみ化: ✦トグルで開閉(既定は閉)。Apple Intelligence
+      非対応機ではパネル内に案内を出し自動要約を止める(旧計画2-5を吸収)
+- [ ] 2-5. フッター実装: ステータスランプ/一時停止/コピー/保存/クリア(2度押し確認は現行移植)
+- [ ] 2-6. 字幕リストのウィンドウ化: 表示上限+「以前を表示」(旧計画3-3を吸収。
+      常時文字起こしになりメッセージ増加が加速するため本フェーズで必須化)
+- [ ] 2-7. 空状態2種(待機中/一時停止中)とジャンプボタンの移植
 
-## Phase 4: Rust — プロセス管理(1-5, 2-7, 2-8, 4)
+## Phase 3: 対面モード(mimi)
 
-- [x] 子プロセス死活監視: exit時に `helper-exited {stream, sessionId, code}` をemit
-- [x] AIサーバーの起動・再起動・リクエスト相関(id)・タイムアウト管理
-- [x] `meeting_transcript` 蓄積と fallback コンテキストの全削除(UIのmessagesに一本化)
-- [x] stop を graceful 化(stdinクローズ→待機→kill)。録音ファイル破損防止
-- [x] エクスポートのファイル名を可読タイムスタンプに
+Phase 1-2 のライブ字幕パイプラインをそのまま使う表示モード。依存が薄いため
+必要なら Phase 2 完了直後に前倒し可能。
 
-## Phase 5: UI — 表示と AI パネル(2-3, 2-4, 2-6, 4)
+- [ ] 3-1. モード切替: Live の「…」メニュー「対面モードへ切り替え」→ 全画面オーバーレイ。
+      ESC/終了で復帰。入場時に speaker ストリームを停止し **mic のみ**へ切り替え、
+      退出時に元の音源構成を復元する
+- [ ] 3-2. 特大字幕表示: 最新発話 48px 基準(専用スケール 0.7〜2.2x、A−/A＋ボタンは
+      44pt 以上のタッチターゲット)。直前2発話は縮小・減光して上に残す。
+      interim は本文と同様に逐次更新。**話者ラベルは表示しない**(純粋なテキストのみ)
+- [ ] 3-3. 高コントラスト反転(白地黒字⇔黒地白字)。両モードでコントラスト比 7:1 以上
+- [ ] 3-4. プッシュトゥトーク: 大型ボタン(全幅・64pt)とスペースキーの押下中だけ
+      音声認識を有効化。実装は Phase 1-5 の pause/resume 基盤を流用し、
+      押下=resume/解放=pause をヘルパーに送る(音読ループ防止が目的なので、
+      離した瞬間に interim を確定 or 破棄する挙動を実機で検証して決める)
+- [ ] 3-5. このモードでは訳文非表示(既定)。表示スケール等の設定は localStorage 永続化
+- [ ] 3-6. アクセシビリティ検証: 文字サイズ最大時のレイアウト崩れ、
+      Reduce Motion 時のアニメーション抑制
 
-- [x] 単一レーンイベント前提に interim/final 適用ロジックを簡素化、
-      translation イベントの追記対応。transcriptSelection の競合判定を削除
-- [x] helper-exited 受信時の自動再起動(バックオフ付き、最大3回)(1-5)
-- [x] 自動サマリー失敗をSummaryセクション内に表示(2-3)。デバウンスは現行維持(2-2)
-- [x] ローリングサマリー状態管理: previousSummary + 新規分のみ送信、文字数上限(2-4)
-- [x] AIチャットを履歴付きスレッド表示に(2-6)
-- [x] 不足ボタンの実装: Refresh Languages / Copy / Save / Clear(4)
-- [x] デフォルト言語ペア: システム言語をMainに(2-5)
+## Phase 4: Settings 刷新(小)
 
-## Phase 6: 録音機能(新規)
+- [ ] 4-1. サイドバーナビ化(一般/認識モデル/言語)。既存の言語パック・モデル選択UIを
+      「言語」「認識モデル」ペインへ移設、言語再検出↻もここへ
+- [ ] 4-2. 「一般」ペイン新設: 起動時自動開始トグル/録音に音声を含めるトグル/保存先表示
+- [ ] 4-3. 言語パックDL進捗の表示改善(旧計画4-5を吸収、最低限スピナー+完了反映)
 
-要件:
-- マイクとスピーカーを別々に録音(ライブ文字起こしと並行)
-- 確認画面: 右=録音ファイル一覧、中央=選択した音声の波形、下=タイムスタンプ付き
-  文字起こし(クリックで該当位置へシーク)
-- mic のみ / speaker のみ / 統合版(ミックス)をダウンロード可能
+## Phase 5: Recordings 刷新
 
-実装:
-- [x] Swift: `--record-file` で m4a(AAC 48k mono) 録音、stdin EOF/SIGTERMで確定
-- [x] Swift: `--transcript-file` で確定イベントをJSONL保存(startMs付き)
-- [x] Swift: `--waveform <file>` 波形ピークJSON出力 / `--mix a b --output out` ミックス
-- [x] Rust: recordings ディレクトリ管理、list/read/waveform/export コマンド
-- [x] UI: Live/Recordings タブ、波形canvas + audio再生、transcriptクリックでシーク
-- [x] tauri.conf: asset protocol 有効化(録音再生用)
+- [ ] 5-1. サイドバー+詳細の2ペイン化(日付グループ: 今日/昨日/過去30日/それ以前)。
+      recordings.ts にグルーピング純関数+テスト
+- [ ] 5-2. アクションメニュー化: 書き出し(mic/speaker/mixed)+削除を集約(機能は現行流用)
+- [ ] 5-3. 外部音声アップロード: 「＋音声ファイルを読み込む」+ドラッグ&ドロップ。
+      【Rust】`import_audio_file` コマンド(m4a/wav/mp3 を recordings ディレクトリへ
+      コピー+meta 生成、source=external)。取り込み後は再処理導線へ誘導
+- [ ] 5-4. トリム: 波形に開始/終了ハンドル(選択範囲を残す)。
+      【Rust】`trim_recording`: ffmpeg or AudioFileTools 系で `trimmed.m4a` を別生成
+      (元ファイル温存)。トランスクリプトも範囲外を除去+タイムスタンプをシフト
+      (純関数 `trimTranscript(items, startMs, endMs)` を TDD で先行)
+- [ ] 5-5. トリム/削除の確認: 適用時に確認ダイアログ(破壊的操作の HIG 準拠)
 
-## Phase 7: 仕上げ
+## Phase 6: 事後処理パイプライン(WhisperX)
 
-- [x] README更新(実在するUIと一致させる)
-- [x] 全テスト実行(vitest / swift / cargo)
+- [ ] 6-1. 【調査spike】WhisperX 実行形態の決定: uvx/pipx 検出 → subprocess 実行 →
+      JSON 出力パース。diarization は pyannote(HF トークン必要)のため、
+      トークン未設定時は「話者分離なしで実行」へフォールバックする仕様を先に固める
+- [ ] 6-2. 【Rust】`reprocess_recording(id, engine)` コマンド: engine=builtin/whisper/whisperx。
+      進捗イベント(transcribe→align→diarize)を emit、結果は `transcript.whisperx.jsonl`
+      として元と並存(非破壊)
+- [ ] 6-3. 【Web】再処理メニュー+3段階進捗バー(モック準拠)。完了後は話者ラベル付き
+      表示(話者N の色割当は recordings.ts に純関数+テスト)
+- [ ] 6-4. 設定「認識モデル」ペインに WhisperX 要件の案内(インストール状況/HFトークン入力)
 
-## 決定事項
+## 検証ゲート(全フェーズ共通)
 
-- 録音フォーマット: m4a(AAC)。1時間で約15MB。graceful stopで確定処理する
-- 波形生成はヘルパー側でピーク抽出(巨大ファイルをWebViewでデコードしない)
-- サマリーの自動更新はデバウンス6sのまま(ユーザー判断)
-- Rust側の会議コンテキスト二重管理は廃止し、UIの messages を唯一のソースにする
+- `bun run test`(svelte-check → vitest)+ `scripts/test-swift-helper.sh` を各項目の完了条件とする
+- Phase 1 完了時に実機で: 起動→自動字幕→録音開始/停止→Recordings 反映→⌘Q 中断安全性
+- Phase 3 完了時に: 対面モードの文字サイズ最大・反転・実距離(1m)での可読性確認
+- Phase 5-4 完了時に: トリム後の波形シーク⇔トランスクリプト同期ズレがないこと
+
+## 対象外(今回見送り)
+
+- メニューバー常駐・字幕オーバーレイ小窓(ハイブリッド案の将来拡張として保留)
+- ライブ字幕への WhisperX 適用(リアルタイム diarization は非対応)
+- iCloud 同期、AI コンテキスト上限管理(別計画)
