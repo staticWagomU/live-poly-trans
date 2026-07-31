@@ -35,6 +35,34 @@ export function isCurrentSessionEvent(
   return sessions[event.stream] === event.sessionId;
 }
 
+/// A recording session the user opened on top of the always-running
+/// transcription. Transcription state (activeStreams) and recording state
+/// are deliberately independent: stopping one must not touch the other.
+export type RecordingSession = {
+  id: string;
+  dir: string;
+  startedAtMs: number;
+};
+
+export function recordingElapsedSeconds(
+  session: Pick<RecordingSession, 'startedAtMs'>,
+  nowMs: number
+): number {
+  return Math.max(0, Math.floor((nowMs - session.startedAtMs) / 1000));
+}
+
+export function formatRecordingTimer(elapsedSeconds: number): string {
+  const hours = Math.floor(elapsedSeconds / 3600);
+  const minutes = Math.floor((elapsedSeconds % 3600) / 60);
+  const seconds = elapsedSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+  }
+
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
 /// Decides whether an auto-restart attempt may still start its stream once
 /// its backoff delay has elapsed. The world can change during the delay in
 /// three ways, each of which must cancel the restart:

@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   emptyStreamSessions,
+  formatRecordingTimer,
   isCurrentSessionEvent,
+  recordingElapsedSeconds,
   shouldRestartStream,
   withStreamSession,
   withoutStreamSessions
@@ -58,6 +60,29 @@ describe('isCurrentSessionEvent', () => {
     expect(isCurrentSessionEvent(sessions, { stream: 'speaker', sessionId: 'spk-1' })).toBe(
       false
     );
+  });
+});
+
+describe('recordingElapsedSeconds', () => {
+  it('reports whole seconds since the session started', () => {
+    expect(recordingElapsedSeconds({ startedAtMs: 10_000 }, 73_400)).toBe(63);
+  });
+
+  it('never goes negative when clocks skew', () => {
+    expect(recordingElapsedSeconds({ startedAtMs: 10_000 }, 9_000)).toBe(0);
+  });
+});
+
+describe('formatRecordingTimer', () => {
+  it('formats minutes and zero-padded seconds', () => {
+    expect(formatRecordingTimer(0)).toBe('0:00');
+    expect(formatRecordingTimer(63)).toBe('1:03');
+    expect(formatRecordingTimer(600)).toBe('10:00');
+  });
+
+  it('adds an hours segment past one hour', () => {
+    expect(formatRecordingTimer(3_600)).toBe('1:00:00');
+    expect(formatRecordingTimer(3_723)).toBe('1:02:03');
   });
 });
 

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { applyTranslationEvent, transcriptEventToMessage } from './transcripts';
+import {
+  applyTranslationEvent,
+  interleaveThreadItems,
+  isRecordingMarker,
+  recordingStartMarker,
+  recordingStopMarker,
+  transcriptEventToMessage
+} from './transcripts';
 import type { ChatMessage } from './transcripts';
 
 describe('transcriptEventToMessage', () => {
@@ -184,5 +191,82 @@ describe('applyTranslationEvent', () => {
     });
 
     expect(updated).toEqual([finalMessage]);
+  });
+});
+
+describe('recording markers', () => {
+  const message = (id: string): ChatMessage => ({
+    id,
+    role: 'self',
+    speakerId: 'self',
+    speakerLabel: 'Speaker A',
+    language: 'en-US',
+    text: id,
+    translation: null,
+    isFinal: true,
+    timestamp: '2026-07-31T00:00:00Z',
+    segmentId: id
+  });
+
+  it('builds start and stop markers anchored to the current message count', () => {
+    const start = recordingStartMarker('rec-1', '2026-07-31T10:00:00Z', 2);
+
+    expect(start).toEqual({
+      kind: 'recording-marker',
+      id: 'rec-1-start',
+      phase: 'start',
+      timestamp: '2026-07-31T10:00:00Z',
+      afterMessageCount: 2
+    });
+
+    expect(recordingStopMarker('rec-1', '2026-07-31T10:05:30Z', 5, 330)).toEqual({
+      kind: 'recording-marker',
+      id: 'rec-1-stop',
+      phase: 'stop',
+      timestamp: '2026-07-31T10:05:30Z',
+      afterMessageCount: 5,
+      durationSeconds: 330
+    });
+  });
+
+  it('identifies markers among thread items', () => {
+    expect(isRecordingMarker(recordingStartMarker('rec-1', 't', 0))).toBe(true);
+    expect(isRecordingMarker(message('m1'))).toBe(false);
+  });
+
+  it('interleaves markers at their anchored positions', () => {
+    const messages = [message('m1'), message('m2'), message('m3')];
+    const start = recordingStartMarker('rec-1', 't1', 1);
+    const stop = recordingStopMarker('rec-1', 't2', 3, 60);
+
+    expect(interleaveThreadItems(messages, [start, stop]).map((item) => item.id)).toEqual([
+      'm1',
+      'rec-1-start',
+      'm2',
+      'm3',
+      'rec-1-stop'
+    ]);
+  });
+
+  it('keeps marker order stable when several share a position', () => {
+    const messages = [message('m1')];
+    const stop = recordingStopMarker('rec-1', 't1', 1, 10);
+    const start = recordingStartMarker('rec-2', 't2', 1);
+
+    expect(interleaveThreadItems(messages, [stop, start]).map((item) => item.id)).toEqual([
+      'm1',
+      'rec-1-stop',
+      'rec-2-start'
+    ]);
+  });
+
+  it('clamps markers anchored beyond the current list to the end', () => {
+    const messages = [message('m1')];
+    const start = recordingStartMarker('rec-1', 't1', 9);
+
+    expect(interleaveThreadItems(messages, [start]).map((item) => item.id)).toEqual([
+      'm1',
+      'rec-1-start'
+    ]);
   });
 });

@@ -57,11 +57,88 @@ export type ChatMessage = {
   timestamp: string;
   sessionId?: string;
   segmentId: string;
+  /// True when this utterance was captured while a recording session was
+  /// open; the caption stream draws the red recording rail on it.
+  inRecording?: boolean;
   confidence?: number;
   detectedLanguage?: string;
   detectedLanguageConfidence?: number;
   spans?: TranscriptSpan[];
 };
+
+/// A recording start/stop line rendered inside the caption stream. Markers
+/// are anchored by how many final messages existed when they were created
+/// (arrival order), not by timestamp — mic and speaker clocks are not
+/// comparable, but arrival order is what the user saw.
+export type RecordingMarker = {
+  kind: 'recording-marker';
+  id: string;
+  phase: 'start' | 'stop';
+  timestamp: string;
+  afterMessageCount: number;
+  durationSeconds?: number;
+};
+
+export type ThreadItem = ChatMessage | RecordingMarker;
+
+export function isRecordingMarker(item: ThreadItem): item is RecordingMarker {
+  return 'kind' in item && item.kind === 'recording-marker';
+}
+
+export function recordingStartMarker(
+  recordingId: string,
+  timestamp: string,
+  afterMessageCount: number
+): RecordingMarker {
+  return {
+    kind: 'recording-marker',
+    id: `${recordingId}-start`,
+    phase: 'start',
+    timestamp,
+    afterMessageCount
+  };
+}
+
+export function recordingStopMarker(
+  recordingId: string,
+  timestamp: string,
+  afterMessageCount: number,
+  durationSeconds: number
+): RecordingMarker {
+  return {
+    kind: 'recording-marker',
+    id: `${recordingId}-stop`,
+    phase: 'stop',
+    timestamp,
+    afterMessageCount,
+    durationSeconds
+  };
+}
+
+/// Weaves markers into the message list at their anchored positions.
+/// Markers anchored past the end (messages were cleared afterwards) clamp
+/// to the end instead of disappearing.
+export function interleaveThreadItems(
+  messages: ChatMessage[],
+  markers: RecordingMarker[]
+): ThreadItem[] {
+  const items: ThreadItem[] = [];
+
+  for (let position = 0; position <= messages.length; position += 1) {
+    for (const marker of markers) {
+      const anchor = Math.min(marker.afterMessageCount, messages.length);
+      if (anchor === position) {
+        items.push(marker);
+      }
+    }
+
+    if (position < messages.length) {
+      items.push(messages[position]);
+    }
+  }
+
+  return items;
+}
 
 export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
   const segmentId = event.segmentId ?? `${event.timestamp}-${event.text}`;
