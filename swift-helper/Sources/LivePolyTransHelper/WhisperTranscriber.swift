@@ -113,7 +113,13 @@ public func runWhisperTranscription(
     recordFile: recordFile,
     whisperFormat: whisperFormat
   )
-  installWhisperShutdownHandlers(stream: stream, inputSource: inputSource, runner: runner)
+  installWhisperShutdownHandlers(
+    stream: stream,
+    inputSource: inputSource,
+    runner: runner,
+    emitter: emitter
+  )
+  await emitter.emitStatus(StatusEvent(stream: stream, state: "control-ready"))
 
   // Chunks transcribe strictly in arrival order so final bubbles never
   // reorder; whisper inference for the current chunk runs while the next
@@ -183,7 +189,7 @@ public func runWhisperTranscription(
     }
     chunkContinuation.finish()
     await consumer.value
-    inputSource.recorder?.finalize()
+    inputSource.recordingSink.stopRecording()
     runner.cleanup()
     helperDebugLog("whisper-stream-finished stream=\(stream.rawValue)")
   } catch {
@@ -195,7 +201,7 @@ public func runWhisperTranscription(
     // delete the temp directory under a still-running child.
     await consumer.value
     inputSource.cleanup()
-    inputSource.recorder?.finalize()
+    inputSource.recordingSink.stopRecording()
     runner.cleanup()
     throw error
   }
@@ -216,14 +222,17 @@ private func makeWhisperInputSource(
     )
   case .speaker:
     let speakerInput = try await SpeakerTapInput()
-    let recorder = try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
+    let recordingSink = RecordingSink(
+      sourceFormat: speakerInput.audioFormat,
+      initialRecorder: try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
+    )
     let sequence = try await speakerInput.makeCaptureSequence(
       targetFormat: whisperFormat,
-      recorder: recorder,
+      recordingSink: recordingSink,
       transform: { $0 }
     )
 
-    return AudioInputSource(sequence: sequence, recorder: recorder) {
+    return AudioInputSource(sequence: sequence, recordingSink: recordingSink) {
       helperDebugLog("speaker-cleanup")
       speakerInput.stop()
     }
@@ -270,7 +279,8 @@ private let whisperShutdownGraceSeconds: Double = 10
 private func installWhisperShutdownHandlers(
   stream: AudioStream,
   inputSource: AudioInputSource<CapturedAudioBuffer>,
-  runner: WhisperCliRunner
+  runner: WhisperCliRunner,
+  emitter: HelperEventEmitter
 ) {
   let trigger: @Sendable () -> Void = {
     whisperShutdownOnce.run {
@@ -283,17 +293,19 @@ private func installWhisperShutdownHandlers(
         // The drain overran the grace: kill the in-flight whisper-cli so it
         // does not outlive this process, save the audio, then exit.
         runner.terminateInFlight()
-        inputSource.recorder?.finalize()
+        inputSource.recordingSink.stopRecording()
         runner.cleanup()
         exit(0)
       }
     }
   }
 
-  DispatchQueue.global().async {
-    while readLine(strippingNewline: false) != nil {}
-    trigger()
-  }
+  runHelperControlLoop(
+    stream: stream,
+    sink: inputSource.recordingSink,
+    emitter: emitter,
+    onShutdown: trigger
+  )
 
   signal(SIGTERM, SIG_IGN)
   let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())

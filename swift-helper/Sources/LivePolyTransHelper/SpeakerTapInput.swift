@@ -74,7 +74,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
 
   public func makeInputSequence(
     analyzerFormat: AVAudioFormat,
-    recorder: AudioRecorder? = nil
+    recordingSink: RecordingSink? = nil
   ) async throws -> AsyncThrowingStream<AnalyzerInput, Error> {
     // Trailing silence must reach the analyzer long enough to trigger
     // finalization of the pending segment; only prolonged silence is dropped
@@ -86,7 +86,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
     )
     return try await makeCaptureSequence(
       targetFormat: analyzerFormat,
-      recorder: recorder,
+      recordingSink: recordingSink,
       shouldInclude: { silenceGate.shouldEmit($0) },
       transform: { AnalyzerInput(buffer: $0.buffer, bufferStartTime: $0.startTime) }
     )
@@ -99,7 +99,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
   /// before it so gated gaps stay on the file/clock timeline.
   public func makeCaptureSequence<Element: Sendable>(
     targetFormat: AVAudioFormat,
-    recorder: AudioRecorder? = nil,
+    recordingSink: RecordingSink? = nil,
     shouldInclude: @escaping @Sendable (AVAudioPCMBuffer) -> Bool = { _ in true },
     transform: @escaping @Sendable (CapturedAudioBuffer) -> Element
   ) async throws -> AsyncThrowingStream<Element, Error> {
@@ -126,7 +126,7 @@ public final class SpeakerTapInput: @unchecked Sendable {
           // Recording taps the raw capture BEFORE silence gating so the file
           // timeline matches transcript timestamps sample for sample.
           let bufferStartTime = captureClock.advance(by: buffer.frameLength)
-          recorder?.write(buffer)
+          recordingSink?.write(buffer)
 
           guard shouldInclude(buffer) else {
             return

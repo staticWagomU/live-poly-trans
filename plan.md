@@ -36,7 +36,7 @@
 
 ## Phase 1: 動作モデル転換(最重要・リスク最大)
 
-- [ ] 1-1. 【Swift】helper に stdin 制御チャネル追加: `{"cmd":"start-recording","dir":…}` /
+- [x] 1-1. 【Swift】helper に stdin 制御チャネル追加: `{"cmd":"start-recording","dir":…}` /
       `{"cmd":"stop-recording"}` の JSON 行を受けて AudioRecorder を動的に開始/停止。
       ストリーム再起動なしで録音を出し入れする(現状は起動引数 recordingDir 固定)。
       TDD: CommandLineOptionsTests に倣い制御行パーサを TestSupport でテスト

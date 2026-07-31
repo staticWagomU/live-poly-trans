@@ -52,11 +52,17 @@ public struct StatusEvent: Codable, Equatable, Sendable {
 /// partial JSON lines.
 public actor HelperEventEmitter {
   private let segmentWriter: SegmentWriter?
-  private let transcriptWriter: JsonlFileWriter?
+  private var transcriptWriter: JsonlFileWriter?
 
   public init(segmentWriter: SegmentWriter?, transcriptWriter: JsonlFileWriter?) {
     self.segmentWriter = segmentWriter
     self.transcriptWriter = transcriptWriter
+  }
+
+  /// Recording start/stop swaps the per-recording transcript file while the
+  /// stream keeps running; nil detaches it.
+  public func setTranscriptWriter(_ writer: JsonlFileWriter?) {
+    transcriptWriter = writer
   }
 
   public func emitInterim(_ event: TranscriptEvent) {

@@ -30,6 +30,7 @@ swiftc \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioRecorder.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AppleIntelligenceService.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/CommandLineOptions.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ControlChannel.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/DebugLog.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/HelperEvents.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ISO8601Timestamp.swift" \

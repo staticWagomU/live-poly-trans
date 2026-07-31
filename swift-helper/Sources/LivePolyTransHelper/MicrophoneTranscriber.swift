@@ -93,7 +93,13 @@ public func runMicrophoneTranscription(
     }
   }
 
-  installShutdownHandlers(stream: stream, analyzer: analyzer, inputSource: inputSource)
+  installShutdownHandlers(
+    stream: stream,
+    analyzer: analyzer,
+    inputSource: inputSource,
+    emitter: emitter
+  )
+  await emitter.emitStatus(StatusEvent(stream: stream, state: "control-ready"))
 
   do {
     helperDebugLog("speech-analyzer-start stream=\(stream.rawValue)")
@@ -102,13 +108,13 @@ public func runMicrophoneTranscription(
       try await task.value
     }
     await arbiter.flushAll()
-    inputSource.recorder?.finalize()
+    inputSource.recordingSink.stopRecording()
     helperDebugLog("stream-finished stream=\(stream.rawValue)")
   } catch {
     helperDebugLog("stream-error stream=\(stream.rawValue) error=\(diagnosticDescription(for: error))")
     resultTasks.forEach { $0.cancel() }
     inputSource.cleanup()
-    inputSource.recorder?.finalize()
+    inputSource.recordingSink.stopRecording()
     throw error
   }
 }
@@ -220,7 +226,8 @@ final class ShutdownOnce: @unchecked Sendable {
 private func installShutdownHandlers(
   stream: AudioStream,
   analyzer: SpeechAnalyzer,
-  inputSource: AudioInputSource<AnalyzerInput>
+  inputSource: AudioInputSource<AnalyzerInput>,
+  emitter: HelperEventEmitter
 ) {
   let trigger: @Sendable () -> Void = {
     shutdownOnce.run {
@@ -231,16 +238,18 @@ private func installShutdownHandlers(
       }
       DispatchQueue.global().asyncAfter(deadline: .now() + 5) {
         helperDebugLog("shutdown-timeout stream=\(stream.rawValue)")
-        inputSource.recorder?.finalize()
+        inputSource.recordingSink.stopRecording()
         exit(0)
       }
     }
   }
 
-  DispatchQueue.global().async {
-    while readLine(strippingNewline: false) != nil {}
-    trigger()
-  }
+  runHelperControlLoop(
+    stream: stream,
+    sink: inputSource.recordingSink,
+    emitter: emitter,
+    onShutdown: trigger
+  )
 
   signal(SIGTERM, SIG_IGN)
   let source = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
@@ -316,7 +325,10 @@ func makeMicrophoneCaptureSource<Element: Sendable>(
   let inputFormat = input.outputFormat(forBus: 0)
   let targetFormat = try await resolveTargetFormat(inputFormat)
   let converter = audioConverter(from: inputFormat, to: targetFormat)
-  let recorder = try AudioRecorder(path: recordFile, sourceFormat: inputFormat)
+  let recordingSink = RecordingSink(
+    sourceFormat: inputFormat,
+    initialRecorder: try AudioRecorder(path: recordFile, sourceFormat: inputFormat)
+  )
   let audioCounter = AudioDebugCounter(label: "mic")
 
   helperDebugLog("mic-input-format {\(audioFormatDescription(inputFormat))}")
@@ -328,7 +340,7 @@ func makeMicrophoneCaptureSource<Element: Sendable>(
     input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
       do {
         audioCounter.record(buffer)
-        recorder?.write(buffer)
+        recordingSink.write(buffer)
         let convertedBuffer = try convertBuffer(buffer, to: targetFormat, using: converter)
         continuation.yield(transform(CapturedAudioBuffer(buffer: convertedBuffer)))
       } catch {
@@ -341,7 +353,7 @@ func makeMicrophoneCaptureSource<Element: Sendable>(
   helperDebugLog("mic-engine-started")
   return AudioInputSource(
     sequence: inputSequence,
-    recorder: recorder
+    recordingSink: recordingSink
   ) {
     helperDebugLog("mic-cleanup")
     engine.stop()
@@ -365,13 +377,16 @@ private func makeSpeakerInputSource(
   helperDebugLog("speaker-analyzer-format {\(audioFormatDescription(analyzerFormat))}")
   try await analyzer.prepareToAnalyze(in: analyzerFormat)
   helperDebugLog("speaker-analyzer-prepared")
-  let recorder = try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
+  let recordingSink = RecordingSink(
+    sourceFormat: speakerInput.audioFormat,
+    initialRecorder: try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
+  )
   let sequence = try await speakerInput.makeInputSequence(
     analyzerFormat: analyzerFormat,
-    recorder: recorder
+    recordingSink: recordingSink
   )
 
-  return AudioInputSource(sequence: sequence, recorder: recorder) {
+  return AudioInputSource(sequence: sequence, recordingSink: recordingSink) {
     helperDebugLog("speaker-cleanup")
     speakerInput.stop()
   }
@@ -398,16 +413,16 @@ final class ContinuationBox<Element: Sendable>: @unchecked Sendable {
 
 struct AudioInputSource<Element: Sendable>: @unchecked Sendable {
   let sequence: AsyncThrowingStream<Element, Error>
-  let recorder: AudioRecorder?
+  let recordingSink: RecordingSink
   let cleanup: @Sendable () -> Void
 
   init(
     sequence: AsyncThrowingStream<Element, Error>,
-    recorder: AudioRecorder? = nil,
+    recordingSink: RecordingSink,
     cleanup: @escaping @Sendable () -> Void
   ) {
     self.sequence = sequence
-    self.recorder = recorder
+    self.recordingSink = recordingSink
     self.cleanup = cleanup
   }
 }

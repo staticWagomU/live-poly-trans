@@ -19,6 +19,10 @@ struct CommandLineOptionsTests {
     try defaultsToBuiltinTranscriptionEngine()
     try rejectsUnknownTranscriptionEngine()
     try rejectsWhisperEngineWithoutModelAndCliPaths()
+    try parsesStartRecordingControlLine()
+    try parsesStopRecordingControlLine()
+    try ignoresMalformedControlLines()
+    try choosesNonClobberingRecordingFilePath()
     try readsValueAfterFlag()
     try readsRepeatedValuesAfterFlag()
     try formatsIso8601Timestamp()
@@ -641,6 +645,50 @@ struct CommandLineOptionsTests {
     if actual != expected {
       throw TestFailure(message: "Expected \(expected), got \(actual)")
     }
+  }
+
+  static func parsesStartRecordingControlLine() throws {
+    try expectEqual(
+      parseHelperControlLine(#"{"cmd":"start-recording","dir":"/tmp/rec-1"}"#),
+      .startRecording(directory: "/tmp/rec-1")
+    )
+  }
+
+  static func parsesStopRecordingControlLine() throws {
+    try expectEqual(parseHelperControlLine(#"{"cmd":"stop-recording"}"#), .stopRecording)
+  }
+
+  static func ignoresMalformedControlLines() throws {
+    try expectEqual(parseHelperControlLine(""), nil)
+    try expectEqual(parseHelperControlLine("   \n"), nil)
+    try expectEqual(parseHelperControlLine("not json"), nil)
+    try expectEqual(parseHelperControlLine(#"{"cmd":"unknown"}"#), nil)
+    try expectEqual(parseHelperControlLine(#"{"cmd":"start-recording"}"#), nil)
+    try expectEqual(parseHelperControlLine(#"{"cmd":"start-recording","dir":""}"#), nil)
+    try expectEqual(parseHelperControlLine(#"["cmd"]"#), nil)
+  }
+
+  static func choosesNonClobberingRecordingFilePath() throws {
+    try expectEqual(
+      nextRecordingFilePath(directory: "/rec", stream: .mic, fileExists: { _ in false }),
+      "/rec/mic.m4a"
+    )
+    try expectEqual(
+      nextRecordingFilePath(
+        directory: "/rec",
+        stream: .speaker,
+        fileExists: { $0 == "/rec/speaker.m4a" }
+      ),
+      "/rec/speaker-2.m4a"
+    )
+    try expectEqual(
+      nextRecordingFilePath(
+        directory: "/rec",
+        stream: .mic,
+        fileExists: { $0 == "/rec/mic.m4a" || $0 == "/rec/mic-2.m4a" }
+      ),
+      "/rec/mic-3.m4a"
+    )
   }
 
   static func readsValueAfterFlag() throws {
