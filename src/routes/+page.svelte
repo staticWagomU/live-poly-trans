@@ -88,6 +88,7 @@
   };
 
   const autoStartPreferenceKey = 'lpt-auto-start';
+  const includeAudioPreferenceKey = 'lpt-include-audio';
   const fontScalePreferenceKey = 'lpt-transcript-font-scale';
   const speechModelPreferenceKey = 'lpt-speech-model';
   const summaryRefreshDelayMs = 6000;
@@ -134,6 +135,8 @@
   let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
   let aiOpen = false;
   let aiUnavailable = false;
+  let autoStartEnabled = true;
+  let includeAudioEnabled = true;
   let mimiActive = false;
   let mimiPreviousMode: CaptureMode = 'both';
   let mimiPreviousRunning = false;
@@ -165,7 +168,9 @@
   onMount(() => {
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
     speechModel = parseSpeechModelPreference(localStorage.getItem(speechModelPreferenceKey));
-    const autoStart = localStorage.getItem(autoStartPreferenceKey) !== '0';
+    autoStartEnabled = localStorage.getItem(autoStartPreferenceKey) !== '0';
+    includeAudioEnabled = localStorage.getItem(includeAudioPreferenceKey) !== '0';
+    const autoStart = autoStartEnabled;
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
       console.error('Failed to remove an app event listener', error);
@@ -350,6 +355,16 @@
   function setTranscriptFontScale(scale: number) {
     transcriptFontScale = scale;
     localStorage.setItem(fontScalePreferenceKey, String(scale));
+  }
+
+  function setAutoStartEnabled(enabled: boolean) {
+    autoStartEnabled = enabled;
+    localStorage.setItem(autoStartPreferenceKey, enabled ? '1' : '0');
+  }
+
+  function setIncludeAudioEnabled(enabled: boolean) {
+    includeAudioEnabled = enabled;
+    localStorage.setItem(includeAudioPreferenceKey, enabled ? '1' : '0');
   }
 
   function setSpeechModel(selection: SpeechModelSelection) {
@@ -546,7 +561,9 @@
     }
 
     try {
-      const created = await invoke<CreatedRecording>('start_recording_session');
+      const created = await invoke<CreatedRecording>('start_recording_session', {
+        includeAudio: includeAudioEnabled
+      });
       recordingSession = { id: created.id, dir: created.dir, startedAtMs: Date.now() };
       recordingElapsed = 0;
       recordingTimer = setInterval(() => {
@@ -637,6 +654,7 @@
         // its recorder at spawn; mid-stream start/stop rides the control
         // channel instead.
         recordingDir: recordingSession?.dir ?? null,
+        recordingAudio: includeAudioEnabled,
         ...streamEnginePayload(speechModel)
       });
     } catch (error) {
@@ -1011,6 +1029,10 @@
           onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
           {speechModel}
           onSpeechModelChanged={setSpeechModel}
+          {autoStartEnabled}
+          onAutoStartChange={setAutoStartEnabled}
+          {includeAudioEnabled}
+          onIncludeAudioChange={setIncludeAudioEnabled}
         />
       {/if}
     </div>

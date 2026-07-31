@@ -665,7 +665,15 @@ struct CommandLineOptionsTests {
   static func parsesStartRecordingControlLine() throws {
     try expectEqual(
       parseHelperControlLine(#"{"cmd":"start-recording","dir":"/tmp/rec-1"}"#),
-      .startRecording(directory: "/tmp/rec-1")
+      .startRecording(directory: "/tmp/rec-1", includeAudio: true)
+    )
+    try expectEqual(
+      parseHelperControlLine(#"{"cmd":"start-recording","dir":"/tmp/rec-1","audio":false}"#),
+      .startRecording(directory: "/tmp/rec-1", includeAudio: false)
+    )
+    try expectEqual(
+      parseHelperControlLine(#"{"cmd":"start-recording","dir":"/tmp/rec-1","audio":true}"#),
+      .startRecording(directory: "/tmp/rec-1", includeAudio: true)
     )
   }
 

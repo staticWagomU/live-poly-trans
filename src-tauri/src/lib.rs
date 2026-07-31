@@ -802,8 +802,8 @@ fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> 
 
 // MARK: recording session control
 
-pub fn start_recording_control_line(dir: &str) -> String {
-    serde_json::json!({ "cmd": "start-recording", "dir": dir }).to_string()
+pub fn start_recording_control_line(dir: &str, include_audio: bool) -> String {
+    serde_json::json!({ "cmd": "start-recording", "dir": dir, "audio": include_audio }).to_string()
 }
 
 pub fn stop_recording_control_line() -> String {
@@ -1000,6 +1000,7 @@ pub mod commands {
         languages: Vec<String>,
         session_id: String,
         recording_dir: Option<String>,
+        recording_audio: Option<bool>,
         engine: Option<String>,
         whisper_model: Option<String>,
     ) -> Result<(), String> {
@@ -1025,11 +1026,17 @@ pub mod commands {
                     let dir = PathBuf::from(dir);
                     fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
                     (
-                        Some(
-                            next_recording_file_path(&dir, &stream)
-                                .to_string_lossy()
-                                .into_owned(),
-                        ),
+                        // The transcript is always part of a recording; audio
+                        // is optional (settings: 録音に音声ファイルを含める).
+                        if recording_audio.unwrap_or(true) {
+                            Some(
+                                next_recording_file_path(&dir, &stream)
+                                    .to_string_lossy()
+                                    .into_owned(),
+                            )
+                        } else {
+                            None
+                        },
                         Some(
                             dir.join(format!("{stream}.jsonl"))
                                 .to_string_lossy()
@@ -1319,6 +1326,7 @@ pub mod commands {
     pub async fn start_recording_session(
         app: AppHandle,
         state: State<'_, HelperSession>,
+        include_audio: Option<bool>,
     ) -> Result<CreatedRecording, String> {
         let children = state.children.clone();
 
@@ -1326,7 +1334,7 @@ pub mod commands {
             wait_for_control_ready(&children, CONTROL_READY_TIMEOUT)?;
             let created = create_recording_blocking(&app)?;
 
-            let line = start_recording_control_line(&created.dir);
+            let line = start_recording_control_line(&created.dir, include_audio.unwrap_or(true));
             if let Err(error) = send_control_line_to_children(&children, &line) {
                 // The dir stays on disk (it may already hold partial data from
                 // helpers that did get the line); mark it closed so it is not
@@ -1366,6 +1374,27 @@ pub mod commands {
 
             eprintln!("live-poly-trans tauri: recording-session-stop id={id}");
             finalize_recording_blocking(&app, &id)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn recordings_directory(app: AppHandle) -> Result<String, String> {
+        Ok(recordings_dir(&app)?.display().to_string())
+    }
+
+    /// Opens the recordings folder in Finder (settings: 保存先を表示).
+    #[tauri::command]
+    pub async fn reveal_recordings_directory(app: AppHandle) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let dir = recordings_dir(&app)?;
+            fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            Command::new("open")
+                .arg(&dir)
+                .spawn()
+                .map_err(|error| error.to_string())?;
+            Ok(())
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1600,6 +1629,8 @@ pub fn run() {
             commands::finalize_recording,
             commands::start_recording_session,
             commands::stop_recording_session,
+            commands::recordings_directory,
+            commands::reveal_recordings_directory,
             commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
@@ -1691,15 +1722,19 @@ mod tests {
     #[test]
     fn recording_control_lines_match_the_helper_protocol() {
         assert_eq!(
-            start_recording_control_line("/tmp/rec-1"),
-            r#"{"cmd":"start-recording","dir":"/tmp/rec-1"}"#
+            start_recording_control_line("/tmp/rec-1", true),
+            r#"{"audio":true,"cmd":"start-recording","dir":"/tmp/rec-1"}"#
+        );
+        assert_eq!(
+            start_recording_control_line("/tmp/rec-1", false),
+            r#"{"audio":false,"cmd":"start-recording","dir":"/tmp/rec-1"}"#
         );
         assert_eq!(stop_recording_control_line(), r#"{"cmd":"stop-recording"}"#);
     }
 
     #[test]
     fn start_recording_control_line_escapes_special_characters() {
-        let line = start_recording_control_line(r#"/tmp/we"ird dir"#);
+        let line = start_recording_control_line(r#"/tmp/we"ird dir"#, true);
         let value: Value = serde_json::from_str(&line).expect("control line is valid JSON");
         assert_eq!(value["dir"], r#"/tmp/we"ird dir"#);
     }

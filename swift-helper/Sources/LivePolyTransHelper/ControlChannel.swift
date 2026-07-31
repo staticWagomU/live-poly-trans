@@ -7,7 +7,9 @@ import Foundation
 /// recording can start and end without restarting audio capture. EOF on
 /// stdin still means shutdown (the Rust side drops the pipe to stop us).
 public enum HelperControlCommand: Equatable, Sendable {
-  case startRecording(directory: String)
+  /// includeAudio=false records the transcript only (the "録音に音声
+  /// ファイルを含める" setting turned off).
+  case startRecording(directory: String, includeAudio: Bool)
   case stopRecording
 }
 
@@ -28,7 +30,10 @@ public func parseHelperControlLine(_ line: String) -> HelperControlCommand? {
     guard let directory = object["dir"] as? String, !directory.isEmpty else {
       return nil
     }
-    return .startRecording(directory: directory)
+    return .startRecording(
+      directory: directory,
+      includeAudio: object["audio"] as? Bool ?? true
+    )
   case "stop-recording":
     return .stopRecording
   default:
@@ -80,9 +85,15 @@ public func runHelperControlLoop(
       }
 
       switch command {
-      case let .startRecording(directory):
-        helperDebugLog("control-start-recording stream=\(stream.rawValue) dir=\(directory)")
-        sink.startRecording(directory: directory, stream: stream)
+      case let .startRecording(directory, includeAudio):
+        helperDebugLog(
+          "control-start-recording stream=\(stream.rawValue) dir=\(directory) audio=\(includeAudio)"
+        )
+        if includeAudio {
+          sink.startRecording(directory: directory, stream: stream)
+        } else {
+          sink.stopRecording()
+        }
         let writer = JsonlFileWriter(
           path: recordingTranscriptFilePath(directory: directory, stream: stream)
         )
