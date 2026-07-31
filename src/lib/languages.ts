@@ -53,3 +53,18 @@ export function transcriptionCandidateLanguages(mainLanguage: string, subLanguag
     (language, index, languages) => language && languages.indexOf(language) === index
   );
 }
+
+export function updateLanguagePair(
+  pair: LanguagePair,
+  side: keyof LanguagePair,
+  language: string
+): LanguagePair {
+  if (
+    (side === 'source' && language === pair.target) ||
+    (side === 'target' && language === pair.source)
+  ) {
+    return { source: pair.target, target: pair.source };
+  }
+
+  return { ...pair, [side]: language };
+}

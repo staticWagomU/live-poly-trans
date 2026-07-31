@@ -6,6 +6,7 @@
     chooseDefaultLanguagePair,
     languageControlLabel,
     transcriptionCandidateLanguages,
+    updateLanguagePair,
     type LanguageInfo
   } from '$lib/languages';
   import {
@@ -678,7 +679,20 @@
         <div class="language-strip" aria-label="Main and sub languages">
           <label>
             <span>Main</span>
-            <select bind:value={mainLanguage} aria-label="Main language">
+            <select
+              value={mainLanguage}
+              aria-label="Main language"
+              disabled={isRecording || isCaptureBusy}
+              on:change={(event) => {
+                const pair = updateLanguagePair(
+                  { source: mainLanguage, target: subLanguage },
+                  'source',
+                  event.currentTarget.value
+                );
+                mainLanguage = pair.source;
+                subLanguage = pair.target;
+              }}
+            >
               {#each installedLanguages as language}
                 <option value={language.id}>{languageControlLabel(language)}</option>
               {/each}
@@ -687,7 +701,20 @@
           <span class="arrow">􀄫</span>
           <label>
             <span>Sub</span>
-            <select bind:value={subLanguage} aria-label="Sub language">
+            <select
+              value={subLanguage}
+              aria-label="Sub language"
+              disabled={isRecording || isCaptureBusy}
+              on:change={(event) => {
+                const pair = updateLanguagePair(
+                  { source: mainLanguage, target: subLanguage },
+                  'target',
+                  event.currentTarget.value
+                );
+                mainLanguage = pair.source;
+                subLanguage = pair.target;
+              }}
+            >
               {#each installedLanguages as language}
                 <option value={language.id}>{languageControlLabel(language)}</option>
               {/each}
@@ -698,6 +725,7 @@
             class="refresh-languages"
             title="Refresh installed languages"
             aria-label="Refresh installed languages"
+            disabled={isRecording || isCaptureBusy}
             on:click={() => detectLanguages(true)}
           >
             ↻
@@ -1151,6 +1179,11 @@
     font-weight: 600;
   }
 
+  .language-strip select:disabled {
+    cursor: default;
+    opacity: 0.56;
+  }
+
   .refresh-languages {
     border: 0;
     border-radius: 8px;
@@ -1160,8 +1193,13 @@
     font-size: 14px;
   }
 
-  .refresh-languages:hover {
+  .refresh-languages:hover:not(:disabled) {
     color: var(--apple-blue);
+  }
+
+  .refresh-languages:disabled {
+    cursor: default;
+    opacity: 0.45;
   }
 
   .arrow {

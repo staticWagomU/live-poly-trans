@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { chooseDefaultLanguagePair, languageControlLabel, transcriptionCandidateLanguages } from './languages';
+import {
+  chooseDefaultLanguagePair,
+  languageControlLabel,
+  transcriptionCandidateLanguages,
+  updateLanguagePair
+} from './languages';
 
 describe('chooseDefaultLanguagePair', () => {
   it('prefers Japanese and English when both installed', () => {
@@ -51,5 +56,37 @@ describe('transcriptionCandidateLanguages', () => {
 
   it('deduplicates matching main and sub languages', () => {
     expect(transcriptionCandidateLanguages('ja-JP', 'ja-JP')).toEqual(['ja-JP']);
+  });
+});
+
+describe('updateLanguagePair', () => {
+  it('updates one side when a different language is selected', () => {
+    expect(
+      updateLanguagePair(
+        { source: 'en-US', target: 'ja-JP' },
+        'source',
+        'fr-FR'
+      )
+    ).toEqual({ source: 'fr-FR', target: 'ja-JP' });
+  });
+
+  it('swaps the pair when main is changed to the current sub language', () => {
+    expect(
+      updateLanguagePair(
+        { source: 'en-US', target: 'ja-JP' },
+        'source',
+        'ja-JP'
+      )
+    ).toEqual({ source: 'ja-JP', target: 'en-US' });
+  });
+
+  it('swaps the pair when sub is changed to the current main language', () => {
+    expect(
+      updateLanguagePair(
+        { source: 'en-US', target: 'ja-JP' },
+        'target',
+        'en-US'
+      )
+    ).toEqual({ source: 'ja-JP', target: 'en-US' });
   });
 });
