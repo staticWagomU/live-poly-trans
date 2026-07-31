@@ -48,6 +48,12 @@
   import RecordingsView from '$lib/RecordingsView.svelte';
   import SettingsView from '$lib/SettingsView.svelte';
   import {
+    missingPermissions,
+    permissionStartupNotice,
+    requiredPermissions,
+    type PermissionStatus
+  } from '$lib/permissions';
+  import {
     parseSpeechModelPreference,
     speechModelPreferenceValue,
     streamEnginePayload,
@@ -143,6 +149,8 @@
   let mimiStartCount = 0;
   let pttHeld = false;
   let pttReconciling = false;
+  let permissionNotice: string | null = null;
+  let settingsPane: 'general' | 'privacy' = 'general';
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');
@@ -200,9 +208,15 @@
 
         await detectLanguages();
 
+        // Launching used to fire every privacy dialog at once, because asking
+        // was the only way to learn the answer. Reading the grants first keeps
+        // the first launch quiet: if something is missing we explain it and
+        // let the user grant it one at a time from Settings.
+        const missing = await missingCapturePermissions();
+
         // The app transcribes from launch (the new base behavior); the
         // preference only decides whether we start paused instead.
-        if (autoStart && !cleanupRegistry.isDisposed()) {
+        if (autoStart && missing.length === 0 && !cleanupRegistry.isDisposed()) {
           await startTranscription();
         }
       })
@@ -229,6 +243,36 @@
       }
     };
   });
+
+  /// Reads the grants without prompting and turns whatever is missing into a
+  /// banner. A probe failure returns nothing missing on purpose — capture then
+  /// runs as before and reports the real error rather than being held back by
+  /// an inconclusive check.
+  async function missingCapturePermissions() {
+    let status: PermissionStatus | null = null;
+    try {
+      status = await invoke<PermissionStatus>('permission_status');
+    } catch (error) {
+      console.error('Could not read the privacy permissions', error);
+    }
+
+    const missing = missingPermissions(status, requiredPermissions(captureMode));
+    permissionNotice = permissionStartupNotice(missing);
+    return missing;
+  }
+
+  function openPrivacySettings() {
+    settingsPane = 'privacy';
+    activeTab = 'settings';
+  }
+
+  /// Re-evaluated whenever Settings reports a change, so granting the last
+  /// missing permission clears the banner without a relaunch.
+  function applyPermissionStatus(status: PermissionStatus) {
+    permissionNotice = permissionStartupNotice(
+      missingPermissions(status, requiredPermissions(captureMode))
+    );
+  }
 
   async function detectLanguages(preserveSelection = false) {
     try {
@@ -980,6 +1024,12 @@
 
     <div class="content-shell">
       <div class="app-alert-slot">
+        {#if permissionNotice && activeTab !== 'settings'}
+          <div class="app-notice" role="status">
+            <p>{permissionNotice}</p>
+            <button type="button" on:click={openPrivacySettings}>設定を開く</button>
+          </div>
+        {/if}
         {#if appError}
           <div class="app-alert" role="alert">
             <p>{appError}</p>
@@ -1033,6 +1083,8 @@
           onAutoStartChange={setAutoStartEnabled}
           {includeAudioEnabled}
           onIncludeAudioChange={setIncludeAudioEnabled}
+          initialPane={settingsPane}
+          onPermissionsChanged={applyPermissionStatus}
         />
       {/if}
     </div>
@@ -1126,5 +1178,36 @@
 
   .app-alert button:hover {
     background: rgba(179, 38, 30, 0.08);
+  }
+
+  /* Missing permissions are a normal first-launch state, not a failure, so
+     this reads as guidance rather than the red error alert above. */
+  .app-notice {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(0, 102, 204, 0.2);
+    background: var(--blue-soft);
+    color: var(--blue);
+    padding: 8px 16px;
+  }
+
+  .app-notice p {
+    flex: 1;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  .app-notice button {
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 7px;
+    background: var(--blue);
+    color: #fff;
+    padding: 5px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
   }
 </style>

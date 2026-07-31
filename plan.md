@@ -139,18 +139,18 @@ uv のバージョンは**ピン留め**し SHA256 をコードに埋め込む(�
 取得系は macOS 標準の `/usr/bin/curl` `/usr/bin/shasum` `/usr/bin/tar` に委譲し、
 Cargo への HTTP/解凍/ハッシュ依存の追加を避ける。
 
-- [ ] 7-1. 【Rust】ピン留め定義と配置先の純関数: `uv_download_for(arch)`(URL/SHA256/
+- [x] 7-1. 【Rust】ピン留め定義と配置先の純関数: `uv_download_for(arch)`(URL/SHA256/
       展開ディレクトリ名)、`managed_uv_dir(app_data)` = `$APPDATA/tools/uv`。
       `locate_program` を `program_candidates(name, home, managed_dir)` に分解し、
       アプリ管理 uv を探索候補の先頭へ。既存の whisperx ランナー選択テストは緑のまま
-- [ ] 7-2. 【Rust】`install_uv_with(download, work_dir, dest_dir, run, report)`:
+- [x] 7-2. 【Rust】`install_uv_with(download, work_dir, dest_dir, run, report)`:
       curl→shasum 照合→tar 展開→uv/uvx 配置→chmod。`run` を関数注入にして
       発行コマンド列と checksum 不一致時の中断を単体テスト。
       `sha256_from_shasum_output` も純関数として切り出す
-- [ ] 7-3. 【Rust】`ensure_uv` コマンド: 既存なら即返し、無ければ 7-2 を実行して
+- [x] 7-3. 【Rust】`ensure_uv` コマンド: 既存なら即返し、無ければ 7-2 を実行して
       進捗を `uv-install-progress`(download/verify/extract/done)で emit。
       `whisperx_status` / `reprocess_recording` はアプリ管理 uv を見るようになる
-- [ ] 7-4. 【Web】設定「認識モデル」の WhisperX 欄を「準備する」ボタン+進捗表示に変更。
+- [x] 7-4. 【Web】設定「認識モデル」の WhisperX 欄を「準備する」ボタン+進捗表示に変更。
       失敗時のみ `brew install uv` の手動導線をフォールバック表示。
       段階ラベルは `src/lib/uvInstall.ts` に純関数+テスト
 
@@ -165,18 +165,18 @@ Cargo への HTTP/解凍/ハッシュ依存の追加を避ける。
 `AVAudioApplication.shared.recordPermission` と `CGPreflightScreenCaptureAccess()`
 (どちらもダイアログを出さない状態取得 API)だけを使い、未許可なら自動開始せず案内に留める。
 
-- [ ] 8-1. 【Swift】`--check-permissions` / `--request-permission <microphone|screen-recording>`
+- [x] 8-1. 【Swift】`--check-permissions` / `--request-permission <microphone|screen-recording>`
       をコマンドに追加。状態取得は非プロンプト API のみ、リクエストは1種類ずつ。
       `permissionState(for:)` の写像と JSON ペイロードを TestSupport でテスト
-- [ ] 8-2. 【Rust】`permission_status` / `request_permission(kind)` / `open_privacy_settings(kind)`
+- [x] 8-2. 【Rust】`permission_status` / `request_permission(kind)` / `open_privacy_settings(kind)`
       コマンド。`privacy_settings_url(kind)` は純関数+テスト
       (`x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` など)
-- [ ] 8-3. 【Web】`src/lib/permissions.ts`: `requiredPermissions(mode)` /
+- [x] 8-3. 【Web】`src/lib/permissions.ts`: `requiredPermissions(mode)` /
       `missingPermissions(status, required)` / `permissionActionFor(state)` を純関数+テスト
-- [ ] 8-4. 【Web】設定に「🔐 プライバシー」ペインを新設。マイク/画面収録を1行ずつ
+- [x] 8-4. 【Web】設定に「🔐 プライバシー」ペインを新設。マイク/画面収録を1行ずつ
       状態タグ付きで並べ、未確認は「許可する」(=単発リクエスト)、拒否済みは
       「システム設定を開く」(該当ペインへ直接ジャンプ)を出す
-- [ ] 8-5. 【Web】起動時の一斉ダイアログ廃止: onMount で `permission_status` を先に読み、
+- [x] 8-5. 【Web】起動時の一斉ダイアログ廃止: onMount で `permission_status` を先に読み、
       不足があれば自動開始をスキップして「権限が必要です → 設定を開く」バナーを表示。
       すべて許可済みのときだけ従来どおり自動開始する
 

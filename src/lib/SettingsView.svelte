@@ -1,8 +1,23 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
-  import { onMount } from 'svelte';
+  import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { onMount, untrack } from 'svelte';
   import { filterLanguagePacks, partitionLanguagePacks } from '$lib/languagePacks';
   import type { LanguageInfo } from '$lib/languages';
+  import {
+    PERMISSION_KINDS,
+    permissionActionFor,
+    permissionLabel,
+    permissionStateOf,
+    type PermissionKind,
+    type PermissionStatus
+  } from '$lib/permissions';
+  import {
+    isUvInstallStage,
+    uvInstallStageLabel,
+    uvInstallStageProgress,
+    type UvInstallStage
+  } from '$lib/uvInstall';
   import {
     formatModelSize,
     resolveSpeechModelSelection,
@@ -18,6 +33,8 @@
     reserved?: LanguageInfo[];
   };
 
+  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs';
+
   let {
     isRecording = false,
     onInstalledChanged,
@@ -26,7 +43,9 @@
     autoStartEnabled = true,
     onAutoStartChange,
     includeAudioEnabled = true,
-    onIncludeAudioChange
+    onIncludeAudioChange,
+    initialPane = 'general',
+    onPermissionsChanged
   }: {
     isRecording?: boolean;
     onInstalledChanged?: (installed: LanguageInfo[]) => void;
@@ -36,15 +55,24 @@
     onAutoStartChange?: (enabled: boolean) => void;
     includeAudioEnabled?: boolean;
     onIncludeAudioChange?: (enabled: boolean) => void;
+    initialPane?: SettingsPane;
+    onPermissionsChanged?: (status: PermissionStatus) => void;
   } = $props();
 
   type WhisperxRunner = { program: string; prefixArgs?: string[] };
 
   const hfTokenPreferenceKey = 'lpt-hf-token';
 
-  let pane = $state<'general' | 'model' | 'langs'>('general');
+  // Seed only: which pane opens is the caller's business once (the privacy
+  // banner deep-links here), and the view remounts each time Settings opens.
+  let pane = $state<SettingsPane>(untrack(() => initialPane));
   let whisperxRunner = $state<WhisperxRunner | null>(null);
   let whisperxChecked = $state(false);
+  let uvStage = $state<UvInstallStage | null>(null);
+  let uvError = $state<string | null>(null);
+  let permissionStatus = $state<PermissionStatus | null>(null);
+  let permissionError = $state<string | null>(null);
+  let busyPermission = $state<PermissionKind | null>(null);
   let hfToken = $state('');
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -69,18 +97,87 @@
     hfToken = localStorage.getItem(hfTokenPreferenceKey) ?? '';
     void refresh();
     void refreshModels();
+    void refreshPermissions();
     void invoke<string>('recordings_directory')
       .then((path) => (recordingsPath = path))
       .catch(() => (recordingsPath = null));
-    void invoke<WhisperxRunner | null>('whisperx_status')
-      .then((runner) => {
-        whisperxRunner = runner;
-        whisperxChecked = true;
-      })
-      .catch(() => {
-        whisperxChecked = true;
-      });
+    void refreshWhisperxStatus();
+
+    let unlisten: UnlistenFn | null = null;
+    let disposed = false;
+    void listen<string>('uv-install-progress', (event) => {
+      if (isUvInstallStage(event.payload)) {
+        uvStage = event.payload;
+      }
+    }).then((stop) => {
+      if (disposed) {
+        void stop();
+      } else {
+        unlisten = stop;
+      }
+    });
+
+    return () => {
+      disposed = true;
+      void unlisten?.();
+    };
   });
+
+  async function refreshWhisperxStatus() {
+    try {
+      whisperxRunner = await invoke<WhisperxRunner | null>('whisperx_status');
+    } catch {
+      whisperxRunner = null;
+    } finally {
+      whisperxChecked = true;
+    }
+  }
+
+  /// Reads the current grants without prompting, so opening Settings never
+  /// pops a system dialog on its own.
+  async function refreshPermissions() {
+    try {
+      permissionStatus = await invoke<PermissionStatus>('permission_status');
+      permissionError = null;
+      onPermissionsChanged?.(permissionStatus);
+    } catch (statusError) {
+      permissionError = String(statusError);
+    }
+  }
+
+  async function askForPermission(kind: PermissionKind) {
+    busyPermission = kind;
+    permissionError = null;
+    try {
+      permissionStatus = await invoke<PermissionStatus>('request_permission', { kind });
+      onPermissionsChanged?.(permissionStatus);
+    } catch (requestError) {
+      permissionError = String(requestError);
+    } finally {
+      busyPermission = null;
+    }
+  }
+
+  function openPrivacySettings(kind: PermissionKind) {
+    void invoke('open_privacy_settings', { kind }).catch((openError) => {
+      permissionError = String(openError);
+    });
+  }
+
+  /// Downloads uv into the app's own data directory. The heavy part comes
+  /// later — the first WhisperX run still pulls its models — so the copy sets
+  /// that expectation rather than implying this is the whole wait.
+  async function prepareWhisperx() {
+    uvError = null;
+    uvStage = 'download';
+    try {
+      whisperxRunner = await invoke<WhisperxRunner>('ensure_uv');
+      uvStage = 'done';
+    } catch (installError) {
+      uvError = String(installError);
+      uvStage = null;
+    }
+  }
 
   function saveHfToken(value: string) {
     hfToken = value;
@@ -169,6 +266,9 @@
     <button type="button" class:active={pane === 'general'} onclick={() => (pane = 'general')}>
       ⚙︎ 一般
     </button>
+    <button type="button" class:active={pane === 'privacy'} onclick={() => (pane = 'privacy')}>
+      🔐 プライバシー
+    </button>
     <button type="button" class:active={pane === 'model'} onclick={() => (pane = 'model')}>
       🧠 認識モデル
     </button>
@@ -234,6 +334,74 @@
           </div>
         </div>
       </div>
+    </div>
+  {:else if pane === 'privacy'}
+    <div class="set-pane">
+      <h2>プライバシー</h2>
+      <p class="lede">
+        文字起こしに必要な許可を1つずつ確認できます。ここで「許可する」を押したものだけ、
+        macOS の確認ダイアログが表示されます。
+        <button type="button" class="link-btn" onclick={refreshPermissions}>↻ 再確認</button>
+      </p>
+
+      {#if permissionError}
+        <p class="settings-error" role="alert">{permissionError}</p>
+      {/if}
+
+      <div class="set-card">
+        {#each PERMISSION_KINDS as kind (kind)}
+          {@const state = permissionStatus ? permissionStateOf(permissionStatus, kind) : null}
+          <div class="set-row">
+            <div>
+              {permissionLabel(kind)}
+              <div class="d">
+                {#if kind === 'microphone'}
+                  自分の声を文字起こしするために使います。
+                {:else}
+                  相手の声(Zoom などのシステム音声)を取り込むために使います。
+                {/if}
+                {#if state === 'denied'}
+                  <br />システム設定の一覧に LivePolyTrans が並んでいます。チェックを入れてください。
+                {/if}
+              </div>
+            </div>
+            <div class="perm-action">
+              <span class="tag" class:ok={state === 'granted'}>
+                {#if state === null}
+                  確認中…
+                {:else if state === 'granted'}
+                  許可済み
+                {:else if state === 'denied'}
+                  拒否
+                {:else}
+                  未確認
+                {/if}
+              </span>
+              {#if busyPermission === kind}
+                <span class="pack-busy"><span class="spinner"></span>確認中…</span>
+              {:else if state && permissionActionFor(state) === 'request'}
+                <button
+                  type="button"
+                  class="link-btn"
+                  disabled={busyPermission !== null}
+                  onclick={() => askForPermission(kind)}
+                >
+                  許可する
+                </button>
+              {:else if state && permissionActionFor(state) === 'open-settings'}
+                <button type="button" class="link-btn" onclick={() => openPrivacySettings(kind)}>
+                  システム設定を開く
+                </button>
+              {/if}
+            </div>
+          </div>
+        {/each}
+      </div>
+
+      <p class="pack-empty perm-note">
+        許可を取り消したいときは、システム設定 &gt; プライバシーとセキュリティ
+        から同じ項目のチェックを外してください。
+      </p>
     </div>
   {:else if pane === 'model'}
     <div class="set-pane">
@@ -309,16 +477,53 @@
                   確認中…
                 {:else if whisperxRunner}
                   {whisperxRunner.program} 経由で実行します。Recordings の「再処理」から使えます。
+                {:else if uvStage}
+                  {uvInstallStageLabel(uvStage)}
                 {:else}
-                  見つかりません。<code>brew install uv</code> でインストールすると
-                  uvx 経由で実行できます(初回はモデルのダウンロードが走ります)。
+                  未準備です。「準備する」を押すと実行環境(uv)を約 17MB
+                  ダウンロードします。最初の再処理では WhisperX 本体とモデル(数 GB)の
+                  取得も走るため、初回だけ時間がかかります。
                 {/if}
               </div>
+              {#if uvStage && !whisperxRunner}
+                <div
+                  class="uv-bar"
+                  role="progressbar"
+                  aria-label="WhisperX 実行環境の準備"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(uvInstallStageProgress(uvStage) * 100)}
+                >
+                  <span style:width={`${uvInstallStageProgress(uvStage) * 100}%`}></span>
+                </div>
+              {/if}
             </div>
-            <span class="tag" class:ok={whisperxRunner !== null}>
-              {whisperxRunner ? 'Ready' : '未検出'}
-            </span>
+            {#if whisperxRunner}
+              <span class="tag ok">Ready</span>
+            {:else if uvStage}
+              <span class="pack-busy"><span class="spinner"></span>準備中…</span>
+            {:else}
+              <button
+                type="button"
+                class="link-btn"
+                disabled={!whisperxChecked}
+                onclick={prepareWhisperx}
+              >
+                準備する
+              </button>
+            {/if}
           </div>
+          {#if uvError}
+            <div class="set-row">
+              <div>
+                <p class="settings-error" role="alert">{uvError}</p>
+                <div class="d">
+                  自動取得に失敗した場合は <code>brew install uv</code> でも同じことができます。
+                </div>
+              </div>
+              <button type="button" class="link-btn" onclick={prepareWhisperx}>再試行</button>
+            </div>
+          {/if}
           <div class="set-row">
             <div>
               Hugging Face トークン(話者分離用)
@@ -638,6 +843,41 @@
 
   .whisperx-group {
     margin-top: 26px;
+  }
+
+  .perm-action {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 0 0 auto;
+  }
+
+  .perm-note {
+    margin-top: 14px;
+    line-height: 1.5;
+  }
+
+  .uv-bar {
+    margin-top: 8px;
+    width: min(280px, 100%);
+    height: 6px;
+    border-radius: 999px;
+    background: var(--divider);
+    overflow: hidden;
+  }
+
+  .uv-bar span {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: var(--blue);
+    transition: width 0.3s ease;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .uv-bar span {
+      transition: none;
+    }
   }
 
   .token-input {
