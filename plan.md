@@ -113,15 +113,16 @@ Phase 1-2 のライブ字幕パイプラインをそのまま使う表示モー�
 
 ## Phase 6: 事後処理パイプライン(WhisperX)
 
-- [ ] 6-1. 【調査spike】WhisperX 実行形態の決定: uvx/pipx 検出 → subprocess 実行 →
+- [x] 6-1. 【調査spike】WhisperX 実行形態の決定: uvx/pipx 検出 → subprocess 実行 →
       JSON 出力パース。diarization は pyannote(HF トークン必要)のため、
       トークン未設定時は「話者分離なしで実行」へフォールバックする仕様を先に固める
-- [ ] 6-2. 【Rust】`reprocess_recording(id, engine)` コマンド: engine=builtin/whisper/whisperx。
+- [x] 6-2. 【Rust】`reprocess_recording(id, engine)` コマンド: engine=builtin/whisper/whisperx。
+      (実装済みは whisperx。builtin/whisper の再処理は明示エラー+メニューでは未対応表示)
       進捗イベント(transcribe→align→diarize)を emit、結果は `transcript.whisperx.jsonl`
       として元と並存(非破壊)
-- [ ] 6-3. 【Web】再処理メニュー+3段階進捗バー(モック準拠)。完了後は話者ラベル付き
+- [x] 6-3. 【Web】再処理メニュー+3段階進捗バー(モック準拠)。完了後は話者ラベル付き
       表示(話者N の色割当は recordings.ts に純関数+テスト)
-- [ ] 6-4. 設定「認識モデル」ペインに WhisperX 要件の案内(インストール状況/HFトークン入力)
+- [x] 6-4. 設定「認識モデル」ペインに WhisperX 要件の案内(インストール状況/HFトークン入力)
 
 ## 検証ゲート(全フェーズ共通)
 

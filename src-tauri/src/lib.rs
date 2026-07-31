@@ -819,6 +819,122 @@ fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> 
     fs::write(dir.join("meta.json"), json).map_err(|error| error.to_string())
 }
 
+// MARK: whisperx post-processing
+
+/// How to invoke WhisperX. Spike outcome (plan 6-1): prefer `uvx` (ships
+/// with uv, runs the tool without a permanent install), then `pipx run`,
+/// then a `whisperx` binary already on PATH. Diarization needs a pyannote
+/// HF token; without one we run transcription+alignment only.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WhisperxRunner {
+    pub program: String,
+    pub prefix_args: Vec<String>,
+}
+
+pub fn whisperx_runner_from(available: impl Fn(&str) -> Option<String>) -> Option<WhisperxRunner> {
+    if let Some(program) = available("uvx") {
+        return Some(WhisperxRunner {
+            program,
+            prefix_args: vec!["whisperx".to_string()],
+        });
+    }
+
+    if let Some(program) = available("pipx") {
+        return Some(WhisperxRunner {
+            program,
+            prefix_args: vec!["run".to_string(), "whisperx".to_string()],
+        });
+    }
+
+    if let Some(program) = available("whisperx") {
+        return Some(WhisperxRunner {
+            program,
+            prefix_args: Vec::new(),
+        });
+    }
+
+    None
+}
+
+fn locate_program(name: &str) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+    let candidates = [
+        format!("/opt/homebrew/bin/{name}"),
+        format!("/usr/local/bin/{name}"),
+        format!("{home}/.local/bin/{name}"),
+        format!("{home}/.cargo/bin/{name}"),
+    ];
+
+    for candidate in candidates {
+        if Path::new(&candidate).exists() {
+            return Some(candidate);
+        }
+    }
+
+    let found = Command::new("/usr/bin/which")
+        .arg(name)
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
+        .filter(|path| !path.is_empty());
+
+    found
+}
+
+pub fn resolve_whisperx_runner() -> Option<WhisperxRunner> {
+    whisperx_runner_from(locate_program)
+}
+
+/// Maps whisperx stderr progress markers onto the three UI stages.
+pub fn whisperx_stage_for_line(line: &str) -> Option<&'static str> {
+    let lowered = line.to_lowercase();
+    if lowered.contains("performing transcription") {
+        Some("transcribe")
+    } else if lowered.contains("performing alignment") {
+        Some("align")
+    } else if lowered.contains("performing diarization") {
+        Some("diarize")
+    } else {
+        None
+    }
+}
+
+/// Converts whisperx JSON output into our transcript.whisperx.jsonl lines.
+/// Times become integer milliseconds; the speaker tag is passed through
+/// (SPEAKER_00, ...) and mapped to labels/colors in the UI.
+pub fn whisperx_jsonl_lines(output: &Value) -> Vec<String> {
+    let language = output.get("language").and_then(Value::as_str).unwrap_or("und");
+    let Some(segments) = output.get("segments").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    segments
+        .iter()
+        .filter_map(|segment| {
+            let text = segment.get("text")?.as_str()?.trim();
+            if text.is_empty() {
+                return None;
+            }
+
+            let start = segment.get("start").and_then(Value::as_f64).unwrap_or(0.0);
+            let end = segment.get("end").and_then(Value::as_f64).unwrap_or(start);
+            let mut line = serde_json::json!({
+                "type": "whisperx",
+                "startMs": (start * 1000.0).round() as i64,
+                "endMs": (end * 1000.0).round() as i64,
+                "text": text,
+                "lang": language,
+            });
+            if let Some(speaker) = segment.get("speaker").and_then(Value::as_str) {
+                line["speaker"] = Value::String(speaker.to_string());
+            }
+            Some(line.to_string())
+        })
+        .collect()
+}
+
 // MARK: recording session control
 
 pub fn start_recording_control_line(dir: &str, include_audio: bool) -> String {
@@ -1431,6 +1547,192 @@ pub mod commands {
         .map_err(|error| error.to_string())?
     }
 
+    /// Reports how WhisperX would be run (settings guidance); None when no
+    /// runner is installed.
+    #[tauri::command]
+    pub async fn whisperx_status() -> Result<Option<WhisperxRunner>, String> {
+        tauri::async_runtime::spawn_blocking(|| Ok(resolve_whisperx_runner()))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    /// Picks which audio file a re-process should read: the mixed file when
+    /// both lanes exist (rebuilding it if stale), else the first audio file.
+    fn resolve_reprocess_input(dir: &Path) -> Result<PathBuf, String> {
+        let mic = dir.join("mic.m4a");
+        let speaker = dir.join("speaker.m4a");
+
+        if mic.exists() && speaker.exists() {
+            let mixed = dir.join("mixed.m4a");
+            let is_stale = match (fs::metadata(&mixed), fs::metadata(&mic)) {
+                (Ok(mixed_meta), Ok(mic_meta)) => {
+                    matches!(
+                        (mixed_meta.modified(), mic_meta.modified()),
+                        (Ok(mixed_time), Ok(mic_time)) if mixed_time < mic_time
+                    )
+                }
+                _ => true,
+            };
+
+            if is_stale {
+                let helper_path = resolve_helper_path()?;
+                let output = Command::new(helper_path)
+                    .arg("--mix")
+                    .arg("--input")
+                    .arg(&mic)
+                    .arg("--input")
+                    .arg(&speaker)
+                    .arg("--output")
+                    .arg(&mixed)
+                    .output()
+                    .map_err(|error| error.to_string())?;
+                if !output.status.success() {
+                    return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+                }
+            }
+            return Ok(mixed);
+        }
+
+        let entries = fs::read_dir(dir).map_err(|error| error.to_string())?;
+        let mut audio_files: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path())
+            .filter(|path| {
+                matches!(
+                    path.extension().and_then(|ext| ext.to_str()),
+                    Some("m4a" | "wav" | "mp3" | "aac")
+                )
+            })
+            .collect();
+        audio_files.sort();
+        audio_files
+            .into_iter()
+            .next()
+            .ok_or_else(|| "この録音に音声ファイルがありません".to_string())
+    }
+
+    /// Runs WhisperX over a recording's audio and writes the result next to
+    /// the live transcript as transcript.whisperx.jsonl (non-destructive).
+    /// Progress is emitted as reprocess-progress events per stage.
+    #[tauri::command]
+    pub async fn reprocess_recording(
+        app: AppHandle,
+        id: String,
+        engine: String,
+        hf_token: Option<String>,
+    ) -> Result<usize, String> {
+        if engine != "whisperx" {
+            return Err(format!(
+                "engine {engine} の再処理は未対応です(現在は whisperx のみ)"
+            ));
+        }
+
+        let dir = recording_dir_for(&app, &id)?;
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let runner = resolve_whisperx_runner().ok_or_else(|| {
+                "WhisperX の実行環境が見つかりません。`brew install uv` の後にもう一度お試しください(uvx 経由で実行します)。".to_string()
+            })?;
+
+            let emit_stage = |stage: &str| {
+                let _ = app.emit(
+                    "reprocess-progress",
+                    serde_json::json!({ "id": id, "stage": stage }),
+                );
+            };
+
+            let input = resolve_reprocess_input(&dir)?;
+            let output_dir = dir.join("whisperx-tmp");
+            fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
+
+            let mut args = runner.prefix_args.clone();
+            args.push(input.display().to_string());
+            args.extend(
+                [
+                    "--output_format",
+                    "json",
+                    "--output_dir",
+                    &output_dir.display().to_string(),
+                    "--compute_type",
+                    "int8",
+                ]
+                .map(String::from),
+            );
+            // No HF token -> no pyannote access -> run without speaker
+            // diarization instead of failing (plan 6-1 fallback).
+            let token = hf_token.filter(|token| !token.trim().is_empty());
+            if let Some(token) = &token {
+                args.push("--diarize".to_string());
+                args.push("--hf_token".to_string());
+                args.push(token.clone());
+            }
+
+            eprintln!(
+                "live-poly-trans tauri: reprocess-start id={id} runner={} diarize={}",
+                runner.program,
+                token.is_some()
+            );
+            emit_stage("transcribe");
+
+            let mut child = Command::new(&runner.program)
+                .args(&args)
+                .stdout(Stdio::null())
+                .stderr(Stdio::piped())
+                .spawn()
+                .map_err(|error| format!("WhisperX を起動できませんでした: {error}"))?;
+
+            let mut stderr_tail: Vec<String> = Vec::new();
+            if let Some(stderr) = child.stderr.take() {
+                let reader = BufReader::new(stderr);
+                for line in reader.lines().map_while(Result::ok) {
+                    if let Some(stage) = whisperx_stage_for_line(&line) {
+                        emit_stage(stage);
+                    }
+                    stderr_tail.push(line);
+                    if stderr_tail.len() > 40 {
+                        stderr_tail.remove(0);
+                    }
+                }
+            }
+
+            let status = child.wait().map_err(|error| error.to_string())?;
+            if !status.success() {
+                let _ = fs::remove_dir_all(&output_dir);
+                return Err(format!(
+                    "WhisperX が失敗しました:\n{}",
+                    stderr_tail.join("\n")
+                ));
+            }
+
+            let stem = input
+                .file_stem()
+                .map(|stem| stem.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let json_path = output_dir.join(format!("{stem}.json"));
+            let raw = fs::read_to_string(&json_path)
+                .map_err(|error| format!("WhisperX の出力を読めませんでした: {error}"))?;
+            let parsed: Value =
+                serde_json::from_str(&raw).map_err(|error| error.to_string())?;
+            let lines = whisperx_jsonl_lines(&parsed);
+
+            fs::write(
+                dir.join("transcript.whisperx.jsonl"),
+                format!("{}\n", lines.join("\n")),
+            )
+            .map_err(|error| error.to_string())?;
+            let _ = fs::remove_dir_all(&output_dir);
+
+            emit_stage("done");
+            eprintln!(
+                "live-poly-trans tauri: reprocess-done id={id} segments={}",
+                lines.len()
+            );
+            Ok(lines.len())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
     /// Copies an external audio file (phone memo, voice recorder) into a new
     /// recording so it can be played, trimmed, and later re-processed.
     #[tauri::command]
@@ -1773,6 +2075,8 @@ pub fn run() {
             commands::reveal_recordings_directory,
             commands::import_audio_file,
             commands::trim_recording,
+            commands::whisperx_status,
+            commands::reprocess_recording,
             commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
@@ -1859,6 +2163,73 @@ mod tests {
         assert!(candidates.contains(&PathBuf::from(
             "/App/LivePolyTrans.app/Contents/MacOS/helper"
         )));
+    }
+
+    #[test]
+    fn whisperx_runner_prefers_uvx_then_pipx_then_direct() {
+        let uvx = whisperx_runner_from(|name| {
+            (name == "uvx").then(|| "/opt/homebrew/bin/uvx".to_string())
+        })
+        .unwrap();
+        assert_eq!(uvx.program, "/opt/homebrew/bin/uvx");
+        assert_eq!(uvx.prefix_args, vec!["whisperx"]);
+
+        let pipx = whisperx_runner_from(|name| {
+            (name == "pipx").then(|| "/usr/local/bin/pipx".to_string())
+        })
+        .unwrap();
+        assert_eq!(pipx.prefix_args, vec!["run", "whisperx"]);
+
+        let direct = whisperx_runner_from(|name| {
+            (name == "whisperx").then(|| "/usr/local/bin/whisperx".to_string())
+        })
+        .unwrap();
+        assert!(direct.prefix_args.is_empty());
+
+        assert_eq!(whisperx_runner_from(|_| None), None);
+    }
+
+    #[test]
+    fn whisperx_stages_map_from_stderr_markers() {
+        assert_eq!(
+            whisperx_stage_for_line(">>Performing transcription..."),
+            Some("transcribe")
+        );
+        assert_eq!(
+            whisperx_stage_for_line(">>Performing alignment..."),
+            Some("align")
+        );
+        assert_eq!(
+            whisperx_stage_for_line(">>Performing diarization..."),
+            Some("diarize")
+        );
+        assert_eq!(whisperx_stage_for_line("Loading model..."), None);
+    }
+
+    #[test]
+    fn whisperx_output_converts_to_jsonl_lines() {
+        let output = serde_json::json!({
+            "language": "ja",
+            "segments": [
+                { "start": 0.5, "end": 2.25, "text": " こんにちは ", "speaker": "SPEAKER_00" },
+                { "start": 2.5, "end": 4.0, "text": "はい" },
+                { "start": 4.0, "end": 4.5, "text": "   " }
+            ]
+        });
+
+        let lines = whisperx_jsonl_lines(&output);
+        assert_eq!(lines.len(), 2);
+
+        let first: Value = serde_json::from_str(&lines[0]).unwrap();
+        assert_eq!(first["type"], "whisperx");
+        assert_eq!(first["startMs"], 500);
+        assert_eq!(first["endMs"], 2250);
+        assert_eq!(first["text"], "こんにちは");
+        assert_eq!(first["speaker"], "SPEAKER_00");
+        assert_eq!(first["lang"], "ja");
+
+        let second: Value = serde_json::from_str(&lines[1]).unwrap();
+        assert!(second.get("speaker").is_none());
     }
 
     #[test]

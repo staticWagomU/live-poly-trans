@@ -30,11 +30,14 @@ export type RecordingWaveform = {
 export type RecordingTranscriptItem = {
   key: string;
   startMs: number;
-  stream: 'mic' | 'speaker';
+  stream: 'mic' | 'speaker' | 'unknown';
   speakerLabel: string;
   language: string;
   text: string;
   translation: string | null;
+  /// Diarized speaker number (0-based) for WhisperX results; drives the
+  /// per-speaker color in the transcript view.
+  speakerIndex?: number;
 };
 
 export function parseSegmentStartMs(segmentId: unknown): number {
@@ -108,6 +111,47 @@ export function buildRecordingTranscript(events: unknown[]): RecordingTranscript
   }
 
   return [...items.values()].sort((left, right) => left.startMs - right.startMs);
+}
+
+/// "SPEAKER_07" -> 7; anything unparseable maps to the first slot.
+export function whisperxSpeakerIndex(speaker: string): number {
+  const match = speaker.match(/(\d+)\s*$/);
+  const parsed = match ? Number.parseInt(match[1], 10) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/// Builds the transcript view of a WhisperX re-process from the mixed jsonl
+/// event stream (whisperx lines coexist with the live transcript lines).
+export function buildWhisperxTranscript(events: unknown[]): RecordingTranscriptItem[] {
+  const items: RecordingTranscriptItem[] = [];
+
+  for (const raw of events) {
+    if (!raw || typeof raw !== 'object') {
+      continue;
+    }
+
+    const event = raw as Record<string, unknown>;
+    if (event.type !== 'whisperx' || typeof event.text !== 'string') {
+      continue;
+    }
+
+    const startMs = typeof event.startMs === 'number' ? event.startMs : 0;
+    const speaker = typeof event.speaker === 'string' ? event.speaker : null;
+    const speakerIndex = speaker !== null ? whisperxSpeakerIndex(speaker) : undefined;
+
+    items.push({
+      key: `wx-${startMs}-${items.length}`,
+      startMs,
+      stream: 'unknown',
+      speakerLabel: speakerIndex !== undefined ? `話者${speakerIndex + 1}` : '話者',
+      language: typeof event.lang === 'string' ? event.lang : 'und',
+      text: event.text,
+      translation: null,
+      ...(speakerIndex !== undefined ? { speakerIndex } : {})
+    });
+  }
+
+  return items.sort((left, right) => left.startMs - right.startMs);
 }
 
 export type RecordingGroup = {

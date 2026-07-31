@@ -1,10 +1,12 @@
 <script lang="ts">
   import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+  import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
   import { onMount } from 'svelte';
   import {
     buildRecordingTranscript,
+    buildWhisperxTranscript,
     formatFileSize,
     formatTimestampMs,
     groupRecordingsByDate,
@@ -20,6 +22,11 @@
   let selectedRecording = $state<RecordingSummary | null>(null);
   let selectedFile = $state<RecordingFileInfo | null>(null);
   let transcript = $state<RecordingTranscriptItem[]>([]);
+  let whisperxItems = $state<RecordingTranscriptItem[]>([]);
+  let transcriptSource = $state<'live' | 'whisperx'>('live');
+  let reprocessOpen = $state(false);
+  let reprocessStage = $state<string | null>(null);
+  let isReprocessing = $state(false);
   let waveform = $state<RecordingWaveform | null>(null);
   let audioSrc = $state<string | null>(null);
   let audioElement = $state<HTMLAudioElement | null>(null);
@@ -54,13 +61,49 @@
   const activeTrim = $derived(
     selectedFile && selectedRecording?.trims ? (selectedRecording.trims[selectedFile.name] ?? null) : null
   );
+  const baseTranscript = $derived(
+    transcriptSource === 'whisperx' && whisperxItems.length > 0 ? whisperxItems : transcript
+  );
   const displayTranscript = $derived(
-    activeTrim ? trimTranscript(transcript, activeTrim.startMs, activeTrim.endMs) : transcript
+    activeTrim ? trimTranscript(baseTranscript, activeTrim.startMs, activeTrim.endMs) : baseTranscript
   );
   const activeKey = $derived(activeItemKey(displayTranscript, currentTimeMs));
+  const reprocessStageLabel = $derived(
+    reprocessStage === 'transcribe'
+      ? '1/3 文字起こし中…'
+      : reprocessStage === 'align'
+        ? '2/3 タイムスタンプを整列中…'
+        : reprocessStage === 'diarize'
+          ? '3/3 話者を分離中…'
+          : null
+  );
+  const reprocessProgressRatio = $derived(
+    reprocessStage === 'transcribe'
+      ? 0.33
+      : reprocessStage === 'align'
+        ? 0.66
+        : reprocessStage === 'diarize'
+          ? 0.9
+          : 0
+  );
 
   onMount(() => {
     void refreshRecordings();
+
+    const unlistenProgress = listen<{ id: string; stage: string }>(
+      'reprocess-progress',
+      (event) => {
+        if (event.payload.id !== selectedRecording?.id) {
+          return;
+        }
+
+        if (event.payload.stage === 'done') {
+          reprocessStage = null;
+        } else {
+          reprocessStage = event.payload.stage;
+        }
+      }
+    );
 
     const unlistenDrop = getCurrentWebview().onDragDropEvent((event) => {
       if (event.payload.type === 'over') {
@@ -77,6 +120,7 @@
       recordingRequest.invalidate();
       fileRequest.invalidate();
       void unlistenDrop.then((unlisten) => unlisten());
+      void unlistenProgress.then((unlisten) => unlisten());
     };
   });
 
@@ -112,8 +156,10 @@
     notice = null;
     error = null;
     actionsOpen = false;
+    reprocessOpen = false;
     trimRange = null;
     transcript = [];
+    whisperxItems = [];
     isLoadingTranscript = true;
     const fileSelection = selectFile(recording.files[0] ?? null);
 
@@ -123,6 +169,8 @@
         return;
       }
       transcript = buildRecordingTranscript(events);
+      whisperxItems = buildWhisperxTranscript(events);
+      transcriptSource = whisperxItems.length > 0 ? 'whisperx' : 'live';
     } catch (transcriptError) {
       if (isLatest()) {
         error = String(transcriptError);
@@ -421,6 +469,60 @@
     }
   }
 
+  // ---- reprocess (WhisperX) ----
+
+  async function reloadTranscript(recordingId: string) {
+    try {
+      const events = await invoke<unknown[]>('read_recording_transcript', { id: recordingId });
+      if (selectedRecording?.id !== recordingId) {
+        return;
+      }
+      transcript = buildRecordingTranscript(events);
+      whisperxItems = buildWhisperxTranscript(events);
+      if (whisperxItems.length > 0) {
+        transcriptSource = 'whisperx';
+      }
+    } catch (reloadError) {
+      error = String(reloadError);
+    }
+  }
+
+  async function runReprocess() {
+    const recording = selectedRecording;
+    if (!recording || isReprocessing) {
+      return;
+    }
+
+    reprocessOpen = false;
+    isReprocessing = true;
+    reprocessStage = 'transcribe';
+    error = null;
+    notice = null;
+    try {
+      const segments = await invoke<number>('reprocess_recording', {
+        id: recording.id,
+        engine: 'whisperx',
+        // pyannote (diarization) needs a Hugging Face token; without one the
+        // backend falls back to transcription + alignment only.
+        hfToken: localStorage.getItem('lpt-hf-token')
+      });
+      notice = `WhisperX の再処理が完了しました(${segments} セグメント)。`;
+      await reloadTranscript(recording.id);
+    } catch (reprocessError) {
+      error = String(reprocessError);
+    } finally {
+      isReprocessing = false;
+      reprocessStage = null;
+    }
+  }
+
+  // Distinct dot colors for diarized speakers (話者1, 話者2, ...).
+  const speakerPalette = ['#0066cc', '#ff9500', '#34c759', '#af52de', '#ff2d55', '#5ac8fa'];
+
+  function speakerColor(index: number): string {
+    return speakerPalette[index % speakerPalette.length];
+  }
+
   function activeItemKey(items: RecordingTranscriptItem[], timeMs: number): string | null {
     let active: RecordingTranscriptItem | null = null;
     for (const item of items) {
@@ -454,7 +556,12 @@
   }
 </script>
 
-<svelte:window on:click={() => (actionsOpen = false)} />
+<svelte:window
+  on:click={() => {
+    actionsOpen = false;
+    reprocessOpen = false;
+  }}
+/>
 
 <div class="recordings" class:drop-target={isDropTarget}>
   <aside class="rec-side" aria-label="録音一覧">
@@ -675,7 +782,64 @@
       <section class="rec-transcript" aria-label="文字起こし">
         <div class="tr-head">
           <h3>文字起こし</h3>
+          <div class="tr-tools">
+            {#if whisperxItems.length > 0 && transcript.length > 0}
+              <div class="seg-mini" role="tablist" aria-label="文字起こしの種類">
+                <button
+                  type="button"
+                  class:active={transcriptSource === 'whisperx'}
+                  onclick={() => (transcriptSource = 'whisperx')}
+                >
+                  WhisperX
+                </button>
+                <button
+                  type="button"
+                  class:active={transcriptSource === 'live'}
+                  onclick={() => (transcriptSource = 'live')}
+                >
+                  ライブ字幕
+                </button>
+              </div>
+            {/if}
+            <div class="menu-anchor">
+              <button
+                type="button"
+                class="pill-btn"
+                aria-haspopup="menu"
+                aria-expanded={reprocessOpen}
+                disabled={isReprocessing}
+                onclick={(event) => {
+                  event.stopPropagation();
+                  reprocessOpen = !reprocessOpen;
+                }}
+              >
+                {isReprocessing ? '再処理中…' : '再処理'} <span class="chev">▾</span>
+              </button>
+              {#if reprocessOpen}
+                <nav class="menu">
+                  <div class="mlabel">エンジンを選んで処理し直す</div>
+                  <button type="button" class="mi" disabled title="今後対応予定">
+                    Apple 内蔵 — 高速
+                  </button>
+                  <button type="button" class="mi" disabled title="今後対応予定">
+                    Whisper — 高精度
+                  </button>
+                  <div class="sep"></div>
+                  <button type="button" class="mi" onclick={runReprocess}>
+                    WhisperX — 話者分離つき
+                  </button>
+                </nav>
+              {/if}
+            </div>
+          </div>
         </div>
+
+        {#if reprocessStageLabel}
+          <div class="proc">
+            <div class="stage" role="status">{reprocessStageLabel}</div>
+            <div class="bar"><i style={`width: ${reprocessProgressRatio * 100}%`}></i></div>
+          </div>
+        {/if}
         {#if isLoadingTranscript}
           <p class="empty" role="status">文字起こしを読み込み中…</p>
         {:else if displayTranscript.length === 0}
@@ -695,7 +859,15 @@
               >
                 <span class="ts">{formatTimestampMs(item.startMs)}</span>
                 <span class="body">
-                  <span class="spk"><i class:mic={item.stream === 'mic'}></i>{item.speakerLabel}</span>
+                  <span class="spk">
+                    <i
+                      class:mic={item.stream === 'mic'}
+                      style={item.speakerIndex !== undefined
+                        ? `background: ${speakerColor(item.speakerIndex)}`
+                        : ''}
+                    ></i>
+                    {item.speakerLabel}
+                  </span>
                   <span class="text">{item.text}</span>
                   {#if item.translation}
                     <span class="sub">{item.translation}</span>
@@ -1151,6 +1323,64 @@
     font-weight: 600;
     margin: 0;
     color: var(--ink);
+  }
+
+  .tr-tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .seg-mini {
+    display: flex;
+    background: var(--seg-track);
+    border-radius: 8px;
+    padding: 2px;
+  }
+
+  .seg-mini button {
+    padding: 3px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--ink-2);
+  }
+
+  .seg-mini button.active {
+    background: var(--canvas);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+    font-weight: 600;
+  }
+
+  .menu .mlabel {
+    padding: 6px 11px 2px;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .proc {
+    margin: 4px 0 16px;
+  }
+
+  .proc .stage {
+    font-size: 12px;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .proc .bar {
+    height: 4px;
+    border-radius: 4px;
+    background: var(--divider);
+    overflow: hidden;
+  }
+
+  .proc .bar i {
+    display: block;
+    height: 100%;
+    background: var(--blue);
+    transition: width 0.6s cubic-bezier(0.25, 0.1, 0.25, 1);
   }
 
   .tr-list {

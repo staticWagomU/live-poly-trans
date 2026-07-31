@@ -1,11 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildRecordingTranscript,
+  buildWhisperxTranscript,
   formatFileSize,
   formatTimestampMs,
   groupRecordingsByDate,
   parseSegmentStartMs,
   trimTranscript,
+  whisperxSpeakerIndex,
   type RecordingTranscriptItem
 } from './recordings';
 
@@ -209,5 +211,39 @@ describe('trimTranscript', () => {
       'at-start',
       'at-end'
     ]);
+  });
+});
+
+describe('whisperx transcript', () => {
+  it('maps whisperx jsonl events to transcript items with speaker labels', () => {
+    const events = [
+      { type: 'whisperx', startMs: 2_000, endMs: 4_000, text: '後の発話', lang: 'ja', speaker: 'SPEAKER_01' },
+      { type: 'whisperx', startMs: 0, endMs: 1_500, text: '先の発話', lang: 'ja', speaker: 'SPEAKER_00' },
+      { type: 'transcript', segmentId: '0-1000', stream: 'mic', isFinal: true, text: 'live line' }
+    ];
+
+    const items = buildWhisperxTranscript(events);
+
+    expect(items.map((item) => [item.text, item.speakerLabel, item.speakerIndex])).toEqual([
+      ['先の発話', '話者1', 0],
+      ['後の発話', '話者2', 1]
+    ]);
+    expect(items[0].startMs).toBe(0);
+    expect(items[1].startMs).toBe(2_000);
+  });
+
+  it('labels segments without diarization as plain speakers', () => {
+    const items = buildWhisperxTranscript([
+      { type: 'whisperx', startMs: 0, endMs: 1_000, text: 'no speaker', lang: 'en' }
+    ]);
+
+    expect(items[0].speakerLabel).toBe('話者');
+    expect(items[0].speakerIndex).toBeUndefined();
+  });
+
+  it('assigns stable speaker indexes by first appearance', () => {
+    expect(whisperxSpeakerIndex('SPEAKER_00')).toBe(0);
+    expect(whisperxSpeakerIndex('SPEAKER_07')).toBe(7);
+    expect(whisperxSpeakerIndex('weird')).toBe(0);
   });
 });

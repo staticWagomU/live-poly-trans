@@ -38,7 +38,14 @@
     onIncludeAudioChange?: (enabled: boolean) => void;
   } = $props();
 
+  type WhisperxRunner = { program: string; prefixArgs?: string[] };
+
+  const hfTokenPreferenceKey = 'lpt-hf-token';
+
   let pane = $state<'general' | 'model' | 'langs'>('general');
+  let whisperxRunner = $state<WhisperxRunner | null>(null);
+  let whisperxChecked = $state(false);
+  let hfToken = $state('');
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
   let busyLanguage = $state<string | null>(null);
@@ -59,12 +66,30 @@
   const reservedIds = $derived(new Set((payload?.reserved ?? []).map((language) => language.id)));
 
   onMount(() => {
+    hfToken = localStorage.getItem(hfTokenPreferenceKey) ?? '';
     void refresh();
     void refreshModels();
     void invoke<string>('recordings_directory')
       .then((path) => (recordingsPath = path))
       .catch(() => (recordingsPath = null));
+    void invoke<WhisperxRunner | null>('whisperx_status')
+      .then((runner) => {
+        whisperxRunner = runner;
+        whisperxChecked = true;
+      })
+      .catch(() => {
+        whisperxChecked = true;
+      });
   });
+
+  function saveHfToken(value: string) {
+    hfToken = value;
+    if (value.trim()) {
+      localStorage.setItem(hfTokenPreferenceKey, value.trim());
+    } else {
+      localStorage.removeItem(hfTokenPreferenceKey);
+    }
+  }
 
   async function refreshModels() {
     modelsError = null;
@@ -272,6 +297,47 @@
           <code>brew install whisper-cpp</code> でインストールできます。
         </p>
       {/if}
+
+      <div class="set-group whisperx-group">
+        <h3>WhisperX(録音後の再処理)</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              実行環境
+              <div class="d">
+                {#if !whisperxChecked}
+                  確認中…
+                {:else if whisperxRunner}
+                  {whisperxRunner.program} 経由で実行します。Recordings の「再処理」から使えます。
+                {:else}
+                  見つかりません。<code>brew install uv</code> でインストールすると
+                  uvx 経由で実行できます(初回はモデルのダウンロードが走ります)。
+                {/if}
+              </div>
+            </div>
+            <span class="tag" class:ok={whisperxRunner !== null}>
+              {whisperxRunner ? 'Ready' : '未検出'}
+            </span>
+          </div>
+          <div class="set-row">
+            <div>
+              Hugging Face トークン(話者分離用)
+              <div class="d">
+                話者分離(pyannote)にはトークンが必要です。未設定でも再処理は動きますが、
+                話者ラベルなしになります。
+              </div>
+            </div>
+            <input
+              class="token-input"
+              type="password"
+              placeholder="hf_..."
+              aria-label="Hugging Face トークン"
+              value={hfToken}
+              onchange={(event) => saveHfToken(event.currentTarget.value)}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   {:else}
     <div class="set-pane">
@@ -568,6 +634,21 @@
   .link-btn:disabled {
     opacity: 0.5;
     cursor: default;
+  }
+
+  .whisperx-group {
+    margin-top: 26px;
+  }
+
+  .token-input {
+    width: min(220px, 40%);
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 6px 9px;
+    font: inherit;
+    font-size: 12.5px;
   }
 
   .filter {
