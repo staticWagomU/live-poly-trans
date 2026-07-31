@@ -6,6 +6,8 @@ public enum HelperCommand: Equatable, Sendable {
   case waveform(path: String, buckets: Int)
   case mix(inputs: [String], output: String)
   case trim(input: String, output: String, startMs: Int64, endMs: Int64)
+  case checkPermissions
+  case requestPermission(PermissionKind)
   case stream(AudioStream)
 }
 
@@ -92,6 +94,18 @@ public struct CommandLineOptions: Equatable, Sendable {
       )
     }
 
+    if arguments.contains("--check-permissions") {
+      return CommandLineOptions(command: .checkPermissions)
+    }
+
+    if let kindName = value(after: "--request-permission", in: arguments) {
+      guard let kind = PermissionKind(rawValue: kindName) else {
+        throw CommandLineOptionsError.unknownPermissionKind(kindName)
+      }
+
+      return CommandLineOptions(command: .requestPermission(kind))
+    }
+
     if arguments.contains("--mix") {
       let inputs = values(after: "--input", in: arguments)
       guard inputs.count == 2, let output = value(after: "--output", in: arguments) else {
@@ -145,6 +159,7 @@ private func parsedTranscriptionEngine(in arguments: [String]) throws -> Transcr
 public enum CommandLineOptionsError: Error, Equatable, Sendable {
   case unsupportedArguments([String])
   case unknownTranscriptionEngine(String)
+  case unknownPermissionKind(String)
   case missingWhisperConfiguration
 }
 

@@ -21,6 +21,8 @@ struct CommandLineOptionsTests {
     try rejectsWhisperEngineWithoutModelAndCliPaths()
     try parsesTrimCommand()
     try trimsAudioFileToRange()
+    try computesWaveformForAacFile()
+    try mixesAacFiles()
     try treatsEmptyLanguageArgumentsAsUnset()
     try parsesStartRecordingControlLine()
     try parsesStopRecordingControlLine()
@@ -43,6 +45,12 @@ struct CommandLineOptionsTests {
     try requestsTranscriptConfidenceAttributes()
     try labelsSpeakerStreamAsSystemAudioSpeaker()
     try describesScreenCapturePermissionRecovery()
+    try parsesCheckPermissionsCommand()
+    try parsesRequestPermissionCommand()
+    try rejectsUnknownPermissionKind()
+    try mapsRecordPermissionOntoPermissionState()
+    try mapsScreenCapturePreflightOntoPermissionState()
+    try encodesPermissionStatusPayload()
     try calculatesAudioFrameLength()
     try gatesLeadingAndTrailingSilence()
     try resumesAfterDroppedSilence()
@@ -699,6 +707,69 @@ struct CommandLineOptionsTests {
     }
   }
 
+  /// Recordings are AAC .m4a, and AVAudioFile signals their end by throwing
+  /// instead of returning an empty buffer, so the whole waveform was lost on
+  /// the very last read.
+  static func computesWaveformForAacFile() throws {
+    let directory = try makeTemporaryDirectory(prefix: "lpt-waveform-test")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let inputUrl = directory.appendingPathComponent("input.wav")
+    try writeInt16MonoWav(samples: toneSamples(seconds: 2), sampleRate: 16_000, to: inputUrl)
+    let aacUrl = directory.appendingPathComponent("input.m4a")
+    try trimAudioFile(
+      inputPath: inputUrl.path,
+      outputPath: aacUrl.path,
+      startMs: 0,
+      endMs: 2_000
+    )
+
+    let waveform = try computeWaveform(path: aacUrl.path, buckets: 100)
+    try expectEqual(waveform.peaks.count, 100)
+    guard abs(waveform.durationMs - 2_000) < 200 else {
+      throw TestFailure(message: "waveform duration \(waveform.durationMs)ms, expected ~2000ms")
+    }
+    guard waveform.peaks.allSatisfy({ $0 > 0.1 }) else {
+      throw TestFailure(message: "expected every bucket of a continuous tone to have a peak")
+    }
+  }
+
+  static func mixesAacFiles() throws {
+    let directory = try makeTemporaryDirectory(prefix: "lpt-mix-test")
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    let wavUrl = directory.appendingPathComponent("input.wav")
+    try writeInt16MonoWav(samples: toneSamples(seconds: 1), sampleRate: 16_000, to: wavUrl)
+    let inputs = try ["a.m4a", "b.m4a"].map { name -> String in
+      let url = directory.appendingPathComponent(name)
+      try trimAudioFile(inputPath: wavUrl.path, outputPath: url.path, startMs: 0, endMs: 1_000)
+      return url.path
+    }
+
+    let outputUrl = directory.appendingPathComponent("mixed.m4a")
+    try mixAudioFiles(inputs: inputs, outputPath: outputUrl.path)
+
+    let output = try AVAudioFile(forReading: outputUrl)
+    let durationMs = Double(output.length) / output.processingFormat.sampleRate * 1000
+    guard abs(durationMs - 1_000) < 200 else {
+      throw TestFailure(message: "mixed duration \(durationMs)ms, expected ~1000ms")
+    }
+  }
+
+  static func makeTemporaryDirectory(prefix: String) throws -> URL {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("\(prefix)-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    return directory
+  }
+
+  /// A 440 Hz tone at 16 kHz: loud in every bucket, so a dropped tail shows up.
+  static func toneSamples(seconds: Int) -> [Float] {
+    (0..<(16_000 * seconds)).map { index in
+      Float(sin(2 * Double.pi * 440 * Double(index) / 16_000)) * 0.5
+    }
+  }
+
   static func treatsEmptyLanguageArgumentsAsUnset() throws {
     // The app sends --target-language "" for 翻訳しない; an empty identifier
     // must not reach the translator as a real language.
@@ -975,6 +1046,55 @@ struct CommandLineOptionsTests {
     if !screenCapturePermissionRecoveryMessage.contains("LivePolyTransHelper") {
       throw TestFailure(message: "Expected screen capture recovery message to name the helper app")
     }
+  }
+
+  static func parsesCheckPermissionsCommand() throws {
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--check-permissions"]).command,
+      .checkPermissions
+    )
+  }
+
+  static func parsesRequestPermissionCommand() throws {
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--request-permission", "microphone"]).command,
+      .requestPermission(.microphone)
+    )
+    try expectEqual(
+      try CommandLineOptions.parse(["helper", "--request-permission", "screen-recording"]).command,
+      .requestPermission(.screenRecording)
+    )
+  }
+
+  static func rejectsUnknownPermissionKind() throws {
+    do {
+      _ = try CommandLineOptions.parse(["helper", "--request-permission", "camera"])
+      throw TestFailure(message: "Expected an unknown permission kind to be rejected")
+    } catch let error as CommandLineOptionsError {
+      try expectEqual(error, .unknownPermissionKind("camera"))
+    }
+  }
+
+  static func mapsRecordPermissionOntoPermissionState() throws {
+    try expectEqual(permissionState(forRecordPermission: .granted), .granted)
+    try expectEqual(permissionState(forRecordPermission: .denied), .denied)
+    try expectEqual(permissionState(forRecordPermission: .undetermined), .notDetermined)
+  }
+
+  /// CGPreflightScreenCaptureAccess only answers yes/no: a "no" cannot tell
+  /// a first launch apart from a refusal, so it must not be reported as a
+  /// denial the user has to go undo in System Settings.
+  static func mapsScreenCapturePreflightOntoPermissionState() throws {
+    try expectEqual(permissionState(forScreenCaptureGranted: true), .granted)
+    try expectEqual(permissionState(forScreenCaptureGranted: false), .notDetermined)
+  }
+
+  static func encodesPermissionStatusPayload() throws {
+    let payload = PermissionStatusPayload(microphone: .granted, screenRecording: .notDetermined)
+    try expectEqual(
+      try jsonLine(for: payload),
+      #"{"microphone":"granted","screenRecording":"notDetermined"}"#
+    )
   }
 
   static func calculatesAudioFrameLength() throws {

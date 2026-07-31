@@ -38,6 +38,12 @@ public struct LivePolyTransHelper {
       let waveform = try computeWaveform(path: path, buckets: buckets)
       print(try jsonLine(for: waveform))
       fflush(stdout)
+    case .checkPermissions:
+      print(try jsonLine(for: currentPermissionStatus()))
+      fflush(stdout)
+    case let .requestPermission(kind):
+      print(try jsonLine(for: await requestPermission(kind)))
+      fflush(stdout)
     case let .mix(inputs, output):
       try mixAudioFiles(inputs: inputs, outputPath: output)
       print(#"{"ok":true}"#)

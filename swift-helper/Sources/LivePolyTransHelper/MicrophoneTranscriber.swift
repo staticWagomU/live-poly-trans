@@ -3,15 +3,6 @@ import Foundation
 import Speech
 import CoreMedia
 
-@available(macOS 14.0, *)
-public func requestMicrophonePermission() async -> Bool {
-  await withCheckedContinuation { continuation in
-    AVAudioApplication.requestRecordPermission { granted in
-      continuation.resume(returning: granted)
-    }
-  }
-}
-
 @available(macOS 26.0, *)
 public func runMicrophoneTranscription(
   stream: AudioStream = .mic,

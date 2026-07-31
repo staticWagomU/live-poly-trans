@@ -216,10 +216,6 @@ public final class SpeakerTapInput: @unchecked Sendable {
   }
 }
 
-public func requestScreenCapturePermission() -> Bool {
-  CGPreflightScreenCaptureAccess() || CGRequestScreenCaptureAccess()
-}
-
 @available(macOS 13.0, *)
 public func screenCaptureKitShareableContent() async throws -> SCShareableContent {
   let currentContent = try await SCShareableContent.current

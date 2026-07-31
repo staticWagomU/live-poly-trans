@@ -36,6 +36,7 @@ swiftc \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ISO8601Timestamp.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/JsonLine.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/LanguageDetection.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/PrivacyPermissions.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/ScreenCaptureKitSpeakerConfiguration.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/SegmentWriter.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/TranscriptArbitration.swift" \
