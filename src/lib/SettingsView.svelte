@@ -278,7 +278,7 @@
     flex-direction: column;
     gap: 18px;
     overflow: auto;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     padding: 20px 24px 40px;
   }
 
@@ -293,7 +293,7 @@
 
   .settings-head h1 {
     margin: 8px 0 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 21px;
     font-weight: 600;
     letter-spacing: 0;
@@ -302,7 +302,7 @@
   .section-pill {
     display: inline-block;
     width: fit-content;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 999px;
     background: var(--surface-pearl);
     color: var(--ink-muted);
@@ -327,19 +327,19 @@
 
   .settings-tools input {
     width: 200px;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 8px;
-    background: var(--canvas);
-    color: var(--ink);
+    background: var(--legacy-canvas);
+    color: var(--legacy-ink);
     padding: 7px 10px;
     font: inherit;
     font-size: 12.5px;
   }
 
   .settings-tools button {
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 8px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     color: var(--ink-muted);
     padding: 7px 12px;
     font-size: 12px;
@@ -397,9 +397,9 @@
     max-width: 620px;
     margin: 0;
     padding: 0;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 11px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     list-style: none;
     overflow: hidden;
   }
@@ -427,7 +427,7 @@
   }
 
   .pack-label {
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 13.5px;
     font-weight: 500;
   }
@@ -458,7 +458,7 @@
 
   .pack-remove {
     border: 1px solid rgba(255, 59, 48, 0.3);
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     color: var(--apple-red);
   }
 
@@ -503,7 +503,7 @@
   }
 
   .pack-system {
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 999px;
     background: var(--surface-pearl);
     color: var(--ink-muted);

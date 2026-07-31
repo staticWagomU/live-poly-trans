@@ -29,7 +29,7 @@
 
 - [ ] 0-1. `+page.svelte`(2046行)の分割: `LiveView.svelte` を新設し、
       ツールバー/字幕スレッド/AIパネルを子コンポーネント化。既存テストが緑のまま
-- [ ] 0-2. デザイントークンを `src/lib/theme.css` に集約(モックの CSS 変数を移植)。
+- [x] 0-2. デザイントークンを `src/lib/theme.css` に集約(モックの CSS 変数を移植)。
       ライト/ダーク両セット定義(`prefers-color-scheme`、旧計画4-7を吸収)
 - [ ] 0-3. キャプチャ状態(activeStreams/sessionIds/restart)を `src/lib/captureState.ts`
       に純関数として抽出+単体テスト(Phase 1 の土台)

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import '$lib/theme.css';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
@@ -1052,28 +1053,12 @@
 </main>
 
 <style>
-  :global(:root) {
-    --apple-blue: #0066cc;
-    --apple-blue-focus: #0071e3;
-    --apple-blue-soft: rgba(0, 102, 204, 0.11);
-    --apple-red: #ff3b30;
-    --apple-green: #34c759;
-    --ink: #1d1d1f;
-    --ink-muted: #7a7a7a;
-    --ink-secondary: #333333;
-    --hairline: #e0e0e0;
-    --divider-soft: #f0f0f0;
-    --canvas: #ffffff;
-    --canvas-parchment: #f5f5f7;
-    --surface-pearl: #fafafc;
-  }
-
   :global(body) {
     margin: 0;
     min-height: 100vh;
     overflow: hidden;
     background: var(--canvas-parchment);
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-family:
       -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
   }
@@ -1111,7 +1096,7 @@
     grid-template-rows: auto 1fr;
     border: 0;
     border-radius: 0;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
   }
 
   .content-shell {
@@ -1169,7 +1154,7 @@
     gap: 12px;
     min-height: 54px;
     padding: 8px 16px;
-    border-bottom: 1px solid var(--hairline);
+    border-bottom: 1px solid var(--legacy-hairline);
     background: rgba(245, 245, 247, 0.92);
     backdrop-filter: blur(18px);
   }
@@ -1193,8 +1178,8 @@
   .record,
   .record-toggle,
   .date-pill {
-    border: 1px solid var(--hairline);
-    background: var(--canvas);
+    border: 1px solid var(--legacy-hairline);
+    background: var(--legacy-canvas);
   }
 
   .capture-switch,
@@ -1227,7 +1212,7 @@
     width: calc((100% - 6px) / 3);
     border: 1px solid rgba(0, 0, 0, 0.05);
     border-radius: 8px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
     content: '';
     transform: translateX(var(--capture-pill-x, 0%));
@@ -1263,16 +1248,16 @@
 
   .capture-switch button:hover:not(:disabled),
   .tab-switch button:hover {
-    color: var(--ink);
+    color: var(--legacy-ink);
   }
 
   .capture-switch button.active,
   .tab-switch button.active {
-    color: var(--ink);
+    color: var(--legacy-ink);
   }
 
   .tab-switch button.active {
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08);
   }
 
@@ -1308,7 +1293,7 @@
     border: 0;
     border-radius: 8px;
     background: transparent;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 12px;
     font-weight: 600;
   }
@@ -1412,8 +1397,8 @@
     min-height: 0;
     grid-template-rows: auto 1fr;
     overflow: hidden;
-    border-right: 1px solid var(--hairline);
-    background: var(--canvas);
+    border-right: 1px solid var(--legacy-hairline);
+    background: var(--legacy-canvas);
   }
 
   .meeting-ai {
@@ -1437,7 +1422,7 @@
 
   .ai-head h2 {
     margin: 7px 0 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 21px;
     font-weight: 600;
     letter-spacing: 0;
@@ -1488,7 +1473,7 @@
     min-height: 0;
     flex-direction: column;
     gap: 8px;
-    border-top: 1px solid var(--hairline);
+    border-top: 1px solid var(--legacy-hairline);
     padding-top: 12px;
   }
 
@@ -1505,7 +1490,7 @@
     max-height: 240px;
     overflow: auto;
     margin: 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-family: inherit;
     font-size: 13px;
     font-weight: 400;
@@ -1556,8 +1541,8 @@
     margin: 0;
     border: 1px solid var(--divider-soft);
     border-radius: 12px 12px 12px 4px;
-    background: var(--canvas);
-    color: var(--ink);
+    background: var(--legacy-canvas);
+    color: var(--legacy-ink);
     padding: 7px 10px;
     font-size: 12.5px;
     line-height: 1.45;
@@ -1574,10 +1559,10 @@
     min-width: 0;
     box-sizing: border-box;
     resize: none;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 8px;
-    background: var(--canvas);
-    color: var(--ink);
+    background: var(--legacy-canvas);
+    color: var(--legacy-ink);
     padding: 9px 10px;
     font: inherit;
     font-size: 13px;
@@ -1595,7 +1580,7 @@
 
   .thread-head h1 {
     margin: 8px 0 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 21px;
     font-weight: 600;
     letter-spacing: 0;
@@ -1632,9 +1617,9 @@
   }
 
   .thread-actions button {
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 8px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     color: var(--ink-muted);
     padding: 5px 10px;
     font-size: 12px;
@@ -1822,7 +1807,7 @@
 
   .listening-empty h2 {
     margin: 22px 0 6px;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 21px;
     font-weight: 600;
     letter-spacing: 0;
@@ -1844,9 +1829,9 @@
   }
 
   .stream-chips span {
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 999px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     color: var(--ink-muted);
     padding: 6px 10px;
     font-size: 12px;
@@ -1890,7 +1875,7 @@
     border: 1px solid var(--divider-soft);
     border-bottom-left-radius: 5px;
     background: var(--canvas-parchment);
-    color: var(--ink);
+    color: var(--legacy-ink);
   }
 
   .chat-bubble.outgoing {
@@ -1955,7 +1940,7 @@
 
     .thread {
       border-right: 0;
-      border-bottom: 1px solid var(--hairline);
+      border-bottom: 1px solid var(--legacy-hairline);
     }
   }
 

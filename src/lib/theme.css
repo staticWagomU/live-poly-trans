@@ -1,0 +1,66 @@
+/*
+ * Design tokens for the UI redesign (source of truth: mockups/ui-redesign.html).
+ *
+ * Two token families coexist during the migration:
+ * - The redesign set (--blue, --ink, --canvas, …) mirrors the mockup and has
+ *   light and dark values. New components must use these.
+ * - The legacy set (--apple-*) keeps the pre-redesign screens pixel-identical
+ *   until they are rebuilt; it is light-only on purpose and disappears once
+ *   the last legacy screen is gone.
+ */
+
+:root {
+  --blue: #0066cc;
+  --blue-focus: #0071e3;
+  --blue-soft: rgba(0, 102, 204, 0.1);
+  --red: #ff3b30;
+  --green: #34c759;
+  --ink: #1d1d1f;
+  --ink-2: #515154;
+  --muted: #86868b;
+  --hairline: rgba(0, 0, 0, 0.09);
+  --divider: rgba(0, 0, 0, 0.05);
+  --canvas: #ffffff;
+  --parchment: #f5f5f7;
+  --pearl: rgba(255, 255, 255, 0.72);
+  --menu-bg: rgba(252, 252, 253, 0.92);
+  --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.16);
+  --seg-track: rgba(120, 120, 128, 0.14);
+  --hover-wash: rgba(120, 120, 128, 0.12);
+  --fs: 1;
+
+  /* legacy tokens (pre-redesign screens) */
+  --apple-blue: #0066cc;
+  --apple-blue-focus: #0071e3;
+  --apple-blue-soft: rgba(0, 102, 204, 0.11);
+  --apple-red: #ff3b30;
+  --apple-green: #34c759;
+  --legacy-ink: #1d1d1f;
+  --ink-muted: #7a7a7a;
+  --ink-secondary: #333333;
+  --legacy-hairline: #e0e0e0;
+  --divider-soft: #f0f0f0;
+  --legacy-canvas: #ffffff;
+  --canvas-parchment: #f5f5f7;
+  --surface-pearl: #fafafc;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+    --menu-bg: rgba(40, 40, 42, 0.94);
+    --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.55);
+    --seg-track: rgba(120, 120, 128, 0.24);
+    --hover-wash: rgba(120, 120, 128, 0.22);
+  }
+}

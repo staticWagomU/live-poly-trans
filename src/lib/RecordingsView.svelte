@@ -494,8 +494,8 @@
     flex-direction: column;
     gap: 14px;
     overflow: auto;
-    border-right: 1px solid var(--hairline);
-    background: var(--canvas);
+    border-right: 1px solid var(--legacy-hairline);
+    background: var(--legacy-canvas);
     padding: 20px 24px;
   }
 
@@ -508,14 +508,14 @@
 
   .detail-head h2 {
     margin: 8px 0 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 21px;
     font-weight: 600;
   }
 
   .pill {
     width: fit-content;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 999px;
     background: var(--surface-pearl);
     color: var(--ink-muted);
@@ -569,8 +569,8 @@
   }
 
   .file-chips button {
-    border-color: var(--hairline);
-    background: var(--canvas);
+    border-color: var(--legacy-hairline);
+    background: var(--legacy-canvas);
     color: var(--ink-muted);
   }
 
@@ -705,7 +705,7 @@
   }
 
   .text {
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 14px;
     line-height: 1.4;
     word-break: break-word;
@@ -734,7 +734,7 @@
 
   .empty-state h2 {
     margin: 0;
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 17px;
   }
 
@@ -784,9 +784,9 @@
     display: grid;
     width: 100%;
     gap: 2px;
-    border: 1px solid var(--hairline);
+    border: 1px solid var(--legacy-hairline);
     border-radius: 10px;
-    background: var(--canvas);
+    background: var(--legacy-canvas);
     padding: 10px 12px;
     text-align: left;
   }
@@ -797,7 +797,7 @@
   }
 
   .recording-title {
-    color: var(--ink);
+    color: var(--legacy-ink);
     font-size: 13px;
     font-weight: 600;
   }
@@ -819,7 +819,7 @@
 
     .detail {
       border-right: 0;
-      border-bottom: 1px solid var(--hairline);
+      border-bottom: 1px solid var(--legacy-hairline);
     }
   }
 </style>
