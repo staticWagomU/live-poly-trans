@@ -158,6 +158,7 @@
       .catch((error) => {
         if (!cleanupRegistry.isDisposed()) {
           appError = `Could not initialize the app: ${String(error)}`;
+          cleanupRegistry.dispose();
         }
       });
 
