@@ -20,6 +20,8 @@ final class WhisperCliRunner: @unchecked Sendable {
   private let cliPath: String
   private let modelPath: String
   private let tempDirectory: URL
+  private let inFlightLock = NSLock()
+  private var inFlightProcess: Process?
 
   init(cliPath: String, modelPath: String) throws {
     self.cliPath = cliPath
@@ -53,7 +55,9 @@ final class WhisperCliRunner: @unchecked Sendable {
     process.standardError = stderrPipe
     let stderrCollector = PipeCollector(stderrPipe)
 
-    let status = try await runUntilExit(process)
+    setInFlight(process)
+    defer { setInFlight(nil) }
+    let status = try await runUntilExit(process, timeoutSeconds: whisperCliTimeoutSeconds)
     guard status == 0 else {
       throw WhisperCliError(
         message: "whisper-cli exited with status \(status): \(stderrCollector.tail())"
@@ -63,24 +67,77 @@ final class WhisperCliRunner: @unchecked Sendable {
     return try parsedWhisperResult(try Data(contentsOf: jsonUrl))
   }
 
+  /// Kills the currently running whisper-cli, if any. Called on shutdown so
+  /// an in-flight inference never outlives the helper as an orphan pegging
+  /// the performance cores.
+  func terminateInFlight() {
+    inFlightLock.lock()
+    let process = inFlightProcess
+    inFlightLock.unlock()
+
+    if let process {
+      terminateProcessWithEscalation(process)
+    }
+  }
+
   func cleanup() {
     try? FileManager.default.removeItem(at: tempDirectory)
   }
+
+  private func setInFlight(_ process: Process?) {
+    inFlightLock.lock()
+    inFlightProcess = process
+    inFlightLock.unlock()
+  }
 }
 
-/// Awaits process exit without blocking a cooperative-pool thread for the
-/// duration of the inference.
-private func runUntilExit(_ process: Process) async throws -> Int32 {
-  try await withCheckedThrowingContinuation { continuation in
-    process.terminationHandler = { finished in
-      continuation.resume(returning: finished.terminationStatus)
-    }
+/// One chunk is at most 28 s of audio; even slow hardware transcribes it in
+/// well under this. Hitting the timeout means the cli is wedged (Metal/ANE
+/// hang, model on a stalled volume) and blocking the whole queue.
+let whisperCliTimeoutSeconds: Double = 120
 
-    do {
-      try process.run()
-    } catch {
-      process.terminationHandler = nil
-      continuation.resume(throwing: error)
+/// Awaits process exit without blocking a cooperative-pool thread for the
+/// duration of the inference. The process is killed on timeout and on task
+/// cancellation; both surface as a non-zero exit status through the normal
+/// termination path, so the continuation always resumes exactly once.
+func runUntilExit(_ process: Process, timeoutSeconds: Double) async throws -> Int32 {
+  try await withTaskCancellationHandler {
+    try await withCheckedThrowingContinuation { continuation in
+      process.terminationHandler = { finished in
+        continuation.resume(returning: finished.terminationStatus)
+      }
+
+      do {
+        try process.run()
+        DispatchQueue.global().asyncAfter(deadline: .now() + timeoutSeconds) {
+          guard process.isRunning else {
+            return
+          }
+
+          helperDebugLog("whisper-cli-timeout pid=\(process.processIdentifier)")
+          terminateProcessWithEscalation(process)
+        }
+      } catch {
+        process.terminationHandler = nil
+        continuation.resume(throwing: error)
+      }
+    }
+  } onCancel: {
+    terminateProcessWithEscalation(process)
+  }
+}
+
+/// SIGTERM first so the cli can drop cleanly, SIGKILL two seconds later if
+/// it ignored that.
+private func terminateProcessWithEscalation(_ process: Process) {
+  guard process.isRunning else {
+    return
+  }
+
+  process.terminate()
+  DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+    if process.isRunning {
+      kill(process.processIdentifier, SIGKILL)
     }
   }
 }

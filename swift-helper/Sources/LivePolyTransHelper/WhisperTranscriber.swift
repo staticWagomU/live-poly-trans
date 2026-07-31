@@ -3,6 +3,11 @@ import Foundation
 
 let whisperSampleRate: Double = 16_000
 
+/// Upper bound on queued utterance chunks awaiting inference. Each chunk is
+/// up to 28 s x 16 kHz Float (~1.8 MB), so this caps queue memory at ~22 MB
+/// while leaving room for inference to catch up after a slow stretch.
+let maxPendingWhisperChunks = 12
+
 /// Mic ambient noise sits well above the digital-silence floor loopback
 /// audio has, so the streams cut utterances at different levels. Tune from
 /// the whisper-audio RMS debug logs of a real session, not by guessing.
@@ -71,9 +76,15 @@ public func runWhisperTranscription(
   )
   let pendingChunks = PendingChunkCounter()
   var chunkContinuation: AsyncStream<UtteranceChunk>.Continuation!
-  let chunkStream = AsyncStream<UtteranceChunk>(bufferingPolicy: .unbounded) {
+  // Bounded so a wedged or slower-than-realtime inference cannot grow the
+  // queue (and helper memory) for the rest of the session; the oldest queued
+  // chunks keep transcribing in order and the newest is dropped instead.
+  let chunkStream = AsyncStream<UtteranceChunk>(
+    bufferingPolicy: .bufferingOldest(maxPendingWhisperChunks)
+  ) {
     chunkContinuation = $0
   }
+  let droppedChunkNotice = ShutdownOnce()
   let enqueueChunk: (UtteranceChunk) -> Void = { [chunkContinuation] chunk in
     let pending = pendingChunks.increment()
     helperDebugLog(
@@ -82,7 +93,19 @@ public func runWhisperTranscription(
     if pending > 4 {
       helperDebugLog("whisper-chunk-backlog stream=\(stream.rawValue) pending=\(pending)")
     }
-    chunkContinuation?.yield(chunk)
+    if case .dropped? = chunkContinuation?.yield(chunk) {
+      pendingChunks.decrement()
+      helperDebugLog(
+        "whisper-chunk-dropped-backlog stream=\(stream.rawValue) segment=\(chunk.startMs)-\(chunk.durationMs)"
+      )
+      // Plain (non-debug) stderr surfaces in the UI as a helper-error event.
+      droppedChunkNotice.run {
+        FileHandle.standardError.write(Data(
+          "Transcription is falling behind; some audio was skipped. A smaller Whisper model keeps up better.\n"
+            .utf8
+        ))
+      }
+    }
   }
 
   let inputSource = try await makeWhisperInputSource(
@@ -90,7 +113,7 @@ public func runWhisperTranscription(
     recordFile: recordFile,
     whisperFormat: whisperFormat
   )
-  installWhisperShutdownHandlers(stream: stream, inputSource: inputSource)
+  installWhisperShutdownHandlers(stream: stream, inputSource: inputSource, runner: runner)
 
   // Chunks transcribe strictly in arrival order so final bubbles never
   // reorder; whisper inference for the current chunk runs while the next
@@ -167,6 +190,10 @@ public func runWhisperTranscription(
     helperDebugLog("whisper-stream-error stream=\(stream.rawValue) error=\(diagnosticDescription(for: error))")
     chunkContinuation.finish()
     consumer.cancel()
+    // Cancellation kills the in-flight whisper-cli via runUntilExit's
+    // cancellation handler; wait for the consumer so cleanup() does not
+    // delete the temp directory under a still-running child.
+    await consumer.value
     inputSource.cleanup()
     inputSource.recorder?.finalize()
     runner.cleanup()
@@ -242,7 +269,8 @@ private let whisperShutdownGraceSeconds: Double = 10
 @available(macOS 26.0, *)
 private func installWhisperShutdownHandlers(
   stream: AudioStream,
-  inputSource: AudioInputSource<CapturedAudioBuffer>
+  inputSource: AudioInputSource<CapturedAudioBuffer>,
+  runner: WhisperCliRunner
 ) {
   let trigger: @Sendable () -> Void = {
     whisperShutdownOnce.run {
@@ -252,7 +280,11 @@ private func installWhisperShutdownHandlers(
       inputSource.cleanup()
       DispatchQueue.global().asyncAfter(deadline: .now() + whisperShutdownGraceSeconds) {
         helperDebugLog("whisper-shutdown-timeout stream=\(stream.rawValue)")
+        // The drain overran the grace: kill the in-flight whisper-cli so it
+        // does not outlive this process, save the audio, then exit.
+        runner.terminateInFlight()
         inputSource.recorder?.finalize()
+        runner.cleanup()
         exit(0)
       }
     }

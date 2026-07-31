@@ -48,6 +48,17 @@ public final class UtteranceChunker {
   private var speechFrames = 0
   private var trailingSilence = 0
   private var isActive = false
+  private var noiseFloorRMS: Double = .infinity
+
+  /// Loopback audio often carries a constant comfort-noise floor above the
+  /// configured absolute threshold; without adapting to it every pause reads
+  /// as speech and chunks only ever cut at the max-length ceiling. The floor
+  /// follows the quietest recent level: it drops instantly and rises slowly,
+  /// and the derived threshold is capped so a session that starts mid-speech
+  /// cannot learn the speech level as "silence".
+  private let noiseFloorMultiplier = 3.0
+  private let maxAdaptiveSilenceRMS = 0.02
+  private let noiseFloorRiseSeconds = 20.0
 
   public init(
     sampleRate: Double = 16_000,
@@ -70,7 +81,9 @@ public final class UtteranceChunker {
       return []
     }
 
-    let isSpeech = audioSignalRMS(samples) > silenceThresholdRMS
+    let rms = audioSignalRMS(samples)
+    updateNoiseFloor(rms, sampleCount: samples.count)
+    let isSpeech = rms > effectiveSilenceThresholdRMS
     let bufferStartFrame = totalFrames
     totalFrames += Int64(samples.count)
 
@@ -139,6 +152,32 @@ public final class UtteranceChunker {
       startMs: milliseconds(fromFrames: activeStartFrame),
       durationMs: milliseconds(fromFrames: Int64(active.count))
     )
+  }
+
+  var effectiveSilenceThresholdRMS: Double {
+    guard noiseFloorRMS.isFinite else {
+      return silenceThresholdRMS
+    }
+
+    return max(
+      silenceThresholdRMS,
+      min(noiseFloorRMS * noiseFloorMultiplier, maxAdaptiveSilenceRMS)
+    )
+  }
+
+  private func updateNoiseFloor(_ rms: Double, sampleCount: Int) {
+    guard noiseFloorRMS.isFinite else {
+      noiseFloorRMS = rms
+      return
+    }
+
+    if rms < noiseFloorRMS {
+      noiseFloorRMS = rms
+      return
+    }
+
+    let riseFraction = min(1, Double(sampleCount) / (sampleRate * noiseFloorRiseSeconds))
+    noiseFloorRMS += (rms - noiseFloorRMS) * riseFraction
   }
 
   private func appendPreRoll(_ samples: [Float]) {

@@ -45,12 +45,16 @@ struct CommandLineOptionsTests {
     try chunkerReportsStartAndDurationFromCumulativeFrames()
     try chunkerIncludesPreRollBeforeSpeechOnset()
     try chunkerFlushReturnsPendingSpeech()
+    try chunkerCutsUtteranceDespiteElevatedNoiseFloor()
+    try chunkerDetectsSpeechWhenSessionStartsMidSpeech()
     try parsesWhisperCliFullJson()
     try computesMeanTokenProbabilityConfidence()
     try sanitizesWhisperNonSpeechAnnotations()
     try mapsWhisperLanguageToSessionLanguageByPrefix()
     try fallsBackToLanguageFitnessForUnmatchedWhisperLanguage()
     try buildsWhisperCliArguments()
+    try await terminatesHungWhisperProcessAfterTimeout()
+    try await terminatesWhisperProcessOnTaskCancellation()
     try keepsMeaningfulTranscriptRules()
     try buildsTranscriptCandidateFromWhisperResult()
     try dropsNonSpeechWhisperResult()
@@ -362,6 +366,66 @@ struct CommandLineOptionsTests {
     try expectEqual(chunker.flush(), nil)
   }
 
+  // Loopback audio from a video call carries comfort noise well above the
+  // speaker stream's 0.001 absolute threshold. The chunker must learn that
+  // floor and still cut utterances at pauses instead of running every chunk
+  // to the 28 s ceiling.
+  static func chunkerCutsUtteranceDespiteElevatedNoiseFloor() throws {
+    let chunker = UtteranceChunker(
+      sampleRate: 16_000,
+      silenceThresholdRMS: 0.001,
+      minSpeechMs: 300,
+      trailingSilenceMs: 800,
+      maxChunkMs: 28_000,
+      preRollMs: 200
+    )
+    let comfortNoise = [Float](repeating: 0.005, count: 4096)
+    let speech = [Float](repeating: 0.1, count: 4096)
+    var chunks: [UtteranceChunk] = []
+
+    for _ in 0..<2 {
+      chunks += chunker.consume(comfortNoise)
+    }
+    for _ in 0..<4 {
+      chunks += chunker.consume(speech)
+    }
+    for _ in 0..<4 {
+      chunks += chunker.consume(comfortNoise)
+    }
+
+    try expectEqual(chunks.count, 1)
+    // Speech starts at buffer 2 (512 ms); the chunk opens 200 ms earlier
+    // with pre-roll.
+    try expectEqual(chunks[0].startMs, 312)
+    try expectEqual(chunks[0].durationMs, 2_248)
+  }
+
+  // A session that starts mid-speech must not learn the speech level as the
+  // noise floor and classify the whole utterance as silence.
+  static func chunkerDetectsSpeechWhenSessionStartsMidSpeech() throws {
+    let chunker = UtteranceChunker(
+      sampleRate: 16_000,
+      silenceThresholdRMS: 0.001,
+      minSpeechMs: 300,
+      trailingSilenceMs: 800,
+      maxChunkMs: 28_000,
+      preRollMs: 200
+    )
+    let speech = [Float](repeating: 0.1, count: 4096)
+    var chunks: [UtteranceChunk] = []
+
+    for _ in 0..<4 {
+      chunks += chunker.consume(speech)
+    }
+    for _ in 0..<4 {
+      chunks += chunker.consume(chunkerSilentBuffer)
+    }
+
+    try expectEqual(chunks.count, 1)
+    try expectEqual(chunks[0].startMs, 0)
+    try expectEqual(chunks[0].durationMs, 2_048)
+  }
+
   // MARK: - Whisper result parsing
   // Fixture mirrors whisper-cli --output-json-full: result.language holds the
   // detected code, transcription carries segments with per-token
@@ -467,6 +531,39 @@ struct CommandLineOptionsTests {
         "--no-prints"
       ]
     )
+  }
+
+  // A wedged whisper-cli (Metal hang, stalled volume) must not block the
+  // transcription queue forever: the runner kills it after the timeout and
+  // surfaces a normal error so the session moves on to the next chunk.
+  static func terminatesHungWhisperProcessAfterTimeout() async throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    process.arguments = ["30"]
+
+    let startedAt = Date()
+    let status = try await runUntilExit(process, timeoutSeconds: 0.2)
+
+    try expectEqual(status == 0, false)
+    try expectEqual(Date().timeIntervalSince(startedAt) < 5, true)
+  }
+
+  static func terminatesWhisperProcessOnTaskCancellation() async throws {
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/bin/sleep")
+    process.arguments = ["30"]
+
+    let startedAt = Date()
+    let task = Task {
+      try await runUntilExit(process, timeoutSeconds: 60)
+    }
+    try await Task.sleep(nanoseconds: 100_000_000)
+    task.cancel()
+    let status = try? await task.value
+
+    try expectEqual(status == nil || status != 0, true)
+    try expectEqual(Date().timeIntervalSince(startedAt) < 5, true)
+    try expectEqual(process.isRunning, false)
   }
 
   static func keepsMeaningfulTranscriptRules() throws {
