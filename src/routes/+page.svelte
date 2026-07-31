@@ -109,7 +109,7 @@
   let summaryError: string | null = null;
   let aiQuestion = '';
   let chatTurns: ChatTurn[] = [];
-  let aiError: string | null = null;
+  let appError: string | null = null;
   let isSummaryLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
@@ -141,7 +141,7 @@
       ),
       cleanupRegistry.add(
         listen<string>('helper-error', (event) => {
-          aiError = event.payload;
+          appError = event.payload;
         })
       ),
       cleanupRegistry.add(
@@ -157,7 +157,7 @@
       })
       .catch((error) => {
         if (!cleanupRegistry.isDisposed()) {
-          aiError = `Could not initialize the app: ${String(error)}`;
+          appError = `Could not initialize the app: ${String(error)}`;
         }
       });
 
@@ -177,7 +177,7 @@
       const payload = await invoke<LanguageDetectionPayload>('detect_languages');
       applyInstalledLanguages(payload.installed, preserveSelection);
     } catch (error) {
-      aiError = String(error);
+      appError = String(error);
     }
   }
 
@@ -280,7 +280,7 @@
       return;
     }
 
-    aiError = null;
+    appError = null;
     statusMessage = null;
 
     if (isRecording) {
@@ -293,7 +293,7 @@
         finishCurrentRecording
       );
       if (stopErrors.length > 0) {
-        aiError = `Could not fully stop capture:\n${stopErrors.map(String).join('\n')}`;
+        appError = `Could not fully stop capture:\n${stopErrors.map(String).join('\n')}`;
       }
       captureTransition = null;
       return;
@@ -327,11 +327,11 @@
         } catch (error) {
           failures.push(`audio recording finalize: ${String(error)}`);
         }
-        aiError = failures.join('\n');
+        appError = failures.join('\n');
         return;
       }
 
-      aiError = failures.length > 0 ? failures.join('\n') : null;
+      appError = failures.length > 0 ? failures.join('\n') : null;
     } finally {
       captureTransition = null;
     }
@@ -352,7 +352,7 @@
       return;
     }
 
-    aiError = null;
+    appError = null;
     captureMode = mode;
 
     if (!isRecording) {
@@ -377,7 +377,7 @@
         }
       }
     } catch (error) {
-      aiError = String(error);
+      appError = String(error);
     } finally {
       captureTransition = null;
     }
@@ -426,7 +426,7 @@
 
     const attempt = restartAttempts[payload.stream] + 1;
     if (attempt > maxRestartAttempts) {
-      aiError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up.`;
+      appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up.`;
       statusMessage = null;
       return;
     }
@@ -449,7 +449,7 @@
       statusMessage = null;
     } catch (error) {
       statusMessage = null;
-      aiError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
+      appError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
     }
   }
 
@@ -519,7 +519,7 @@
 
     isSummaryLoading = true;
     if (!automatic) {
-      aiError = null;
+      appError = null;
     }
 
     try {
@@ -544,7 +544,7 @@
     }
 
     isAnswerLoading = true;
-    aiError = null;
+    appError = null;
     const history = recentChatHistory(chatTurns);
     const bounded = boundMessagesByChars(messages, 6000);
     chatTurns = [...chatTurns, { question, answer: '' }];
@@ -561,7 +561,7 @@
         index === chatTurns.length - 1 ? { ...turn, answer } : turn
       );
     } catch (error) {
-      aiError = String(error);
+      appError = String(error);
       chatTurns = chatTurns.slice(0, -1);
       aiQuestion = question;
     } finally {
@@ -591,7 +591,7 @@
       await navigator.clipboard.writeText(text);
       showActionNotice('Transcript copied.');
     } catch (error) {
-      aiError = String(error);
+      appError = String(error);
     }
   }
 
@@ -606,7 +606,7 @@
       });
       showActionNotice(`Saved: ${result.json_path}`);
     } catch (error) {
-      aiError = String(error);
+      appError = String(error);
     }
   }
 
@@ -617,7 +617,7 @@
     summaryCoveredCount = 0;
     summaryError = null;
     chatTurns = [];
-    aiError = null;
+    appError = null;
     actionNotice = null;
   }
 </script>
@@ -759,8 +759,20 @@
       </div>
     </header>
 
-    {#if activeTab === 'live'}
-      <div class="conversation">
+    <div class="content-shell">
+      <div class="app-alert-slot">
+        {#if appError}
+          <div class="app-alert" role="alert">
+            <p>{appError}</p>
+            <button type="button" aria-label="Dismiss error" on:click={() => (appError = null)}>
+              &times;
+            </button>
+          </div>
+        {/if}
+      </div>
+
+      {#if activeTab === 'live'}
+        <div class="conversation">
         <section
           class="thread"
           aria-label="Translation chat"
@@ -905,10 +917,6 @@
             </button>
           </div>
 
-          {#if aiError}
-            <p class="ai-error">{aiError}</p>
-          {/if}
-
           <section class="ai-section">
             <div class="ai-section-head">
               <h3>Summary</h3>
@@ -951,17 +959,18 @@
             <textarea bind:value={aiQuestion} rows="3" aria-label="Meeting question"></textarea>
           </section>
         </aside>
-      </div>
-    {:else if activeTab === 'recordings'}
-      <RecordingsView />
-    {:else}
-      <SettingsView
-        {isRecording}
-        onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
-        {speechModel}
-        onSpeechModelChanged={setSpeechModel}
-      />
-    {/if}
+        </div>
+      {:else if activeTab === 'recordings'}
+        <RecordingsView />
+      {:else}
+        <SettingsView
+          {isRecording}
+          onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
+          {speechModel}
+          onSpeechModelChanged={setSpeechModel}
+        />
+      {/if}
+    </div>
   </section>
 </main>
 
@@ -1026,6 +1035,54 @@
     border: 0;
     border-radius: 0;
     background: var(--canvas);
+  }
+
+  .content-shell {
+    display: grid;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+
+  .app-alert-slot {
+    min-height: 0;
+  }
+
+  .app-alert {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border-bottom: 1px solid rgba(179, 38, 30, 0.18);
+    background: #fff4f3;
+    color: #9f211b;
+    padding: 8px 16px;
+  }
+
+  .app-alert p {
+    max-height: 54px;
+    flex: 1;
+    overflow: auto;
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.4;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .app-alert button {
+    width: 26px;
+    height: 26px;
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: currentColor;
+    font-size: 20px;
+    line-height: 1;
+  }
+
+  .app-alert button:hover {
+    background: rgba(179, 38, 30, 0.08);
   }
 
   .toolbar {
