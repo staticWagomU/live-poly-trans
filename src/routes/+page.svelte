@@ -49,6 +49,14 @@
     streamEnginePayload,
     type SpeechModelSelection
   } from '$lib/speechModels';
+  import {
+    emptyStreamSessions,
+    isCurrentSessionEvent,
+    shouldRestartStream,
+    withStreamSession,
+    withoutStreamSessions,
+    type StreamSessions
+  } from '$lib/captureState';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
   import { completeCaptureStop } from '$lib/captureLifecycle';
   import {
@@ -95,10 +103,7 @@
   let interimMessages: ChatMessage[] = [];
   let captureMode: CaptureMode = 'both';
   let activeStreams = new Set<AudioStream>();
-  let streamSessionIds: Record<AudioStream, string | null> = {
-    mic: null,
-    speaker: null
-  };
+  let streamSessionIds: StreamSessions = emptyStreamSessions();
   let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
   let streamStartedAt: Record<AudioStream, number | null> = { mic: null, speaker: null };
   // Bumped on every user-initiated start/stop; a pending auto-restart from
@@ -211,7 +216,7 @@
   }
 
   async function handleHelperEvent(payload: HelperEvent) {
-    if (!isCurrentSessionEvent(payload)) {
+    if (!isCurrentSessionEvent(streamSessionIds, payload)) {
       return;
     }
 
@@ -252,27 +257,16 @@
     }
   }
 
-  function isCurrentSessionEvent(event: HelperEvent) {
-    return streamSessionIds[event.stream] === event.sessionId;
-  }
-
   function createStreamSessionId(stream: AudioStream) {
     return `${stream}-${Date.now()}-${crypto.randomUUID()}`;
   }
 
   function setStreamSession(stream: AudioStream, sessionId: string | null) {
-    streamSessionIds = {
-      ...streamSessionIds,
-      [stream]: sessionId
-    };
+    streamSessionIds = withStreamSession(streamSessionIds, stream, sessionId);
   }
 
   function clearStreamSessions(streams: AudioStream[]) {
-    const nextSessionIds = { ...streamSessionIds };
-    for (const stream of streams) {
-      nextSessionIds[stream] = null;
-    }
-    streamSessionIds = nextSessionIds;
+    streamSessionIds = withoutStreamSessions(streamSessionIds, streams);
   }
 
   function setTranscriptFontScale(scale: number) {
@@ -434,7 +428,7 @@
   }
 
   async function handleHelperExit(payload: HelperExitedPayload) {
-    if (streamSessionIds[payload.stream] !== payload.sessionId) {
+    if (!isCurrentSessionEvent(streamSessionIds, payload)) {
       return;
     }
 
@@ -452,10 +446,13 @@
 
       await new Promise((resolve) => setTimeout(resolve, restartBackoffMs(attempt)));
 
-      const stillWanted =
-        generation === captureGeneration &&
-        streamsForCaptureMode(captureMode).includes(payload.stream) &&
-        streamSessionIds[payload.stream] === null;
+      const stillWanted = shouldRestartStream({
+        generationAtExit: generation,
+        currentGeneration: captureGeneration,
+        captureMode,
+        stream: payload.stream,
+        sessions: streamSessionIds
+      });
       if (!stillWanted) {
         statusMessage = null;
         return;
