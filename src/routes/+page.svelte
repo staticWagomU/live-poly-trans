@@ -48,6 +48,7 @@
     type SpeechModelSelection
   } from '$lib/speechModels';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
+  import { completeCaptureStop } from '$lib/captureLifecycle';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -95,7 +96,7 @@
   let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
   let recordingEnabled = false;
   let currentRecording: CreatedRecording | null = null;
-  let isStarting = false;
+  let captureTransition: 'starting' | 'stopping' | 'switching' | null = null;
   let messagesContainer: HTMLDivElement | null = null;
   let latestMessageAnchor: HTMLDivElement | null = null;
   let showJumpToLatest = false;
@@ -117,6 +118,8 @@
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
   $: isSpeakerRecording = activeStreams.has('speaker');
+  $: isCaptureBusy = captureTransition !== null;
+  $: isStarting = captureTransition === 'starting';
   $: selectedCaptureMode = isRecording ? captureModeFromStreams(activeStreams) : captureMode;
   $: visibleMessages = [...messages, ...interimMessages];
 
@@ -272,65 +275,82 @@
   }
 
   async function toggleRecording() {
+    if (isCaptureBusy) {
+      return;
+    }
+
     aiError = null;
     statusMessage = null;
 
     if (isRecording) {
+      captureTransition = 'stopping';
       clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
       interimMessages = [];
-      await invoke('stop_all_sessions');
-      await finishCurrentRecording();
+      const stopErrors = await completeCaptureStop(
+        () => invoke('stop_all_sessions'),
+        finishCurrentRecording
+      );
+      if (stopErrors.length > 0) {
+        aiError = `Could not fully stop capture:\n${stopErrors.map(String).join('\n')}`;
+      }
+      captureTransition = null;
       return;
     }
 
-    isStarting = true;
-    restartAttempts = { mic: 0, speaker: 0 };
+    captureTransition = 'starting';
+    try {
+      restartAttempts = { mic: 0, speaker: 0 };
+      const failures: string[] = [];
 
-    if (recordingEnabled) {
-      try {
-        currentRecording = await invoke<CreatedRecording>('create_recording');
-      } catch (error) {
-        aiError = `Could not prepare audio recording: ${String(error)}`;
-        currentRecording = null;
+      if (recordingEnabled) {
+        try {
+          currentRecording = await invoke<CreatedRecording>('create_recording');
+        } catch (error) {
+          failures.push(`audio recording: ${String(error)}`);
+          currentRecording = null;
+        }
       }
-    }
 
-    const failures: string[] = [];
-
-    for (const stream of streamsForCaptureMode(captureMode)) {
-      try {
-        await startStream(stream);
-      } catch (error) {
-        failures.push(`${stream}: ${String(error)}`);
+      for (const stream of streamsForCaptureMode(captureMode)) {
+        try {
+          await startStream(stream);
+        } catch (error) {
+          failures.push(`${stream}: ${String(error)}`);
+        }
       }
+
+      if (activeStreams.size === 0) {
+        try {
+          await finishCurrentRecording();
+        } catch (error) {
+          failures.push(`audio recording finalize: ${String(error)}`);
+        }
+        aiError = failures.join('\n');
+        return;
+      }
+
+      aiError = failures.length > 0 ? failures.join('\n') : null;
+    } finally {
+      captureTransition = null;
     }
-
-    isStarting = false;
-
-    if (activeStreams.size === 0) {
-      aiError = failures.join('\n');
-      await finishCurrentRecording();
-      return;
-    }
-
-    aiError = failures.length > 0 ? failures.join('\n') : null;
   }
 
   async function finishCurrentRecording() {
-    if (!currentRecording) {
+    const recording = currentRecording;
+    currentRecording = null;
+    if (!recording) {
       return;
     }
 
-    try {
-      await invoke('finalize_recording', { id: currentRecording.id });
-    } catch {
-      // Metadata finalize is best-effort; the audio files are already closed.
-    }
-    currentRecording = null;
+    await invoke('finalize_recording', { id: recording.id });
   }
 
   async function selectCaptureMode(mode: CaptureMode) {
+    if (isCaptureBusy) {
+      return;
+    }
+
     aiError = null;
     captureMode = mode;
 
@@ -338,7 +358,7 @@
       return;
     }
 
-    isStarting = true;
+    captureTransition = 'switching';
 
     try {
       const nextStreams = new Set(streamsForCaptureMode(mode));
@@ -358,7 +378,7 @@
     } catch (error) {
       aiError = String(error);
     } finally {
-      isStarting = false;
+      captureTransition = null;
     }
   }
 
@@ -645,7 +665,7 @@
               type="button"
               class:active={selectedCaptureMode === option.mode}
               aria-pressed={selectedCaptureMode === option.mode}
-              disabled={isStarting}
+              disabled={isCaptureBusy}
               on:click={() => selectCaptureMode(option.mode)}
             >
               {option.label}
@@ -694,8 +714,19 @@
           <span>Save audio</span>
         </label>
 
-        <button class="record" class:recording={isRecording} disabled={isStarting} on:click={toggleRecording}>
-          <span></span>{isStarting ? 'Starting' : isRecording ? 'Stop' : 'Record'}
+        <button
+          class="record"
+          class:recording={isRecording || captureTransition === 'stopping'}
+          disabled={isCaptureBusy}
+          on:click={toggleRecording}
+        >
+          <span></span>{captureTransition === 'starting'
+            ? 'Starting'
+            : captureTransition === 'stopping'
+              ? 'Stopping'
+              : isRecording
+                ? 'Stop'
+                : 'Record'}
         </button>
       </div>
     </header>
