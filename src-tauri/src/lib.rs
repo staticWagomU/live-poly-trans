@@ -14,7 +14,9 @@ use tauri::{AppHandle, Emitter, Manager, State};
 
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
 const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
-const HELPER_STOP_GRACE: Duration = Duration::from_secs(3);
+// Must exceed the Swift helper's 5s shutdown safety net so the helper can
+// finalize the m4a (moov atom) before we SIGKILL it.
+const HELPER_STOP_GRACE: Duration = Duration::from_secs(7);
 const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -781,29 +783,73 @@ fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> 
     fs::write(dir.join("meta.json"), json).map_err(|error| error.to_string())
 }
 
+/// Deletes one recording directory (audio, transcript, meta). The id is
+/// re-validated here because this is the only command that removes files.
+pub fn delete_recording_dir(root: &Path, id: &str) -> Result<(), String> {
+    if id.is_empty() || id.contains('/') || id.contains("..") {
+        return Err(format!("invalid recording id: {id}"));
+    }
+
+    let dir = root.join(id);
+    if !dir.exists() {
+        return Ok(());
+    }
+
+    fs::remove_dir_all(&dir).map_err(|error| error.to_string())
+}
+
+/// Closes every recording still marked in-progress. Quitting the app while
+/// recording never reaches `finalize_recording`, which would leave the
+/// recording open forever and orphaned by the next start.
+pub fn close_open_recordings(root: &Path, ended_at: &str) {
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        let Some(mut meta) = read_recording_meta(&dir) else {
+            continue;
+        };
+        if meta.ended_at.is_none() {
+            meta.ended_at = Some(ended_at.to_string());
+            let _ = write_recording_meta(&dir, &meta);
+        }
+    }
+}
+
 // MARK: commands
 
 pub mod commands {
     use super::*;
 
+    /// Non-async commands run on the main thread in Tauri v2; this one blocks
+    /// on a helper subprocess, so it must not.
     #[tauri::command]
-    pub fn detect_languages() -> Result<LanguageDetectionPayload, String> {
-        let helper_path = resolve_helper_path()?;
-        eprintln!(
-            "live-poly-trans tauri: detect-languages helper={}",
-            helper_path.display()
-        );
+    pub async fn detect_languages() -> Result<LanguageDetectionPayload, String> {
+        tauri::async_runtime::spawn_blocking(|| {
+            let helper_path = resolve_helper_path()?;
+            eprintln!(
+                "live-poly-trans tauri: detect-languages helper={}",
+                helper_path.display()
+            );
 
-        let output = Command::new(helper_path)
-            .arg("--detect-languages")
-            .output()
-            .map_err(|error| error.to_string())?;
+            let output = Command::new(helper_path)
+                .arg("--detect-languages")
+                .output()
+                .map_err(|error| error.to_string())?;
 
-        if !output.status.success() {
-            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
-        }
+            if !output.status.success() {
+                return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
+            }
 
-        serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+            serde_json::from_slice(&output.stdout).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     /// Runs a helper language-pack command (`--install-language` /
@@ -964,13 +1010,17 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn list_speech_models(app: AppHandle) -> Result<SpeechModelsPayload, String> {
-        let home = app.path().home_dir().map_err(|error| error.to_string())?;
+    pub async fn list_speech_models(app: AppHandle) -> Result<SpeechModelsPayload, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let home = app.path().home_dir().map_err(|error| error.to_string())?;
 
-        Ok(SpeechModelsPayload {
-            models: scan_speech_models(&superwhisper_models_dir(&home)),
-            cli_available: resolve_whisper_cli().is_ok(),
+            Ok(SpeechModelsPayload {
+                models: scan_speech_models(&superwhisper_models_dir(&home)),
+                cli_available: resolve_whisper_cli().is_ok(),
+            })
         })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
@@ -1002,26 +1052,37 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn save_transcript(
+    pub async fn save_transcript(
         app: AppHandle,
         messages: Vec<SavedTranscriptMessage>,
     ) -> Result<SaveTranscriptResult, String> {
+        tauri::async_runtime::spawn_blocking(move || save_transcript_blocking(&app, &messages))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    fn save_transcript_blocking(
+        app: &AppHandle,
+        messages: &[SavedTranscriptMessage],
+    ) -> Result<SaveTranscriptResult, String> {
+        // Downloads, not app data: ~/Library is invisible in Finder by
+        // default, so saving there reads as data loss to most users.
         let transcript_dir = app
             .path()
-            .app_data_dir()
-            .map_err(|error| error.to_string())?
-            .join("exports");
+            .download_dir()
+            .map_err(|error| error.to_string())?;
         fs::create_dir_all(&transcript_dir).map_err(|error| error.to_string())?;
 
         let timestamp = readable_timestamp();
-        let json_path = transcript_dir.join(format!("transcript-{timestamp}.json"));
-        let text_path = transcript_dir.join(format!("transcript-{timestamp}.txt"));
+        let base_name = format!("LivePolyTrans-transcript-{timestamp}");
+        let json_path = unique_destination(&transcript_dir, &base_name, "json");
+        let text_path = unique_destination(&transcript_dir, &base_name, "txt");
 
-        let json = serde_json::to_string_pretty(&messages).map_err(|error| error.to_string())?;
+        let json = serde_json::to_string_pretty(messages).map_err(|error| error.to_string())?;
         fs::write(&json_path, json).map_err(|error| error.to_string())?;
 
         let mut text_file = File::create(&text_path).map_err(|error| error.to_string())?;
-        for message in &messages {
+        for message in messages {
             writeln!(
                 text_file,
                 "[{}] {} / {}: {}",
@@ -1110,40 +1171,64 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn create_recording(app: AppHandle) -> Result<CreatedRecording, String> {
-        let id = format!("rec-{}", readable_timestamp());
-        let dir = recording_dir_for(&app, &id)?;
-        fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+    pub async fn create_recording(app: AppHandle) -> Result<CreatedRecording, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let id = format!("rec-{}", readable_timestamp());
+            let dir = recording_dir_for(&app, &id)?;
+            fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
 
-        write_recording_meta(
-            &dir,
-            &RecordingMeta {
-                id: id.clone(),
-                started_at: chrono::Local::now().to_rfc3339(),
-                ended_at: None,
-            },
-        )?;
+            write_recording_meta(
+                &dir,
+                &RecordingMeta {
+                    id: id.clone(),
+                    started_at: chrono::Local::now().to_rfc3339(),
+                    ended_at: None,
+                },
+            )?;
 
-        Ok(CreatedRecording {
-            id,
-            dir: dir.display().to_string(),
+            Ok(CreatedRecording {
+                id,
+                dir: dir.display().to_string(),
+            })
         })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
-    pub fn finalize_recording(app: AppHandle, id: String) -> Result<(), String> {
-        let dir = recording_dir_for(&app, &id)?;
-        let Some(mut meta) = read_recording_meta(&dir) else {
-            return Ok(());
-        };
+    pub async fn finalize_recording(app: AppHandle, id: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let dir = recording_dir_for(&app, &id)?;
+            let Some(mut meta) = read_recording_meta(&dir) else {
+                return Ok(());
+            };
 
-        meta.ended_at = Some(chrono::Local::now().to_rfc3339());
-        write_recording_meta(&dir, &meta)
+            meta.ended_at = Some(chrono::Local::now().to_rfc3339());
+            write_recording_meta(&dir, &meta)
+        })
+        .await
+        .map_err(|error| error.to_string())?
     }
 
     #[tauri::command]
-    pub fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
-        let root = recordings_dir(&app)?;
+    pub async fn delete_recording(app: AppHandle, id: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let root = recordings_dir(&app)?;
+            delete_recording_dir(&root, &id)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
+        tauri::async_runtime::spawn_blocking(move || list_recordings_blocking(&app))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    fn list_recordings_blocking(app: &AppHandle) -> Result<Vec<RecordingSummary>, String> {
+        let root = recordings_dir(app)?;
         let Ok(entries) = fs::read_dir(&root) else {
             return Ok(Vec::new());
         };
@@ -1192,8 +1277,16 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub fn read_recording_transcript(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
-        let dir = recording_dir_for(&app, &id)?;
+    pub async fn read_recording_transcript(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
+        // An 8-hour session's jsonl runs to tens of MB; parsing it on the
+        // main thread freezes the whole window.
+        tauri::async_runtime::spawn_blocking(move || read_recording_transcript_blocking(&app, &id))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    fn read_recording_transcript_blocking(app: &AppHandle, id: &str) -> Result<Vec<Value>, String> {
+        let dir = recording_dir_for(app, id)?;
         let Ok(entries) = fs::read_dir(&dir) else {
             return Ok(Vec::new());
         };
@@ -1344,6 +1437,7 @@ pub fn run() {
             commands::ai_ask,
             commands::create_recording,
             commands::finalize_recording,
+            commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
             commands::recording_waveform,
@@ -1353,8 +1447,44 @@ pub fn run() {
             let _ = app.get_webview_window("main");
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running LivePolyTrans");
+        .build(tauri::generate_context!())
+        .expect("error while running LivePolyTrans")
+        .run(|app, event| {
+            if matches!(event, tauri::RunEvent::Exit) {
+                shutdown_capture_on_exit(app);
+            }
+        });
+}
+
+/// Quitting mid-recording must still drain the helpers (so the m4a files get
+/// their moov atoms) and close the recording metadata; the frontend's stop
+/// path never runs on ⌘Q.
+fn shutdown_capture_on_exit(app: &AppHandle) {
+    let session = app.state::<HelperSession>();
+
+    let streams: Vec<String> = match session.children.lock() {
+        Ok(children) => children.keys().cloned().collect(),
+        Err(_) => Vec::new(),
+    };
+
+    // Streams stop in parallel: sequential graceful stops could take
+    // stop_grace per stream and macOS force-kills apps that linger on quit.
+    let handles: Vec<_> = streams
+        .into_iter()
+        .map(|stream| {
+            let children = session.children.clone();
+            std::thread::spawn(move || {
+                let _ = stop_stream_child(&children, &stream);
+            })
+        })
+        .collect();
+    for handle in handles {
+        let _ = handle.join();
+    }
+
+    if let Ok(root) = recordings_dir(app) {
+        close_open_recordings(&root, &chrono::Local::now().to_rfc3339());
+    }
 }
 
 #[cfg(test)]
@@ -1558,11 +1688,93 @@ mod tests {
             stop_grace_for_engine(Some("whisper")),
             Duration::from_secs(15)
         );
+        // Must stay longer than the Swift helper's 5s shutdown safety net
+        // (MicrophoneTranscriber.installShutdownHandlers), which finalizes the
+        // recording file before exiting. Killing earlier truncates the m4a.
         assert_eq!(
             stop_grace_for_engine(Some("builtin")),
-            Duration::from_secs(3)
+            Duration::from_secs(7)
         );
-        assert_eq!(stop_grace_for_engine(None), Duration::from_secs(3));
+        assert_eq!(stop_grace_for_engine(None), Duration::from_secs(7));
+    }
+
+    #[test]
+    fn close_open_recordings_finalizes_only_recordings_without_end() {
+        let root = std::env::temp_dir().join(format!(
+            "lpt-close-open-recordings-{}",
+            std::process::id()
+        ));
+        let open_dir = root.join("rec-open");
+        let closed_dir = root.join("rec-closed");
+        fs::create_dir_all(&open_dir).unwrap();
+        fs::create_dir_all(&closed_dir).unwrap();
+
+        write_recording_meta(
+            &open_dir,
+            &RecordingMeta {
+                id: "rec-open".to_string(),
+                started_at: "2026-07-31T10:00:00+09:00".to_string(),
+                ended_at: None,
+            },
+        )
+        .unwrap();
+        write_recording_meta(
+            &closed_dir,
+            &RecordingMeta {
+                id: "rec-closed".to_string(),
+                started_at: "2026-07-31T09:00:00+09:00".to_string(),
+                ended_at: Some("2026-07-31T09:30:00+09:00".to_string()),
+            },
+        )
+        .unwrap();
+
+        close_open_recordings(&root, "2026-07-31T11:00:00+09:00");
+
+        let open_meta = read_recording_meta(&open_dir).unwrap();
+        let closed_meta = read_recording_meta(&closed_dir).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(
+            open_meta.ended_at.as_deref(),
+            Some("2026-07-31T11:00:00+09:00")
+        );
+        assert_eq!(
+            closed_meta.ended_at.as_deref(),
+            Some("2026-07-31T09:30:00+09:00")
+        );
+    }
+
+    #[test]
+    fn delete_recording_dir_removes_the_directory_with_contents() {
+        let root = std::env::temp_dir().join(format!("lpt-delete-recording-{}", std::process::id()));
+        let dir = root.join("rec-1");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("mic.m4a"), b"audio").unwrap();
+
+        let result = delete_recording_dir(&root, "rec-1");
+        let still_exists = dir.exists();
+        let _ = fs::remove_dir_all(&root);
+
+        assert_eq!(result, Ok(()));
+        assert!(!still_exists);
+    }
+
+    #[test]
+    fn delete_recording_dir_tolerates_missing_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "lpt-delete-recording-missing-{}",
+            std::process::id()
+        ));
+
+        assert_eq!(delete_recording_dir(&root, "rec-none"), Ok(()));
+    }
+
+    #[test]
+    fn delete_recording_dir_rejects_path_traversal() {
+        let root = std::env::temp_dir();
+
+        assert!(delete_recording_dir(&root, "../evil").is_err());
+        assert!(delete_recording_dir(&root, "a/b").is_err());
     }
 
     #[test]
