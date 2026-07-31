@@ -124,12 +124,71 @@ Phase 1-2 のライブ字幕パイプラインをそのまま使う表示モー�
       表示(話者N の色割当は recordings.ts に純関数+テスト)
 - [x] 6-4. 設定「認識モデル」ペインに WhisperX 要件の案内(インストール状況/HFトークン入力)
 
+## Phase 7: WhisperX 実行環境のアプリ内取得(uv 自動ダウンロード)
+
+前提: `brew install uv` をユーザーに強いていた導線を、アプリ内の「準備する」ボタンに
+置き換える。uv は Python 非依存の単体静的バイナリで、tarball を展開して chmod するだけで
+動く(実測: `uv-aarch64-apple-darwin.tar.gz` 17.4MB / 展開後 uv 40MB + uvx 336KB、
+アプリ自身が書いたファイルには `com.apple.quarantine` が付かず実行可能)。
+
+**設計判断**: 同梱(externalBin)ではなく初回利用時ダウンロードを選択。理由は
+(a) WhisperX を使わない人に DMG +40MB を払わせない、(b) どのみち `uvx whisperx` の
+初回で数 GB 落ちるので進捗 UI は必要、(c) 署名フローに新しいバイナリを持ち込まない。
+uv のバージョンは**ピン留め**し SHA256 をコードに埋め込む(整合性検証をネットワークに
+依存させない。更新は意図的なコード変更として行う)。
+取得系は macOS 標準の `/usr/bin/curl` `/usr/bin/shasum` `/usr/bin/tar` に委譲し、
+Cargo への HTTP/解凍/ハッシュ依存の追加を避ける。
+
+- [ ] 7-1. 【Rust】ピン留め定義と配置先の純関数: `uv_download_for(arch)`(URL/SHA256/
+      展開ディレクトリ名)、`managed_uv_dir(app_data)` = `$APPDATA/tools/uv`。
+      `locate_program` を `program_candidates(name, home, managed_dir)` に分解し、
+      アプリ管理 uv を探索候補の先頭へ。既存の whisperx ランナー選択テストは緑のまま
+- [ ] 7-2. 【Rust】`install_uv_with(download, work_dir, dest_dir, run, report)`:
+      curl→shasum 照合→tar 展開→uv/uvx 配置→chmod。`run` を関数注入にして
+      発行コマンド列と checksum 不一致時の中断を単体テスト。
+      `sha256_from_shasum_output` も純関数として切り出す
+- [ ] 7-3. 【Rust】`ensure_uv` コマンド: 既存なら即返し、無ければ 7-2 を実行して
+      進捗を `uv-install-progress`(download/verify/extract/done)で emit。
+      `whisperx_status` / `reprocess_recording` はアプリ管理 uv を見るようになる
+- [ ] 7-4. 【Web】設定「認識モデル」の WhisperX 欄を「準備する」ボタン+進捗表示に変更。
+      失敗時のみ `brew install uv` の手動導線をフォールバック表示。
+      段階ラベルは `src/lib/uvInstall.ts` に純関数+テスト
+
+## Phase 8: プライバシー権限のオンボーディング(1つずつ確認・付与)
+
+問題: 起動と同時に mic/speaker のヘルパーが同時起動し、マイクと画面収録のダイアログが
+一斉に出る(`+page.svelte` onMount → `startTranscription`)。
+
+**設計判断**: macOS の TCC は「一度リクエストするまでシステム設定の一覧に載らない」ため、
+事前登録する API は存在しない。したがって「一覧に載っていてチェックするだけ」の状態は
+**ユーザーの明示操作で1つずつリクエストする**ことで作る。起動時は
+`AVAudioApplication.shared.recordPermission` と `CGPreflightScreenCaptureAccess()`
+(どちらもダイアログを出さない状態取得 API)だけを使い、未許可なら自動開始せず案内に留める。
+
+- [ ] 8-1. 【Swift】`--check-permissions` / `--request-permission <microphone|screen-recording>`
+      をコマンドに追加。状態取得は非プロンプト API のみ、リクエストは1種類ずつ。
+      `permissionState(for:)` の写像と JSON ペイロードを TestSupport でテスト
+- [ ] 8-2. 【Rust】`permission_status` / `request_permission(kind)` / `open_privacy_settings(kind)`
+      コマンド。`privacy_settings_url(kind)` は純関数+テスト
+      (`x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone` など)
+- [ ] 8-3. 【Web】`src/lib/permissions.ts`: `requiredPermissions(mode)` /
+      `missingPermissions(status, required)` / `permissionActionFor(state)` を純関数+テスト
+- [ ] 8-4. 【Web】設定に「🔐 プライバシー」ペインを新設。マイク/画面収録を1行ずつ
+      状態タグ付きで並べ、未確認は「許可する」(=単発リクエスト)、拒否済みは
+      「システム設定を開く」(該当ペインへ直接ジャンプ)を出す
+- [ ] 8-5. 【Web】起動時の一斉ダイアログ廃止: onMount で `permission_status` を先に読み、
+      不足があれば自動開始をスキップして「権限が必要です → 設定を開く」バナーを表示。
+      すべて許可済みのときだけ従来どおり自動開始する
+
 ## 検証ゲート(全フェーズ共通)
 
 - `bun run test`(svelte-check → vitest)+ `scripts/test-swift-helper.sh` を各項目の完了条件とする
 - Phase 1 完了時に実機で: 起動→自動字幕→録音開始/停止→Recordings 反映→⌘Q 中断安全性
 - Phase 3 完了時に: 対面モードの文字サイズ最大・反転・実距離(1m)での可読性確認
 - Phase 5-4 完了時に: トリム後の波形シーク⇔トランスクリプト同期ズレがないこと
+- Phase 7 完了時に実機で: uv 未導入の状態から「準備する」→ Recordings の再処理が通ること
+- Phase 8 完了時に実機で: TCC リセット(`tccutil reset Microphone <id>` 等)後に起動して
+  ダイアログが自動で出ないこと、設定ペインから1つずつ許可できること
 
 ## 対象外(今回見送り)
 

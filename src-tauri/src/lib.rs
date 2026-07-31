@@ -857,18 +857,30 @@ pub fn whisperx_runner_from(available: impl Fn(&str) -> Option<String>) -> Optio
     None
 }
 
-fn locate_program(name: &str) -> Option<String> {
-    let home = std::env::var("HOME").unwrap_or_default();
-    let candidates = [
-        format!("/opt/homebrew/bin/{name}"),
-        format!("/usr/local/bin/{name}"),
-        format!("{home}/.local/bin/{name}"),
-        format!("{home}/.cargo/bin/{name}"),
-    ];
+/// Where a program may live, most specific first. The app-managed directory
+/// leads so a uv we downloaded ourselves wins over an older Homebrew one.
+pub fn program_candidates(name: &str, home: &str, managed_dir: Option<&Path>) -> Vec<PathBuf> {
+    let mut candidates: Vec<PathBuf> = managed_dir.map(|dir| dir.join(name)).into_iter().collect();
 
-    for candidate in candidates {
-        if Path::new(&candidate).exists() {
-            return Some(candidate);
+    candidates.extend(
+        [
+            format!("/opt/homebrew/bin/{name}"),
+            format!("/usr/local/bin/{name}"),
+            format!("{home}/.local/bin/{name}"),
+            format!("{home}/.cargo/bin/{name}"),
+        ]
+        .map(PathBuf::from),
+    );
+
+    candidates
+}
+
+pub fn locate_program(name: &str, managed_dir: Option<&Path>) -> Option<String> {
+    let home = std::env::var("HOME").unwrap_or_default();
+
+    for candidate in program_candidates(name, &home, managed_dir) {
+        if candidate.exists() {
+            return Some(candidate.display().to_string());
         }
     }
 
@@ -883,8 +895,150 @@ fn locate_program(name: &str) -> Option<String> {
     found
 }
 
-pub fn resolve_whisperx_runner() -> Option<WhisperxRunner> {
-    whisperx_runner_from(locate_program)
+pub fn resolve_whisperx_runner(managed_uv_dir: Option<&Path>) -> Option<WhisperxRunner> {
+    whisperx_runner_from(|name| locate_program(name, managed_uv_dir))
+}
+
+// MARK: uv provisioning (the WhisperX runtime)
+
+/// The uv release we install ourselves. Pinning the version lets us keep the
+/// checksum in source, so the archive is verified without trusting the same
+/// network that served it; a bump is a deliberate code change.
+pub const UV_VERSION: &str = "0.12.1";
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UvDownload {
+    pub url: String,
+    pub sha256: &'static str,
+    pub archive_dir: String,
+}
+
+pub fn uv_download_for(arch: &str) -> Option<UvDownload> {
+    let sha256 = match arch {
+        "aarch64" => "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42",
+        "x86_64" => "69d9f9a00337f25a50dcb13882052da08b8469bac11091c98c5694c3c6721467",
+        _ => return None,
+    };
+
+    let archive_dir = format!("uv-{arch}-apple-darwin");
+    Some(UvDownload {
+        url: format!(
+            "https://github.com/astral-sh/uv/releases/download/{UV_VERSION}/{archive_dir}.tar.gz"
+        ),
+        sha256,
+        archive_dir,
+    })
+}
+
+pub fn current_uv_download() -> Option<UvDownload> {
+    uv_download_for(if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    })
+}
+
+pub fn managed_uv_dir(app_data: &Path) -> PathBuf {
+    app_data.join("tools").join("uv")
+}
+
+pub fn sha256_from_shasum_output(output: &str) -> Option<String> {
+    let digest = output.split_whitespace().next()?;
+    (digest.len() == 64 && digest.chars().all(|byte| byte.is_ascii_hexdigit()))
+        .then(|| digest.to_ascii_lowercase())
+}
+
+/// Fetches uv into `dest_dir` using only tools macOS already ships, so the
+/// app gains no HTTP/archive/hash dependencies. `run` is injected to keep the
+/// sequence (and the refusal to extract an archive that failed verification)
+/// testable. Both directories must exist; this performs no filesystem work of
+/// its own.
+pub fn install_uv_with(
+    download: &UvDownload,
+    work_dir: &Path,
+    dest_dir: &Path,
+    run: impl Fn(&str, &[String]) -> Result<String, String>,
+    report: impl Fn(&str),
+) -> Result<(), String> {
+    let archive = work_dir.join("uv.tar.gz").display().to_string();
+
+    report("download");
+    run(
+        "/usr/bin/curl",
+        &[
+            "-fsSL".to_string(),
+            "--retry".to_string(),
+            "3".to_string(),
+            "-o".to_string(),
+            archive.clone(),
+            download.url.clone(),
+        ],
+    )?;
+
+    report("verify");
+    let shasum = run(
+        "/usr/bin/shasum",
+        &["-a".to_string(), "256".to_string(), archive.clone()],
+    )?;
+    let digest = sha256_from_shasum_output(&shasum)
+        .ok_or_else(|| "ダウンロードしたファイルのチェックサムを読み取れませんでした。".to_string())?;
+    if digest != download.sha256 {
+        return Err(format!(
+            "ダウンロードしたファイルのチェックサムが一致しません(期待 {} / 実際 {})。",
+            download.sha256, digest
+        ));
+    }
+
+    // --strip-components drops the uv-<arch>-apple-darwin/ wrapper so uv and
+    // uvx land directly in dest_dir; the archive already carries +x.
+    report("extract");
+    run(
+        "/usr/bin/tar",
+        &[
+            "-xzf".to_string(),
+            archive,
+            "--strip-components".to_string(),
+            "1".to_string(),
+            "-C".to_string(),
+            dest_dir.display().to_string(),
+        ],
+    )?;
+
+    report("done");
+    Ok(())
+}
+
+pub fn run_command(program: &str, args: &[String]) -> Result<String, String> {
+    let output = Command::new(program)
+        .args(args)
+        .output()
+        .map_err(|error| format!("{program} を起動できませんでした: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!(
+            "{program} が失敗しました: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+}
+
+// MARK: privacy permissions
+
+/// Deep links into the exact System Settings pane. Once a permission has been
+/// requested at least once the app is already listed there, so this turns a
+/// denial into a single checkbox instead of a hunt.
+pub fn privacy_settings_url(kind: &str) -> Option<&'static str> {
+    match kind {
+        "microphone" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        }
+        "screen-recording" => {
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        }
+        _ => None,
+    }
 }
 
 /// Maps whisperx stderr progress markers onto the three UI stages.
@@ -1547,13 +1701,99 @@ pub mod commands {
         .map_err(|error| error.to_string())?
     }
 
+    fn managed_uv_dir_for(app: &AppHandle) -> Result<PathBuf, String> {
+        Ok(managed_uv_dir(
+            &app.path().app_data_dir().map_err(|e| e.to_string())?,
+        ))
+    }
+
     /// Reports how WhisperX would be run (settings guidance); None when no
     /// runner is installed.
     #[tauri::command]
-    pub async fn whisperx_status() -> Result<Option<WhisperxRunner>, String> {
-        tauri::async_runtime::spawn_blocking(|| Ok(resolve_whisperx_runner()))
-            .await
-            .map_err(|error| error.to_string())?
+    pub async fn whisperx_status(app: AppHandle) -> Result<Option<WhisperxRunner>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let managed = managed_uv_dir_for(&app)?;
+            Ok(resolve_whisperx_runner(Some(&managed)))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    /// Installs uv into the app's own data directory when nothing usable is on
+    /// the machine, so WhisperX no longer requires `brew install uv` first.
+    /// A runner that already exists (Homebrew, pipx, a previous install) is
+    /// returned untouched.
+    #[tauri::command]
+    pub async fn ensure_uv(app: AppHandle) -> Result<WhisperxRunner, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let managed = managed_uv_dir_for(&app)?;
+            if let Some(runner) = resolve_whisperx_runner(Some(&managed)) {
+                return Ok(runner);
+            }
+
+            let download = current_uv_download()
+                .ok_or_else(|| "このアーキテクチャ向けの uv 配布物がありません。".to_string())?;
+            let work = std::env::temp_dir().join("live-poly-trans-uv");
+
+            fs::create_dir_all(&work).map_err(|error| error.to_string())?;
+            fs::create_dir_all(&managed).map_err(|error| error.to_string())?;
+
+            let result = install_uv_with(&download, &work, &managed, run_command, |stage| {
+                let _ = app.emit("uv-install-progress", stage);
+            });
+            let _ = fs::remove_dir_all(&work);
+            result?;
+
+            resolve_whisperx_runner(Some(&managed)).ok_or_else(|| {
+                "uv を展開しましたが uvx が見つかりませんでした。".to_string()
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    /// Reads the privacy permissions without prompting, so the app can decide
+    /// whether to auto-start instead of firing system dialogs at launch.
+    #[tauri::command]
+    pub async fn permission_status() -> Result<Value, String> {
+        tauri::async_runtime::spawn_blocking(|| {
+            let helper_path = resolve_helper_path()?;
+            let output = run_command(
+                &helper_path.display().to_string(),
+                &["--check-permissions".to_string()],
+            )?;
+            serde_json::from_str(output.trim()).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    /// Requests exactly one permission, on an explicit user action. macOS only
+    /// lists an app under Privacy & Security once it has asked at least once,
+    /// so this is also what puts us in the list the user ticks.
+    #[tauri::command]
+    pub async fn request_permission(kind: String) -> Result<Value, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let helper_path = resolve_helper_path()?;
+            let output = run_command(
+                &helper_path.display().to_string(),
+                &["--request-permission".to_string(), kind],
+            )?;
+            serde_json::from_str(output.trim()).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn open_privacy_settings(kind: String) -> Result<(), String> {
+        let url = privacy_settings_url(&kind)
+            .ok_or_else(|| format!("unknown permission kind: {kind}"))?;
+        Command::new("open")
+            .arg(url)
+            .spawn()
+            .map_err(|error| error.to_string())?;
+        Ok(())
     }
 
     /// Picks which audio file a re-process should read: the mixed file when
@@ -1630,8 +1870,9 @@ pub mod commands {
         let dir = recording_dir_for(&app, &id)?;
 
         tauri::async_runtime::spawn_blocking(move || {
-            let runner = resolve_whisperx_runner().ok_or_else(|| {
-                "WhisperX の実行環境が見つかりません。`brew install uv` の後にもう一度お試しください(uvx 経由で実行します)。".to_string()
+            let managed = managed_uv_dir_for(&app)?;
+            let runner = resolve_whisperx_runner(Some(&managed)).ok_or_else(|| {
+                "WhisperX の実行環境が見つかりません。設定 > 認識モデル の「WhisperX を準備する」から実行環境を用意してください。".to_string()
             })?;
 
             let emit_stage = |stage: &str| {
@@ -2076,6 +2317,10 @@ pub fn run() {
             commands::import_audio_file,
             commands::trim_recording,
             commands::whisperx_status,
+            commands::ensure_uv,
+            commands::permission_status,
+            commands::request_permission,
+            commands::open_privacy_settings,
             commands::reprocess_recording,
             commands::delete_recording,
             commands::list_recordings,
@@ -2187,6 +2432,115 @@ mod tests {
         assert!(direct.prefix_args.is_empty());
 
         assert_eq!(whisperx_runner_from(|_| None), None);
+    }
+
+    #[test]
+    fn uv_download_pins_a_url_and_checksum_per_architecture() {
+        let arm = uv_download_for("aarch64").unwrap();
+        assert!(arm.url.contains(UV_VERSION));
+        assert!(arm.url.ends_with("uv-aarch64-apple-darwin.tar.gz"));
+        assert_eq!(arm.archive_dir, "uv-aarch64-apple-darwin");
+        assert_eq!(arm.sha256.len(), 64);
+
+        let intel = uv_download_for("x86_64").unwrap();
+        assert_eq!(intel.archive_dir, "uv-x86_64-apple-darwin");
+        assert_ne!(intel.sha256, arm.sha256);
+
+        assert!(uv_download_for("riscv64").is_none());
+    }
+
+    #[test]
+    fn program_candidates_prefer_the_app_managed_directory() {
+        let managed = PathBuf::from("/Data/tools/uv");
+        let candidates = program_candidates("uvx", "/Users/me", Some(&managed));
+
+        assert_eq!(candidates.first().unwrap(), &managed.join("uvx"));
+        assert!(candidates.contains(&PathBuf::from("/opt/homebrew/bin/uvx")));
+        assert!(candidates.contains(&PathBuf::from("/Users/me/.local/bin/uvx")));
+
+        let without_managed = program_candidates("uvx", "/Users/me", None);
+        assert!(!without_managed.iter().any(|path| path.starts_with("/Data")));
+    }
+
+    #[test]
+    fn sha256_is_read_from_the_shasum_output_column() {
+        let digest = "77d2906988e8074fd43f2f329ec452ebbf9b0c257ba1c66451c71de70a6baf42";
+        assert_eq!(
+            sha256_from_shasum_output(&format!("{digest}  /tmp/uv.tar.gz\n")),
+            Some(digest.to_string())
+        );
+        assert_eq!(sha256_from_shasum_output("shasum: no such file"), None);
+        assert_eq!(sha256_from_shasum_output(""), None);
+    }
+
+    #[test]
+    fn uv_install_downloads_verifies_then_extracts() {
+        let download = uv_download_for("aarch64").unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+        let stages = std::cell::RefCell::new(Vec::new());
+
+        let result = install_uv_with(
+            &download,
+            Path::new("/work"),
+            Path::new("/dest"),
+            |program, args| {
+                calls.borrow_mut().push(format!("{program} {}", args.join(" ")));
+                Ok(if program.ends_with("shasum") {
+                    format!("{}  /work/uv.tar.gz", download.sha256)
+                } else {
+                    String::new()
+                })
+            },
+            |stage| stages.borrow_mut().push(stage.to_string()),
+        );
+
+        assert!(result.is_ok());
+        let calls = calls.into_inner();
+        assert!(calls[0].starts_with("/usr/bin/curl"), "{}", calls[0]);
+        assert!(calls[0].contains(&download.url));
+        assert!(calls[1].starts_with("/usr/bin/shasum -a 256"), "{}", calls[1]);
+        assert!(calls[2].starts_with("/usr/bin/tar -xzf"), "{}", calls[2]);
+        assert_eq!(
+            stages.into_inner(),
+            vec!["download", "verify", "extract", "done"]
+        );
+    }
+
+    #[test]
+    fn uv_install_stops_before_extracting_when_the_checksum_differs() {
+        let download = uv_download_for("aarch64").unwrap();
+        let calls = std::cell::RefCell::new(Vec::new());
+
+        let result = install_uv_with(
+            &download,
+            Path::new("/work"),
+            Path::new("/dest"),
+            |program, _| {
+                calls.borrow_mut().push(program.to_string());
+                Ok(if program.ends_with("shasum") {
+                    format!("{}  /work/uv.tar.gz", "0".repeat(64))
+                } else {
+                    String::new()
+                })
+            },
+            |_| {},
+        );
+
+        assert!(result.unwrap_err().contains("チェックサム"));
+        assert!(!calls.into_inner().iter().any(|call| call.ends_with("tar")));
+    }
+
+    #[test]
+    fn privacy_settings_urls_target_the_matching_pane() {
+        assert_eq!(
+            privacy_settings_url("microphone"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")
+        );
+        assert_eq!(
+            privacy_settings_url("screen-recording"),
+            Some("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+        );
+        assert_eq!(privacy_settings_url("camera"), None);
     }
 
     #[test]
