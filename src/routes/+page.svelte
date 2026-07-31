@@ -47,6 +47,7 @@
     streamEnginePayload,
     type SpeechModelSelection
   } from '$lib/speechModels';
+  import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -119,29 +120,45 @@
   $: selectedCaptureMode = isRecording ? captureModeFromStreams(activeStreams) : captureMode;
   $: visibleMessages = [...messages, ...interimMessages];
 
-  onMount(async () => {
+  onMount(() => {
     recordingEnabled = localStorage.getItem(recordingPreferenceKey) === '1';
     transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
     speechModel = parseSpeechModelPreference(localStorage.getItem(speechModelPreferenceKey));
 
-    const unlistenTranscript = await listen<HelperEvent>('transcript-event', (event) => {
-      void handleHelperEvent(event.payload);
+    const cleanupRegistry = createAsyncCleanupRegistry((error) => {
+      console.error('Failed to remove an app event listener', error);
     });
 
-    const unlistenError = await listen<string>('helper-error', (event) => {
-      aiError = event.payload;
-    });
-
-    const unlistenExited = await listen<HelperExitedPayload>('helper-exited', (event) => {
-      void handleHelperExit(event.payload);
-    });
-
-    await detectLanguages();
+    void Promise.all([
+      cleanupRegistry.add(
+        listen<HelperEvent>('transcript-event', (event) => {
+          void handleHelperEvent(event.payload);
+        })
+      ),
+      cleanupRegistry.add(
+        listen<string>('helper-error', (event) => {
+          aiError = event.payload;
+        })
+      ),
+      cleanupRegistry.add(
+        listen<HelperExitedPayload>('helper-exited', (event) => {
+          void handleHelperExit(event.payload);
+        })
+      )
+    ])
+      .then(() => {
+        if (!cleanupRegistry.isDisposed()) {
+          return detectLanguages();
+        }
+      })
+      .catch((error) => {
+        if (!cleanupRegistry.isDisposed()) {
+          aiError = `Could not initialize the app: ${String(error)}`;
+        }
+      });
 
     return () => {
-      unlistenTranscript();
-      unlistenError();
-      unlistenExited();
+      cleanupRegistry.dispose();
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
       }
