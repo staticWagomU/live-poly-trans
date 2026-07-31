@@ -42,6 +42,10 @@ public struct LivePolyTransHelper {
       try mixAudioFiles(inputs: inputs, outputPath: output)
       print(#"{"ok":true}"#)
       fflush(stdout)
+    case let .trim(input, output, startMs, endMs):
+      try trimAudioFile(inputPath: input, outputPath: output, startMs: startMs, endMs: endMs)
+      print(#"{"ok":true}"#)
+      fflush(stdout)
     case let .stream(stream):
       switch options.transcriptionEngine {
       case .builtin:

@@ -19,6 +19,8 @@ struct CommandLineOptionsTests {
     try defaultsToBuiltinTranscriptionEngine()
     try rejectsUnknownTranscriptionEngine()
     try rejectsWhisperEngineWithoutModelAndCliPaths()
+    try parsesTrimCommand()
+    try trimsAudioFileToRange()
     try treatsEmptyLanguageArgumentsAsUnset()
     try parsesStartRecordingControlLine()
     try parsesStopRecordingControlLine()
@@ -645,6 +647,55 @@ struct CommandLineOptionsTests {
   static func expectEqual<T: Equatable>(_ actual: T, _ expected: T) throws {
     if actual != expected {
       throw TestFailure(message: "Expected \(expected), got \(actual)")
+    }
+  }
+
+  static func parsesTrimCommand() throws {
+    try expectEqual(
+      try CommandLineOptions.parse([
+        "helper",
+        "--trim",
+        "--input", "/tmp/mic.m4a",
+        "--output", "/tmp/mic-trimmed.m4a",
+        "--start-ms", "5000",
+        "--end-ms", "12000"
+      ]).command,
+      .trim(input: "/tmp/mic.m4a", output: "/tmp/mic-trimmed.m4a", startMs: 5000, endMs: 12000)
+    )
+
+    do {
+      _ = try CommandLineOptions.parse(["helper", "--trim", "--input", "/tmp/mic.m4a"])
+      throw TestFailure(message: "expected trim without range to fail")
+    } catch is CommandLineOptionsError {}
+  }
+
+  static func trimsAudioFileToRange() throws {
+    let directory = FileManager.default.temporaryDirectory
+      .appendingPathComponent("lpt-trim-test-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+
+    // 2 s of a 440 Hz tone at 16 kHz.
+    let sampleRate = 16_000.0
+    let samples = (0..<Int(sampleRate * 2)).map { index in
+      Float(sin(2 * Double.pi * 440 * Double(index) / sampleRate)) * 0.5
+    }
+    let inputUrl = directory.appendingPathComponent("input.wav")
+    try writeInt16MonoWav(samples: samples, sampleRate: sampleRate, to: inputUrl)
+
+    let outputUrl = directory.appendingPathComponent("trimmed.m4a")
+    try trimAudioFile(
+      inputPath: inputUrl.path,
+      outputPath: outputUrl.path,
+      startMs: 500,
+      endMs: 1500
+    )
+
+    let output = try AVAudioFile(forReading: outputUrl)
+    let durationMs =
+      Double(output.length) / output.processingFormat.sampleRate * 1000
+    guard abs(durationMs - 1000) < 120 else {
+      throw TestFailure(message: "trimmed duration \(durationMs)ms, expected ~1000ms")
     }
   }
 

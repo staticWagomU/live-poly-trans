@@ -697,12 +697,29 @@ pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage])
 // MARK: recordings
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TrimRange {
+    #[serde(rename = "sourceFile")]
+    pub source_file: String,
+    #[serde(rename = "startMs")]
+    pub start_ms: i64,
+    #[serde(rename = "endMs")]
+    pub end_ms: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingMeta {
     pub id: String,
     #[serde(rename = "startedAt")]
     pub started_at: String,
     #[serde(rename = "endedAt", default, skip_serializing_if = "Option::is_none")]
     pub ended_at: Option<String>,
+    /// "external" for imported audio (phone/voice recorder files).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// Trim ranges by output file name, so the UI can shift the transcript
+    /// to match a trimmed file's timeline.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub trims: Option<HashMap<String, TrimRange>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -721,6 +738,8 @@ pub struct RecordingSummary {
     pub started_at: String,
     #[serde(rename = "endedAt")]
     pub ended_at: Option<String>,
+    pub source: Option<String>,
+    pub trims: Option<HashMap<String, TrimRange>>,
     pub files: Vec<RecordingFileInfo>,
 }
 
@@ -1286,6 +1305,8 @@ pub mod commands {
                 id: id.clone(),
                 started_at: chrono::Local::now().to_rfc3339(),
                 ended_at: None,
+                source: None,
+                trims: None,
             },
         )?;
 
@@ -1410,6 +1431,122 @@ pub mod commands {
         .map_err(|error| error.to_string())?
     }
 
+    /// Copies an external audio file (phone memo, voice recorder) into a new
+    /// recording so it can be played, trimmed, and later re-processed.
+    #[tauri::command]
+    pub async fn import_audio_file(app: AppHandle, path: String) -> Result<CreatedRecording, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let source = PathBuf::from(&path);
+            let extension = source
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .map(str::to_lowercase)
+                .unwrap_or_default();
+            if !matches!(extension.as_str(), "m4a" | "wav" | "mp3" | "aac") {
+                return Err(format!(
+                    "unsupported audio format: .{extension} (m4a / wav / mp3 / aac のみ読み込めます)"
+                ));
+            }
+            if !source.exists() {
+                return Err(format!("file not found: {path}"));
+            }
+
+            let id = format!("rec-{}", readable_timestamp());
+            let dir = recording_dir_for(&app, &id)?;
+            fs::create_dir_all(&dir).map_err(|error| error.to_string())?;
+            fs::copy(&source, dir.join(format!("external.{extension}")))
+                .map_err(|error| error.to_string())?;
+
+            let now = chrono::Local::now().to_rfc3339();
+            write_recording_meta(
+                &dir,
+                &RecordingMeta {
+                    id: id.clone(),
+                    started_at: now.clone(),
+                    ended_at: Some(now),
+                    source: Some("external".to_string()),
+                    trims: None,
+                },
+            )?;
+
+            Ok(CreatedRecording {
+                id,
+                dir: dir.display().to_string(),
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    /// Writes the kept range into a new `<stem>-trimmed.m4a` (original file
+    /// untouched) and remembers the range in meta so the UI can shift the
+    /// transcript for the trimmed file.
+    #[tauri::command]
+    pub async fn trim_recording(
+        app: AppHandle,
+        id: String,
+        file_name: String,
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Result<String, String> {
+        if file_name.contains('/') || file_name.contains("..") {
+            return Err(format!("invalid recording file name: {file_name}"));
+        }
+        if end_ms <= start_ms || start_ms < 0 {
+            return Err(format!("invalid trim range: {start_ms}ms - {end_ms}ms"));
+        }
+
+        tauri::async_runtime::spawn_blocking(move || {
+            let dir = recording_dir_for(&app, &id)?;
+            let input = dir.join(&file_name);
+            if !input.exists() {
+                return Err(format!("recording file not found: {file_name}"));
+            }
+
+            let stem = file_name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(&file_name);
+            let output = unique_destination(&dir, &format!("{stem}-trimmed"), "m4a");
+
+            let helper_path = resolve_helper_path()?;
+            let result = Command::new(helper_path)
+                .arg("--trim")
+                .arg("--input")
+                .arg(&input)
+                .arg("--output")
+                .arg(&output)
+                .arg("--start-ms")
+                .arg(start_ms.to_string())
+                .arg("--end-ms")
+                .arg(end_ms.to_string())
+                .output()
+                .map_err(|error| error.to_string())?;
+
+            if !result.status.success() {
+                return Err(String::from_utf8_lossy(&result.stderr).trim().to_owned());
+            }
+
+            let output_name = output
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default();
+
+            if let Some(mut meta) = read_recording_meta(&dir) {
+                meta.trims.get_or_insert_with(HashMap::new).insert(
+                    output_name.clone(),
+                    TrimRange {
+                        source_file: file_name.clone(),
+                        start_ms,
+                        end_ms,
+                    },
+                );
+                write_recording_meta(&dir, &meta)?;
+            }
+
+            Ok(output_name)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
     #[tauri::command]
     pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
         tauri::async_runtime::spawn_blocking(move || list_recordings_blocking(&app))
@@ -1458,6 +1595,8 @@ pub mod commands {
                 id: meta.id,
                 started_at: meta.started_at,
                 ended_at: meta.ended_at,
+                source: meta.source,
+                trims: meta.trims,
                 files,
             });
         }
@@ -1612,6 +1751,7 @@ pub mod commands {
 
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_dialog::init())
         .manage(HelperSession::default())
         .invoke_handler(tauri::generate_handler![
             commands::detect_languages,
@@ -1631,6 +1771,8 @@ pub fn run() {
             commands::stop_recording_session,
             commands::recordings_directory,
             commands::reveal_recordings_directory,
+            commands::import_audio_file,
+            commands::trim_recording,
             commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
@@ -1942,6 +2084,8 @@ mod tests {
                 id: "rec-open".to_string(),
                 started_at: "2026-07-31T10:00:00+09:00".to_string(),
                 ended_at: None,
+                source: None,
+                trims: None,
             },
         )
         .unwrap();
@@ -1951,6 +2095,8 @@ mod tests {
                 id: "rec-closed".to_string(),
                 started_at: "2026-07-31T09:00:00+09:00".to_string(),
                 ended_at: Some("2026-07-31T09:30:00+09:00".to_string()),
+                source: None,
+                trims: None,
             },
         )
         .unwrap();

@@ -3,7 +3,10 @@ import {
   buildRecordingTranscript,
   formatFileSize,
   formatTimestampMs,
-  parseSegmentStartMs
+  groupRecordingsByDate,
+  parseSegmentStartMs,
+  trimTranscript,
+  type RecordingTranscriptItem
 } from './recordings';
 
 describe('parseSegmentStartMs', () => {
@@ -128,5 +131,83 @@ describe('formatFileSize', () => {
     expect(formatFileSize(512)).toBe('512 B');
     expect(formatFileSize(2_048)).toBe('2 KB');
     expect(formatFileSize(5_242_880)).toBe('5.0 MB');
+  });
+});
+
+describe('groupRecordingsByDate', () => {
+  const recording = (id: string, startedAt: string) => ({
+    id,
+    startedAt,
+    endedAt: startedAt,
+    files: []
+  });
+  // Fixed "now": 2026-07-31T12:00 local time.
+  const now = new Date(2026, 6, 31, 12, 0, 0);
+
+  it('buckets recordings into today / yesterday / last 30 days / older', () => {
+    const groups = groupRecordingsByDate(
+      [
+        recording('today', new Date(2026, 6, 31, 9, 0).toISOString()),
+        recording('yesterday', new Date(2026, 6, 30, 23, 30).toISOString()),
+        recording('recent', new Date(2026, 6, 10, 8, 0).toISOString()),
+        recording('old', new Date(2026, 4, 1, 8, 0).toISOString())
+      ],
+      now
+    );
+
+    expect(
+      groups.map((group) => [group.label, group.recordings.map((entry) => entry.id)])
+    ).toEqual([
+      ['今日', ['today']],
+      ['昨日', ['yesterday']],
+      ['過去30日', ['recent']],
+      ['それ以前', ['old']]
+    ]);
+  });
+
+  it('omits empty buckets and sorts newest first inside each', () => {
+    const groups = groupRecordingsByDate(
+      [
+        recording('older-today', new Date(2026, 6, 31, 8, 0).toISOString()),
+        recording('newer-today', new Date(2026, 6, 31, 10, 0).toISOString())
+      ],
+      now
+    );
+
+    expect(groups).toHaveLength(1);
+    expect(groups[0].label).toBe('今日');
+    expect(groups[0].recordings.map((entry) => entry.id)).toEqual([
+      'newer-today',
+      'older-today'
+    ]);
+  });
+});
+
+describe('trimTranscript', () => {
+  const item = (key: string, startMs: number): RecordingTranscriptItem => ({
+    key,
+    startMs,
+    stream: 'mic',
+    speakerLabel: 'Speaker A',
+    language: 'ja-JP',
+    text: key,
+    translation: null
+  });
+
+  it('keeps only items inside the range and shifts them to the new origin', () => {
+    const items = [item('before', 1_000), item('kept', 6_000), item('late', 12_000)];
+
+    expect(trimTranscript(items, 5_000, 10_000)).toEqual([
+      { ...item('kept', 6_000), startMs: 1_000 }
+    ]);
+  });
+
+  it('keeps an item starting exactly at the range edges', () => {
+    const items = [item('at-start', 5_000), item('at-end', 10_000)];
+
+    expect(trimTranscript(items, 5_000, 10_000).map((entry) => entry.key)).toEqual([
+      'at-start',
+      'at-end'
+    ]);
   });
 });

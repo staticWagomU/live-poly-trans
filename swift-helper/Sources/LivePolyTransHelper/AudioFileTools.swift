@@ -5,6 +5,7 @@ public enum AudioFileToolsError: Error, CustomStringConvertible {
   case missingTargetFormat
   case unreadableChannelData(String)
   case invalidMixInputs(Int)
+  case invalidTrimRange(startMs: Int64, endMs: Int64)
 
   public var description: String {
     switch self {
@@ -14,7 +15,68 @@ public enum AudioFileToolsError: Error, CustomStringConvertible {
       "Could not read float channel data from: \(path)"
     case let .invalidMixInputs(count):
       "Mixing requires exactly 2 input files, got \(count)."
+    case let .invalidTrimRange(startMs, endMs):
+      "Invalid trim range: \(startMs)ms - \(endMs)ms."
     }
+  }
+}
+
+/// Copies the [startMs, endMs] slice of an audio file into a new AAC .m4a,
+/// leaving the original untouched (trim keeps the selected range).
+public func trimAudioFile(
+  inputPath: String,
+  outputPath: String,
+  startMs: Int64,
+  endMs: Int64
+) throws {
+  let file = try AVAudioFile(forReading: URL(fileURLWithPath: inputPath))
+  let sampleRate = file.processingFormat.sampleRate
+  let startFrame = max(0, Int64((Double(startMs) / 1000 * sampleRate).rounded()))
+  let endFrame = min(Int64(file.length), Int64((Double(endMs) / 1000 * sampleRate).rounded()))
+  guard sampleRate > 0, endFrame > startFrame else {
+    throw AudioFileToolsError.invalidTrimRange(startMs: startMs, endMs: endMs)
+  }
+
+  let outputUrl = URL(fileURLWithPath: outputPath)
+  try FileManager.default.createDirectory(
+    at: outputUrl.deletingLastPathComponent(),
+    withIntermediateDirectories: true
+  )
+  // No fixed bit rate: the source sample rate is arbitrary (imported files,
+  // 16 kHz test fixtures) and AAC rejects rates the bit rate cannot carry.
+  let outputFile = try AVAudioFile(
+    forWriting: outputUrl,
+    settings: [
+      AVFormatIDKey: kAudioFormatMPEG4AAC,
+      AVSampleRateKey: sampleRate,
+      AVNumberOfChannelsKey: Int(file.processingFormat.channelCount),
+      AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue
+    ],
+    commonFormat: .pcmFormatFloat32,
+    interleaved: false
+  )
+
+  file.framePosition = AVAudioFramePosition(startFrame)
+  var remaining = endFrame - startFrame
+
+  guard
+    let chunk = AVAudioPCMBuffer(
+      pcmFormat: file.processingFormat,
+      frameCapacity: audioFileChunkFrames
+    )
+  else {
+    throw AudioFileToolsError.missingTargetFormat
+  }
+
+  while remaining > 0 {
+    let framesToRead = AVAudioFrameCount(min(Int64(audioFileChunkFrames), remaining))
+    try file.read(into: chunk, frameCount: framesToRead)
+    guard chunk.frameLength > 0 else {
+      break
+    }
+
+    remaining -= Int64(chunk.frameLength)
+    try outputFile.write(from: chunk)
   }
 }
 

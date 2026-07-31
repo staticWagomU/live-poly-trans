@@ -5,6 +5,7 @@ public enum HelperCommand: Equatable, Sendable {
   case aiServer
   case waveform(path: String, buckets: Int)
   case mix(inputs: [String], output: String)
+  case trim(input: String, output: String, startMs: Int64, endMs: Int64)
   case stream(AudioStream)
 }
 
@@ -74,6 +75,21 @@ public struct CommandLineOptions: Equatable, Sendable {
     if let waveformPath = value(after: "--waveform", in: arguments) {
       let buckets = value(after: "--buckets", in: arguments).flatMap(Int.init) ?? defaultWaveformBuckets
       return CommandLineOptions(command: .waveform(path: waveformPath, buckets: buckets))
+    }
+
+    if arguments.contains("--trim") {
+      guard
+        let input = value(after: "--input", in: arguments),
+        let output = value(after: "--output", in: arguments),
+        let startMs = value(after: "--start-ms", in: arguments).flatMap(Int64.init),
+        let endMs = value(after: "--end-ms", in: arguments).flatMap(Int64.init)
+      else {
+        throw CommandLineOptionsError.unsupportedArguments(arguments)
+      }
+
+      return CommandLineOptions(
+        command: .trim(input: input, output: output, startMs: startMs, endMs: endMs)
+      )
     }
 
     if arguments.contains("--mix") {

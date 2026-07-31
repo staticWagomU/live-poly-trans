@@ -5,10 +5,20 @@ export type RecordingFileInfo = {
   sizeBytes: number;
 };
 
+export type RecordingTrimRange = {
+  sourceFile: string;
+  startMs: number;
+  endMs: number;
+};
+
 export type RecordingSummary = {
   id: string;
   startedAt: string;
   endedAt: string | null;
+  /// "external" for imported audio files.
+  source?: string | null;
+  /// Trim ranges keyed by trimmed output file name.
+  trims?: Record<string, RecordingTrimRange> | null;
   files: RecordingFileInfo[];
 };
 
@@ -98,6 +108,63 @@ export function buildRecordingTranscript(events: unknown[]): RecordingTranscript
   }
 
   return [...items.values()].sort((left, right) => left.startMs - right.startMs);
+}
+
+export type RecordingGroup = {
+  label: string;
+  recordings: RecordingSummary[];
+};
+
+/// Sidebar buckets, mockup order: 今日 / 昨日 / 過去30日 / それ以前.
+/// Buckets are calendar-based (local time), not rolling 24h windows.
+export function groupRecordingsByDate(
+  recordings: RecordingSummary[],
+  now: Date
+): RecordingGroup[] {
+  const startOfDay = (date: Date) =>
+    new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const todayStart = startOfDay(now);
+  const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
+  const thirtyDaysStart = todayStart - 30 * 24 * 60 * 60 * 1000;
+
+  const buckets: RecordingGroup[] = [
+    { label: '今日', recordings: [] },
+    { label: '昨日', recordings: [] },
+    { label: '過去30日', recordings: [] },
+    { label: 'それ以前', recordings: [] }
+  ];
+
+  const sorted = [...recordings].sort(
+    (left, right) => Date.parse(right.startedAt) - Date.parse(left.startedAt)
+  );
+
+  for (const recording of sorted) {
+    const startedAt = Date.parse(recording.startedAt);
+    if (!Number.isFinite(startedAt) || startedAt < thirtyDaysStart) {
+      buckets[3].recordings.push(recording);
+    } else if (startedAt >= todayStart) {
+      buckets[0].recordings.push(recording);
+    } else if (startedAt >= yesterdayStart) {
+      buckets[1].recordings.push(recording);
+    } else {
+      buckets[2].recordings.push(recording);
+    }
+  }
+
+  return buckets.filter((bucket) => bucket.recordings.length > 0);
+}
+
+/// Transcript counterpart of trimming the audio to [startMs, endMs]:
+/// items outside the kept range disappear and the survivors' timestamps
+/// shift so the range start becomes the new zero.
+export function trimTranscript(
+  items: RecordingTranscriptItem[],
+  startMs: number,
+  endMs: number
+): RecordingTranscriptItem[] {
+  return items
+    .filter((item) => item.startMs >= startMs && item.startMs <= endMs)
+    .map((item) => ({ ...item, startMs: item.startMs - startMs }));
 }
 
 export function formatTimestampMs(ms: number): string {
