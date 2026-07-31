@@ -384,6 +384,22 @@ pub fn stop_stream_child(
     Ok(())
 }
 
+pub fn stop_each_stream(
+    streams: &[String],
+    mut stop: impl FnMut(&str) -> Result<(), String>,
+) -> Result<(), String> {
+    let errors = streams
+        .iter()
+        .filter_map(|stream| stop(stream).err().map(|error| format!("{stream}: {error}")))
+        .collect::<Vec<_>>();
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
 /// Whisper engine paths, always resolved by this side so the helper carries
 /// no defaults of its own.
 pub struct WhisperEngineConfig<'a> {
@@ -979,11 +995,7 @@ pub mod commands {
                 .cloned()
                 .collect::<Vec<_>>();
 
-            for stream in streams {
-                stop_stream_child(&children, &stream)?;
-            }
-
-            Ok(())
+            stop_each_stream(&streams, |stream| stop_stream_child(&children, stream))
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1551,6 +1563,23 @@ mod tests {
             Duration::from_secs(3)
         );
         assert_eq!(stop_grace_for_engine(None), Duration::from_secs(3));
+    }
+
+    #[test]
+    fn stop_each_stream_attempts_every_stream_before_returning_errors() {
+        let streams = vec!["mic".to_string(), "speaker".to_string()];
+        let mut attempted = Vec::new();
+
+        let result = stop_each_stream(&streams, |stream| {
+            attempted.push(stream.to_string());
+            Err(format!("{stream} failed"))
+        });
+
+        assert_eq!(attempted, streams);
+        assert_eq!(
+            result,
+            Err("mic: mic failed\nspeaker: speaker failed".to_string())
+        );
     }
 
     #[test]
