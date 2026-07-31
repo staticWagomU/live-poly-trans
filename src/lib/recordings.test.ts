@@ -52,6 +52,58 @@ describe('buildRecordingTranscript', () => {
     expect(transcript[0].speakerLabel).toBe('Speaker A');
   });
 
+  it('keeps entries from before and after a helper restart apart', () => {
+    // A restarted helper appends to the same jsonl with its clock reset to
+    // 0, so segment ids repeat. The second run must not overwrite the first
+    // run's lines; the rewind of startMs marks the run boundary.
+    const events = [
+      {
+        type: 'transcript',
+        stream: 'mic',
+        segmentId: '0-1000',
+        isFinal: true,
+        lang: 'ja-JP',
+        text: '一時間目の発話',
+        trans: null
+      },
+      {
+        type: 'transcript',
+        stream: 'mic',
+        segmentId: '5000-2000',
+        isFinal: true,
+        lang: 'ja-JP',
+        text: 'クラッシュ直前の発話',
+        trans: null
+      },
+      {
+        type: 'transcript',
+        stream: 'mic',
+        segmentId: '0-1000',
+        isFinal: true,
+        lang: 'ja-JP',
+        text: '再起動後の発話',
+        trans: null
+      },
+      {
+        type: 'translation',
+        stream: 'mic',
+        segmentId: '0-1000',
+        trans: 'After-restart translation'
+      }
+    ];
+
+    const transcript = buildRecordingTranscript(events);
+
+    expect(transcript.map((item) => item.text)).toContain('一時間目の発話');
+    expect(transcript.map((item) => item.text)).toContain('再起動後の発話');
+    expect(transcript).toHaveLength(3);
+    // The follow-up translation belongs to the post-restart run's segment.
+    expect(transcript.find((item) => item.text === '再起動後の発話')?.translation).toBe(
+      'After-restart translation'
+    );
+    expect(transcript.find((item) => item.text === '一時間目の発話')?.translation).toBeNull();
+  });
+
   it('ignores interim events and unknown payloads', () => {
     const events = [
       { type: 'transcript', stream: 'mic', segmentId: '0-100', isFinal: false, text: 'partial' },

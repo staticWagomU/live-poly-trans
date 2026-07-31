@@ -19,7 +19,7 @@ describe('transcriptEventToMessage', () => {
         segmentId: '1200-800'
       })
     ).toEqual({
-      id: 'mic-en-US-1200',
+      id: 'mic-session-1-mic-en-US-1200',
       role: 'self',
       speakerId: 'self',
       speakerLabel: 'Speaker A',
@@ -28,8 +28,39 @@ describe('transcriptEventToMessage', () => {
       translation: 'こんにちは',
       isFinal: true,
       timestamp: '2026-06-15T00:00:00Z',
+      sessionId: 'mic-session-1',
       segmentId: '1200-800'
     });
+  });
+
+  it('keeps messages from different helper sessions apart', () => {
+    // After an auto-restart the helper's clock starts back at 0, so segment
+    // ids repeat; a bubble from the top of the meeting must not be replaced
+    // in place by a post-restart segment.
+    const beforeRestart = transcriptEventToMessage({
+      type: 'transcript',
+      stream: 'mic',
+      lang: 'ja-JP',
+      text: '冒頭の発話',
+      trans: null,
+      isFinal: true,
+      timestamp: '2026-06-15T00:00:00Z',
+      sessionId: 'mic-session-1',
+      segmentId: '0-1000'
+    });
+    const afterRestart = transcriptEventToMessage({
+      type: 'transcript',
+      stream: 'mic',
+      lang: 'ja-JP',
+      text: '再起動後の発話',
+      trans: null,
+      isFinal: true,
+      timestamp: '2026-06-15T02:00:00Z',
+      sessionId: 'mic-session-2',
+      segmentId: '0-1000'
+    });
+
+    expect(afterRestart.id).not.toBe(beforeRestart.id);
   });
 
   it('uses speaker letters as fallback for older events', () => {
@@ -109,7 +140,7 @@ describe('transcriptEventToMessage', () => {
 
 describe('applyTranslationEvent', () => {
   const finalMessage: ChatMessage = {
-    id: 'speaker-en-US-5000',
+    id: 'speaker-session-1-speaker-en-US-5000',
     role: 'speaker',
     speakerId: 'system-audio',
     speakerLabel: 'Speaker B',
@@ -118,12 +149,14 @@ describe('applyTranslationEvent', () => {
     translation: null,
     isFinal: true,
     timestamp: '2026-07-04T10:00:00Z',
+    sessionId: 'speaker-session-1',
     segmentId: '5000-2000'
   };
 
   it('patches the matching final message with the delivered translation', () => {
     const updated = applyTranslationEvent([finalMessage], {
       stream: 'speaker',
+      sessionId: 'speaker-session-1',
       segmentId: '5000-2000',
       trans: 'リリースは金曜日です'
     });
@@ -134,8 +167,20 @@ describe('applyTranslationEvent', () => {
   it('leaves messages untouched when nothing matches', () => {
     const updated = applyTranslationEvent([finalMessage], {
       stream: 'mic',
+      sessionId: 'speaker-session-1',
       segmentId: '5000-2000',
       trans: '別ストリームの翻訳'
+    });
+
+    expect(updated).toEqual([finalMessage]);
+  });
+
+  it('does not patch a message from a different helper session', () => {
+    const updated = applyTranslationEvent([finalMessage], {
+      stream: 'speaker',
+      sessionId: 'speaker-session-2',
+      segmentId: '5000-2000',
+      trans: '再起動後セッションの翻訳'
     });
 
     expect(updated).toEqual([finalMessage]);

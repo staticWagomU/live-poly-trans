@@ -24,6 +24,9 @@
   let error = $state<string | null>(null);
   let exportNotice = $state<string | null>(null);
   let isExporting = $state(false);
+  let isDeleting = $state(false);
+  let confirmingDelete = $state(false);
+  let confirmDeleteTimer: ReturnType<typeof setTimeout> | null = null;
   let isLoadingRecordings = $state(false);
   let isLoadingTranscript = $state(false);
   let isLoadingWaveform = $state(false);
@@ -35,6 +38,9 @@
     return () => {
       recordingRequest.invalidate();
       fileRequest.invalidate();
+      if (confirmDeleteTimer) {
+        clearTimeout(confirmDeleteTimer);
+      }
     };
   });
 
@@ -67,6 +73,7 @@
     selectedRecording = recording;
     exportNotice = null;
     error = null;
+    confirmingDelete = false;
     transcript = [];
     isLoadingTranscript = true;
     const fileSelection = selectFile(recording.files[0] ?? null);
@@ -216,6 +223,60 @@
     }
   }
 
+  // Deleting is irreversible, so the button asks for a second click and
+  // arms back down by itself if the user walks away.
+  function requestDelete() {
+    if (isDeleting) {
+      return;
+    }
+
+    if (confirmingDelete) {
+      void deleteSelectedRecording();
+      return;
+    }
+
+    confirmingDelete = true;
+    if (confirmDeleteTimer) {
+      clearTimeout(confirmDeleteTimer);
+    }
+    confirmDeleteTimer = setTimeout(() => {
+      confirmingDelete = false;
+    }, 4000);
+  }
+
+  async function deleteSelectedRecording() {
+    const recording = selectedRecording;
+    if (!recording || isDeleting) {
+      return;
+    }
+
+    if (confirmDeleteTimer) {
+      clearTimeout(confirmDeleteTimer);
+    }
+    confirmingDelete = false;
+    isDeleting = true;
+    error = null;
+    try {
+      await invoke('delete_recording', { id: recording.id });
+      recordingRequest.invalidate();
+      fileRequest.invalidate();
+      selectedRecording = null;
+      selectedFile = null;
+      transcript = [];
+      waveform = null;
+      audioSrc = null;
+      currentTimeMs = 0;
+      recordings = recordings.filter((entry) => entry.id !== recording.id);
+      if (recordings.length > 0) {
+        await selectRecording(recordings[0]);
+      }
+    } catch (deleteError) {
+      error = String(deleteError);
+    } finally {
+      isDeleting = false;
+    }
+  }
+
   function activeItemKey(items: RecordingTranscriptItem[], timeMs: number): string | null {
     let active: RecordingTranscriptItem | null = null;
     for (const item of items) {
@@ -275,6 +336,18 @@
             onclick={() => exportVariant('mixed')}
           >
             Merged
+          </button>
+          <button
+            type="button"
+            class="danger"
+            class:confirming={confirmingDelete}
+            disabled={isDeleting || isExporting || selectedRecording.endedAt === null}
+            title={selectedRecording.endedAt === null
+              ? 'This recording is still in progress'
+              : 'Delete this recording and its files'}
+            onclick={requestDelete}
+          >
+            {isDeleting ? 'Deleting…' : confirmingDelete ? 'Really delete?' : 'Delete'}
           </button>
         </div>
       </header>
@@ -354,8 +427,18 @@
       </section>
     {:else}
       <div class="empty-state">
-        <h2>No recordings yet</h2>
-        <p>Enable “Save audio” next to Record, then start a session to capture files here.</p>
+        {#if error}
+          <!-- A failed list must not masquerade as "no recordings": it would
+               send the user to change a setting they already have on. -->
+          <h2>Could not load recordings</h2>
+          <p class="notice error">{error}</p>
+          <button type="button" class="retry" onclick={refreshRecordings}>Try again</button>
+        {:else if isLoadingRecordings}
+          <h2>Loading recordings…</h2>
+        {:else}
+          <h2>No recordings yet</h2>
+          <p>Enable “Save audio” next to Record, then start a session to capture files here.</p>
+        {/if}
       </div>
     {/if}
   </section>
@@ -385,7 +468,13 @@
         </li>
       {/each}
       {#if recordings.length === 0}
-        <li class="empty">{isLoadingRecordings ? 'Loading recordings…' : 'Nothing recorded yet.'}</li>
+        <li class="empty">
+          {isLoadingRecordings
+            ? 'Loading recordings…'
+            : error
+              ? 'Could not load recordings.'
+              : 'Nothing recorded yet.'}
+        </li>
       {/if}
     </ul>
   </aside>
@@ -455,6 +544,17 @@
   .downloads button:disabled {
     cursor: default;
     opacity: 0.45;
+  }
+
+  .downloads button.danger {
+    border-color: rgba(179, 38, 30, 0.24);
+    background: rgba(179, 38, 30, 0.08);
+    color: #b3261e;
+  }
+
+  .downloads button.danger.confirming {
+    background: #b3261e;
+    color: #ffffff;
   }
 
   .list-head button:disabled {
@@ -636,6 +736,18 @@
     margin: 0;
     color: var(--ink);
     font-size: 17px;
+  }
+
+  .empty-state .retry {
+    justify-self: center;
+    margin-top: 8px;
+    border: 1px solid rgba(0, 102, 204, 0.16);
+    border-radius: 8px;
+    background: var(--apple-blue-soft);
+    color: var(--apple-blue);
+    padding: 6px 14px;
+    font-size: 12px;
+    font-weight: 600;
   }
 
   .empty-state p {

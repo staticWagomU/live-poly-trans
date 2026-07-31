@@ -55,6 +55,7 @@ export type ChatMessage = {
   translation: string | null;
   isFinal: boolean;
   timestamp: string;
+  sessionId?: string;
   segmentId: string;
   confidence?: number;
   detectedLanguage?: string;
@@ -67,7 +68,10 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
   const stableSegmentId = segmentId.split('-')[0] || segmentId;
 
   const message: ChatMessage = {
-    id: `${event.stream}-${event.lang}-${stableSegmentId}`,
+    // Namespaced by helper session: after an auto-restart the helper clock
+    // resets to 0, so segment ids repeat and would otherwise replace bubbles
+    // from earlier in the meeting in place.
+    id: `${event.sessionId}-${event.stream}-${event.lang}-${stableSegmentId}`,
     role: event.stream === 'mic' ? 'self' : 'speaker',
     speakerId: event.speakerId ?? fallbackSpeakerId(event.stream),
     speakerLabel: event.speakerLabel ?? fallbackSpeakerLabel(event.stream),
@@ -76,6 +80,7 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
     translation: event.trans,
     isFinal: event.isFinal,
     timestamp: event.time ?? event.timestamp,
+    sessionId: event.sessionId,
     segmentId
   };
 
@@ -108,11 +113,20 @@ export function fallbackSpeakerLabel(stream: TranscriptEvent['stream']) {
 
 export function applyTranslationEvent(
   messages: ChatMessage[],
-  event: Pick<TranslationEvent, 'stream' | 'segmentId' | 'trans'>
+  event: Pick<TranslationEvent, 'stream' | 'segmentId' | 'trans'> &
+    Partial<Pick<TranslationEvent, 'sessionId'>>
 ): ChatMessage[] {
   const role = event.stream === 'mic' ? 'self' : 'speaker';
   const index = messages.findIndex(
-    (message) => message.role === role && message.segmentId === event.segmentId
+    (message) =>
+      message.role === role &&
+      message.segmentId === event.segmentId &&
+      // Segment ids repeat across helper restarts; a translation may only
+      // patch the message from its own session. Messages or events without a
+      // session (older exports) keep the previous permissive matching.
+      (message.sessionId === undefined ||
+        event.sessionId === undefined ||
+        message.sessionId === event.sessionId)
   );
 
   if (index === -1) {

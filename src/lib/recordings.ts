@@ -38,8 +38,15 @@ export function parseSegmentStartMs(segmentId: unknown): number {
 
 /// Merges per-stream transcript JSONL events (final transcripts + follow-up
 /// translation events) into a single timeline sorted by audio position.
+///
+/// A helper restarted mid-session appends to the same jsonl with its capture
+/// clock reset to 0, so segment ids repeat across runs. The rewind of a
+/// stream's monotonic startMs marks the run boundary; keys are namespaced by
+/// run so a later run never overwrites earlier lines.
 export function buildRecordingTranscript(events: unknown[]): RecordingTranscriptItem[] {
   const items = new Map<string, RecordingTranscriptItem>();
+  const runByStream: Record<string, number> = {};
+  const lastStartByStream: Record<string, number> = {};
 
   for (const raw of events) {
     if (!raw || typeof raw !== 'object') {
@@ -52,7 +59,16 @@ export function buildRecordingTranscript(events: unknown[]): RecordingTranscript
       continue;
     }
 
-    const key = `${stream}-${event.segmentId}`;
+    if (event.type === 'transcript' && event.isFinal === true) {
+      const startMs = parseSegmentStartMs(event.segmentId);
+      const lastStartMs = lastStartByStream[stream];
+      if (lastStartMs !== undefined && startMs < lastStartMs) {
+        runByStream[stream] = (runByStream[stream] ?? 0) + 1;
+      }
+      lastStartByStream[stream] = startMs;
+    }
+
+    const key = `${runByStream[stream] ?? 0}-${stream}-${event.segmentId}`;
 
     if (event.type === 'transcript' && event.isFinal === true && typeof event.text === 'string') {
       const existing = items.get(key);

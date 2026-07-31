@@ -50,6 +50,11 @@
   } from '$lib/speechModels';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
   import { completeCaptureStop } from '$lib/captureLifecycle';
+  import {
+    maxRestartAttempts,
+    remainingRestartAttempts,
+    restartBackoffMs
+  } from '$lib/streamRestart';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -77,7 +82,6 @@
   const fontScalePreferenceKey = 'lpt-transcript-font-scale';
   const speechModelPreferenceKey = 'lpt-speech-model';
   const summaryRefreshDelayMs = 6000;
-  const maxRestartAttempts = 3;
 
   let activeTab: 'live' | 'recordings' | 'settings' = 'live';
   let mainLanguage = 'en-US';
@@ -95,6 +99,10 @@
     speaker: null
   };
   let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
+  let streamStartedAt: Record<AudioStream, number | null> = { mic: null, speaker: null };
+  // Bumped on every user-initiated start/stop; a pending auto-restart from
+  // before the bump must not resurrect a session the user already stopped.
+  let captureGeneration = 0;
   let recordingEnabled = false;
   let currentRecording: CreatedRecording | null = null;
   let captureTransition: 'starting' | 'stopping' | 'switching' | null = null;
@@ -115,6 +123,8 @@
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
+  let confirmingClear = false;
+  let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
 
   $: isRecording = activeStreams.size > 0;
   $: isMicRecording = activeStreams.has('mic');
@@ -169,6 +179,9 @@
       }
       if (actionNoticeTimer) {
         clearTimeout(actionNoticeTimer);
+      }
+      if (confirmClearTimer) {
+        clearTimeout(confirmClearTimer);
       }
     };
   });
@@ -286,6 +299,7 @@
 
     if (isRecording) {
       captureTransition = 'stopping';
+      captureGeneration += 1;
       clearStreamSessions([...activeStreams]);
       activeStreams = new Set();
       interimMessages = [];
@@ -302,6 +316,7 @@
 
     captureTransition = 'starting';
     try {
+      captureGeneration += 1;
       restartAttempts = { mic: 0, speaker: 0 };
       const failures: string[] = [];
 
@@ -407,6 +422,7 @@
 
     activeStreams.add(stream);
     activeStreams = new Set(activeStreams);
+    streamStartedAt = { ...streamStartedAt, [stream]: Date.now() };
   }
 
   async function stopStream(stream: AudioStream) {
@@ -425,32 +441,46 @@
     activeStreams.delete(payload.stream);
     activeStreams = new Set(activeStreams);
 
-    const attempt = restartAttempts[payload.stream] + 1;
-    if (attempt > maxRestartAttempts) {
-      appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up.`;
-      statusMessage = null;
-      return;
+    const startedAt = streamStartedAt[payload.stream];
+    const uptimeMs = startedAt !== null ? Date.now() - startedAt : null;
+    const generation = captureGeneration;
+
+    for (const attempt of remainingRestartAttempts(restartAttempts[payload.stream], uptimeMs)) {
+      restartAttempts = { ...restartAttempts, [payload.stream]: attempt };
+      statusMessage = `Restarting ${payload.stream} capture (attempt ${attempt}/${maxRestartAttempts})…`;
+
+      await new Promise((resolve) => setTimeout(resolve, restartBackoffMs(attempt)));
+
+      const stillWanted =
+        generation === captureGeneration &&
+        streamsForCaptureMode(captureMode).includes(payload.stream) &&
+        streamSessionIds[payload.stream] === null;
+      if (!stillWanted) {
+        statusMessage = null;
+        return;
+      }
+
+      try {
+        await startStream(payload.stream);
+        statusMessage = null;
+        return;
+      } catch (error) {
+        appError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
+      }
     }
 
-    restartAttempts = { ...restartAttempts, [payload.stream]: attempt };
-    statusMessage = `Restarting ${payload.stream} capture (attempt ${attempt}/${maxRestartAttempts})…`;
+    statusMessage = null;
+    appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up. Press Record to start again.`;
 
-    await new Promise((resolve) => setTimeout(resolve, attempt * 1000));
-
-    const stillWanted =
-      streamsForCaptureMode(captureMode).includes(payload.stream) &&
-      streamSessionIds[payload.stream] === null;
-    if (!stillWanted) {
-      statusMessage = null;
-      return;
-    }
-
-    try {
-      await startStream(payload.stream);
-      statusMessage = null;
-    } catch (error) {
-      statusMessage = null;
-      appError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
+    // The crash path never goes through toggleRecording, so the recording
+    // would otherwise stay unfinalized and be orphaned by the next start.
+    if (activeStreams.size === 0) {
+      interimMessages = [];
+      try {
+        await finishCurrentRecording();
+      } catch (error) {
+        appError = `${appError}\nCould not finalize the recording: ${String(error)}`;
+      }
     }
   }
 
@@ -605,13 +635,36 @@
       const result = await invoke<{ json_path: string; text_path: string }>('save_transcript', {
         messages
       });
-      showActionNotice(`Saved: ${result.json_path}`);
+      const fileName = result.json_path.split('/').pop() ?? result.json_path;
+      showActionNotice(`Saved to Downloads: ${fileName}`);
     } catch (error) {
       appError = String(error);
     }
   }
 
+  // Clear wipes the whole meeting (transcript, summary, chat) with no undo
+  // and sits right next to Save, so it asks for a second click and disarms
+  // by itself.
+  function requestClearConversation() {
+    if (confirmingClear) {
+      clearConversation();
+      return;
+    }
+
+    confirmingClear = true;
+    if (confirmClearTimer) {
+      clearTimeout(confirmClearTimer);
+    }
+    confirmClearTimer = setTimeout(() => {
+      confirmingClear = false;
+    }, 4000);
+  }
+
   function clearConversation() {
+    if (confirmClearTimer) {
+      clearTimeout(confirmClearTimer);
+    }
+    confirmingClear = false;
     messages = [];
     interimMessages = [];
     aiSummary = '';
@@ -743,6 +796,25 @@
           <span>Save audio</span>
         </label>
 
+        {#if isRecording}
+          <!-- Always-visible per-stream liveness: with capture mode Both, one
+               lane can die while the button still reads Stop, silently losing
+               half the conversation. -->
+          <div class="stream-health" aria-label="Capture status">
+            {#each streamsForCaptureMode(selectedCaptureMode) as stream (stream)}
+              <span
+                class="stream-dot"
+                class:dead={!activeStreams.has(stream)}
+                title={activeStreams.has(stream)
+                  ? `${stream} capture is running`
+                  : `${stream} capture is down`}
+              >
+                {stream === 'mic' ? 'Mic' : 'Speaker'}
+              </span>
+            {/each}
+          </div>
+        {/if}
+
         <button
           class="record"
           class:recording={isRecording || captureTransition === 'stopping'}
@@ -826,10 +898,12 @@
                 </button>
                 <button
                   type="button"
+                  class="clear-button"
+                  class:confirming={confirmingClear}
                   disabled={visibleMessages.length === 0}
-                  on:click={clearConversation}
+                  on:click={requestClearConversation}
                 >
-                  Clear
+                  {confirmingClear ? 'Really clear?' : 'Clear'}
                 </button>
               </div>
             </div>
@@ -842,7 +916,9 @@
               </div>
               <h2>{isStarting ? 'Preparing audio capture...' : 'Listening for speech'}</h2>
               <p>
-                Speak normally. The first words can take a few seconds while Apple Speech warms up.
+                {speechModel.engine === 'whisper'
+                  ? 'Speak normally. Whisper transcribes each phrase after you pause, so the first text appears once you finish a sentence.'
+                  : 'Speak normally. The first words can take a few seconds while Apple Speech warms up.'}
               </p>
               <div class="stream-chips" aria-label="Active streams">
                 <span class:active={isSpeakerRecording}>Speaker</span>
@@ -895,7 +971,7 @@
               </div>
 
               {#if showJumpToLatest}
-                <button type="button" class="jump-to-latest" on:click={scrollToLatest}>
+                <button type="button" class="jump-to-latest" on:click={() => scrollToLatest()}>
                   Jump to latest
                 </button>
               {/if}
@@ -1573,6 +1649,54 @@
   .thread-actions button:disabled {
     cursor: default;
     opacity: 0.45;
+  }
+
+  .stream-health {
+    display: flex;
+    gap: 8px;
+  }
+
+  .stream-dot {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    color: var(--ink-muted);
+    font-size: 11px;
+    font-weight: 600;
+  }
+
+  .stream-dot::before {
+    content: '';
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #34c759;
+  }
+
+  .stream-dot.dead {
+    color: #b3261e;
+  }
+
+  .stream-dot.dead::before {
+    background: #b3261e;
+    animation: stream-dead-pulse 1s ease-in-out infinite;
+  }
+
+  @keyframes stream-dead-pulse {
+    50% {
+      opacity: 0.3;
+    }
+  }
+
+  .thread-actions .clear-button.confirming {
+    border-color: rgba(179, 38, 30, 0.4);
+    background: #b3261e;
+    color: #ffffff;
+  }
+
+  .thread-actions .clear-button.confirming:hover:not(:disabled) {
+    border-color: rgba(179, 38, 30, 0.6);
+    color: #ffffff;
   }
 
   .legend {
