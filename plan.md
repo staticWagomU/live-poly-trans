@@ -27,7 +27,7 @@
 
 ## Phase 0: Tidy First(構造整理のみ、挙動変更なし)
 
-- [ ] 0-1. `+page.svelte`(2046行)の分割: `LiveView.svelte` を新設し、
+- [x] 0-1. `+page.svelte`(2046行)の分割: `LiveView.svelte` を新設し、
       ツールバー/字幕スレッド/AIパネルを子コンポーネント化。既存テストが緑のまま
 - [x] 0-2. デザイントークンを `src/lib/theme.css` に集約(モックの CSS 変数を移植)。
       ライト/ダーク両セット定義(`prefers-color-scheme`、旧計画4-7を吸収)
