@@ -10,6 +10,7 @@
     type RecordingTranscriptItem,
     type RecordingWaveform
   } from '$lib/recordings';
+  import { createLatestRequestGuard } from '$lib/latestRequest';
 
   let recordings = $state<RecordingSummary[]>([]);
   let selectedRecording = $state<RecordingSummary | null>(null);
@@ -23,12 +24,26 @@
   let error = $state<string | null>(null);
   let exportNotice = $state<string | null>(null);
   let isExporting = $state(false);
+  let isLoadingRecordings = $state(false);
+  let isLoadingTranscript = $state(false);
+  let isLoadingWaveform = $state(false);
+  const recordingRequest = createLatestRequestGuard();
+  const fileRequest = createLatestRequestGuard();
 
   onMount(() => {
     void refreshRecordings();
+    return () => {
+      recordingRequest.invalidate();
+      fileRequest.invalidate();
+    };
   });
 
   async function refreshRecordings() {
+    if (isLoadingRecordings) {
+      return;
+    }
+
+    isLoadingRecordings = true;
     error = null;
     try {
       recordings = await invoke<RecordingSummary[]>('list_recordings');
@@ -41,45 +56,77 @@
       }
     } catch (loadError) {
       error = String(loadError);
+    } finally {
+      isLoadingRecordings = false;
     }
   }
 
   async function selectRecording(recording: RecordingSummary) {
+    const isLatest = recordingRequest.begin();
+    fileRequest.invalidate();
     selectedRecording = recording;
     exportNotice = null;
     error = null;
     transcript = [];
+    isLoadingTranscript = true;
+    const fileSelection = selectFile(recording.files[0] ?? null);
+
     try {
       const events = await invoke<unknown[]>('read_recording_transcript', { id: recording.id });
+      if (!isLatest()) {
+        return;
+      }
       transcript = buildRecordingTranscript(events);
     } catch (transcriptError) {
-      error = String(transcriptError);
+      if (isLatest()) {
+        error = String(transcriptError);
+      }
+    } finally {
+      if (isLatest()) {
+        isLoadingTranscript = false;
+      }
     }
 
-    await selectFile(recording.files[0] ?? null);
+    await fileSelection;
   }
 
   async function selectFile(file: RecordingFileInfo | null) {
+    const isLatest = fileRequest.begin();
+    const recording = selectedRecording;
     selectedFile = file;
     waveform = null;
     currentTimeMs = 0;
     audioSrc = file ? convertFileSrc(file.path) : null;
 
-    if (!file || !selectedRecording) {
+    if (!file || !recording) {
+      isLoadingWaveform = false;
       drawWaveform();
       return;
     }
 
+    isLoadingWaveform = true;
     try {
-      waveform = await invoke<RecordingWaveform>('recording_waveform', {
-        id: selectedRecording.id,
+      const nextWaveform = await invoke<RecordingWaveform>('recording_waveform', {
+        id: recording.id,
         fileName: file.name
       });
+      if (!isLatest() || selectedRecording?.id !== recording.id) {
+        return;
+      }
+      waveform = nextWaveform;
     } catch (waveError) {
-      error = String(waveError);
+      if (isLatest()) {
+        error = String(waveError);
+      }
+    } finally {
+      if (isLatest()) {
+        isLoadingWaveform = false;
+      }
     }
 
-    drawWaveform();
+    if (isLatest()) {
+      drawWaveform();
+    }
   }
 
   function drawWaveform() {
@@ -262,6 +309,9 @@
           aria-label="Audio waveform"
         ></canvas>
         <div class="playhead" style={`left: ${playheadRatio * 100}%`} aria-hidden="true"></div>
+        {#if isLoadingWaveform}
+          <span class="waveform-loading" role="status">Loading waveform…</span>
+        {/if}
       </div>
 
       {#if audioSrc}
@@ -275,7 +325,9 @@
 
       <section class="transcript" aria-label="Recording transcript">
         <h3>Transcript</h3>
-        {#if transcript.length === 0}
+        {#if isLoadingTranscript}
+          <p class="empty" role="status">Loading transcript…</p>
+        {:else if transcript.length === 0}
           <p class="empty">No finalized transcript for this recording.</p>
         {:else}
           <ul>
@@ -311,7 +363,9 @@
   <aside class="list" aria-label="Recording files">
     <div class="list-head">
       <h3>Recordings</h3>
-      <button type="button" onclick={refreshRecordings}>Reload</button>
+      <button type="button" disabled={isLoadingRecordings} onclick={refreshRecordings}>
+        {isLoadingRecordings ? 'Loading…' : 'Reload'}
+      </button>
     </div>
     <ul>
       {#each recordings as recording (recording.id)}
@@ -331,7 +385,7 @@
         </li>
       {/each}
       {#if recordings.length === 0}
-        <li class="empty">Nothing recorded yet.</li>
+        <li class="empty">{isLoadingRecordings ? 'Loading recordings…' : 'Nothing recorded yet.'}</li>
       {/if}
     </ul>
   </aside>
@@ -403,6 +457,11 @@
     opacity: 0.45;
   }
 
+  .list-head button:disabled {
+    cursor: wait;
+    opacity: 0.55;
+  }
+
   .file-chips {
     display: flex;
     flex-wrap: wrap;
@@ -460,6 +519,18 @@
     bottom: 0;
     width: 1.5px;
     background: var(--apple-red);
+    pointer-events: none;
+  }
+
+  .waveform-loading {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    background: rgba(250, 250, 252, 0.82);
+    color: var(--ink-muted);
+    font-size: 12px;
+    font-weight: 600;
     pointer-events: none;
   }
 
