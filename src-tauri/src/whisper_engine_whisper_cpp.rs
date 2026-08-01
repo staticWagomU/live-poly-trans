@@ -1,6 +1,14 @@
 use std::path::{Path, PathBuf};
 use crate::whisper_engine_backend::WhisperBackendError;
 
+pub const WHISPER_CPP_SHIM_SYMBOLS: &[&str] = &[
+    "lpt_whisper_backend_create",
+    "lpt_whisper_backend_free",
+    "lpt_whisper_backend_transcribe",
+    "lpt_whisper_backend_free_transcript",
+    "lpt_whisper_backend_last_error",
+];
+
 pub fn whisper_cpp_library_file_name(target_os: &str) -> &'static str {
     match target_os {
         "macos" => "liblpt_whisper_backend.dylib",
@@ -73,5 +81,19 @@ mod tests {
             };
 
         assert!(error.message.contains("/missing/liblpt_whisper_backend.dylib"));
+    }
+
+    #[test]
+    fn shim_symbol_names_match_the_c_abi_contract() {
+        assert_eq!(
+            WHISPER_CPP_SHIM_SYMBOLS,
+            &[
+                "lpt_whisper_backend_create",
+                "lpt_whisper_backend_free",
+                "lpt_whisper_backend_transcribe",
+                "lpt_whisper_backend_free_transcript",
+                "lpt_whisper_backend_last_error",
+            ]
+        );
     }
 }
