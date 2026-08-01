@@ -16,6 +16,8 @@ pub enum WhisperEngineInput {
         timestamp_ms: i64,
         pcm16_base64: String,
     },
+    #[serde(rename_all = "camelCase")]
+    Flush { stream: String },
     Shutdown,
 }
 
@@ -119,6 +121,18 @@ mod tests {
                 seq: 7,
                 timestamp_ms: 1234,
                 pcm16_base64: "AAE=".to_string()
+            }
+        );
+    }
+
+    #[test]
+    fn parses_flush_input_line() {
+        let input = parse_engine_input_line(r#"{"type":"flush","stream":"speaker"}"#).unwrap();
+
+        assert_eq!(
+            input,
+            WhisperEngineInput::Flush {
+                stream: "speaker".to_string()
             }
         );
     }

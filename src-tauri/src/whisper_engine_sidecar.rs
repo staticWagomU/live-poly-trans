@@ -14,6 +14,7 @@ pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
             }))
         }
         WhisperEngineInput::Audio { .. } => SidecarAction::Continue(None),
+        WhisperEngineInput::Flush { .. } => SidecarAction::Continue(None),
         WhisperEngineInput::Shutdown => SidecarAction::Shutdown,
     }
 }
