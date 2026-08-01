@@ -23,6 +23,18 @@ pub fn stable_common_prefix(left: &str, right: &str) -> Option<String> {
     (boundary > 0).then(|| prefix[..boundary].to_string())
 }
 
+pub fn collapse_exact_repeated_text(text: &str) -> String {
+    let midpoint = text.len() / 2;
+    if text.len() % 2 == 0
+        && text.is_char_boundary(midpoint)
+        && text[..midpoint] == text[midpoint..]
+    {
+        return text[..midpoint].to_string();
+    }
+
+    text.to_string()
+}
+
 #[derive(Debug, Default)]
 pub struct PartialStabilizer {
     previous: Option<String>,
@@ -66,5 +78,13 @@ mod tests {
         assert_eq!(stabilizer.observe("hello wor"), None);
         assert_eq!(stabilizer.observe("hello world"), Some("hello ".to_string()));
         assert_eq!(stabilizer.observe("hello world!"), None);
+    }
+
+    #[test]
+    fn collapses_exact_repeated_transcript_text() {
+        assert_eq!(
+            collapse_exact_repeated_text(" ask not. ask not."),
+            " ask not."
+        );
     }
 }

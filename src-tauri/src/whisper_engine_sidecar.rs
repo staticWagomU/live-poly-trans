@@ -2,7 +2,7 @@ use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperB
 use crate::whisper_engine_audio::{decode_pcm16_base64, pcm16_to_f32, PcmRingBuffer};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 use crate::whisper_engine_scheduler::RollingTranscriptionScheduler;
-use crate::whisper_engine_stabilization::PartialStabilizer;
+use crate::whisper_engine_stabilization::{collapse_exact_repeated_text, PartialStabilizer};
 use std::collections::HashMap;
 
 pub const DEFAULT_RING_BUFFER_SAMPLES: usize = 16_000 * 30;
@@ -125,6 +125,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
         let samples = pcm16_to_f32(buffer.samples());
         match self.backend.transcribe(&samples) {
             Ok(Some(mut transcript)) => {
+                transcript.text = collapse_exact_repeated_text(&transcript.text);
                 if !is_final {
                     let stabilizer = self
                         .stabilizers
