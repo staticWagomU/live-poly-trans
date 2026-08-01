@@ -7,6 +7,7 @@ import {
   groupRecordingsByDate,
   parseSegmentStartMs,
   trimTranscript,
+  waveformDisplayPeaks,
   whisperxSpeakerIndex,
   type RecordingTranscriptItem
 } from './recordings';
@@ -245,5 +246,20 @@ describe('whisperx transcript', () => {
     expect(whisperxSpeakerIndex('SPEAKER_00')).toBe(0);
     expect(whisperxSpeakerIndex('SPEAKER_07')).toBe(7);
     expect(whisperxSpeakerIndex('weird')).toBe(0);
+  });
+});
+
+describe('waveformDisplayPeaks', () => {
+  it('scales a quiet track up so its shape stays visible', () => {
+    expect(waveformDisplayPeaks([0.002, 0.01, 0.005])).toEqual([0.2, 1, 0.5]);
+  });
+
+  it('keeps the relative shape of a loud track', () => {
+    expect(waveformDisplayPeaks([0.5, 1, 0.25])).toEqual([0.5, 1, 0.25]);
+  });
+
+  it('leaves silence flat instead of amplifying nothing', () => {
+    expect(waveformDisplayPeaks([0, 0, 0])).toEqual([0, 0, 0]);
+    expect(waveformDisplayPeaks([])).toEqual([]);
   });
 });

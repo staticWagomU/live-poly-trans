@@ -11,6 +11,7 @@
     formatTimestampMs,
     groupRecordingsByDate,
     trimTranscript,
+    waveformDisplayPeaks,
     type RecordingFileInfo,
     type RecordingSummary,
     type RecordingTranscriptItem,
@@ -250,12 +251,12 @@
     }
 
     const middle = height / 2;
-    const barWidth = width / waveform.peaks.length;
-    const playedBars = Math.floor(playheadRatio * waveform.peaks.length);
+    const peaks = waveformDisplayPeaks(waveform.peaks);
+    const barWidth = width / peaks.length;
+    const playedBars = Math.floor(playheadRatio * peaks.length);
 
-    for (let index = 0; index < waveform.peaks.length; index++) {
-      const amplitude = Math.min(1, waveform.peaks[index]);
-      const barHeight = Math.max(2, amplitude * (height - 8));
+    for (let index = 0; index < peaks.length; index++) {
+      const barHeight = Math.max(2, peaks[index] * (height - 8));
       context.fillStyle = index <= playedBars ? 'rgba(0, 102, 204, 0.85)' : 'rgba(120, 120, 128, 0.35)';
       context.fillRect(index * barWidth, middle - barHeight / 2, Math.max(1, barWidth - 1), barHeight);
     }

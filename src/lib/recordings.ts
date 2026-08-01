@@ -211,6 +211,18 @@ export function trimTranscript(
     .map((item) => ({ ...item, startMs: item.startMs - startMs }));
 }
 
+/// Scales peaks against the loudest bucket of the same file. Mic input often
+/// peaks around 0.01, which is a 1px line on an absolute scale; the waveform is
+/// a navigation aid, not a level meter, so shape matters more than loudness.
+export function waveformDisplayPeaks(peaks: number[]): number[] {
+  const loudest = peaks.reduce((max, peak) => Math.max(max, peak), 0);
+  if (loudest <= 0) {
+    return peaks.map(() => 0);
+  }
+
+  return peaks.map((peak) => Math.min(1, peak / loudest));
+}
+
 export function formatTimestampMs(ms: number): string {
   const totalSeconds = Math.max(0, Math.floor(ms / 1000));
   const seconds = totalSeconds % 60;
