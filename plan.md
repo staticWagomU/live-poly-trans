@@ -180,6 +180,39 @@ Cargo への HTTP/解凍/ハッシュ依存の追加を避ける。
       不足があれば自動開始をスキップして「権限が必要です → 設定を開く」バナーを表示。
       すべて許可済みのときだけ従来どおり自動開始する
 
+## Phase 9: ライブ Whisper の恒久ストリーミング化(Windows前提)
+
+**設計判断**: Whisper推論は Swift helper から切り離し、OS非依存の
+`lpt-whisper-engine` sidecar に移す。macOS helper と将来の Windows capture helper は
+どちらも 16kHz mono PCM を同じ JSONL protocol で engine に渡す。これにより、
+`whisper-cli` をチャンクごとに起動する現行方式と、Swift内にWhisperを直結する
+macOS限定実装を廃止対象にする。
+
+- [ ] 9-1. 【Rust】engine JSONL protocol を固定:
+      `config` / `audio` / `flush` / `shutdown` input と
+      `status` / `transcript(isFinal=false/true)` / `metric` / `error` output。
+      protocol は純関数+単体テストで先行し、Tauri/Swift/Windows実装から独立させる
+- [x] 9-2. 【Rust】`lpt-whisper-engine` sidecar skeleton:
+      stdin JSONL → protocol parse → stdout JSONL。まず `config` で `status:ready`、
+      `shutdown` で終了する最小実装を作り、後続でC++ Whisper backendを差し替えられる
+      境界にする
+- [ ] 9-3. 【C++】whisper.cpp backend:
+      モデルをプロセス起動後に1回だけロードし、PCM ring buffer を rolling window で推論。
+      `stepMs` / `windowMs` / `finalizeSilenceMs` は計測ログで調整する
+- [ ] 9-4. 【Engine】partial安定化:
+      local agreement、committed prefix、重複抑制、backlog時のpartial drop/final優先を実装。
+      長時間発話で28秒待ちに戻らないことを fixture で検証する
+- [ ] 9-5. 【macOS helper】Whisper選択時は `whisper-cli` ではなく
+      `lpt-whisper-engine` にPCMを流す。Swift helperは音声取得/録音/権限管理へ責務を寄せる
+- [ ] 9-6. 【Tauri】sidecar bundle/build:
+      macOS/Windows targetごとの `lpt-whisper-engine` binary を外部バイナリとして扱う。
+      `--whisper-cli` と `whisper-cli` 探索は安定後に削除する
+- [ ] 9-7. 【Windows準備】capture helper interface を固定:
+      `start(stream)` / `audioFrame(stream, pcm16, sampleRate, timestamp)` /
+      `stop(stream)`。Windows実装は WASAPI capture/loopback でこの境界に合わせる
+- [ ] 9-8. 【計測ゲート】first partial P95 <= 2秒、final after silence P95 <= 1.5秒、
+      30秒以上の連続発話で待ち時間が線形増加しないことを合格条件にする
+
 ## 検証ゲート(全フェーズ共通)
 
 - `bun run test`(svelte-check → vitest)+ `scripts/test-swift-helper.sh` を各項目の完了条件とする
