@@ -53,6 +53,33 @@ std::string detected_language(whisper_context * context, const std::string & fal
   return language;
 }
 
+bool env_flag_enabled(const char * name, bool default_value) {
+  const char * value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return default_value;
+  }
+
+  return std::strcmp(value, "0") != 0
+      && std::strcmp(value, "false") != 0
+      && std::strcmp(value, "FALSE") != 0
+      && std::strcmp(value, "off") != 0
+      && std::strcmp(value, "OFF") != 0;
+}
+
+int env_int(const char * name, int default_value) {
+  const char * value = std::getenv(name);
+  if (value == nullptr || value[0] == '\0') {
+    return default_value;
+  }
+
+  char * end = nullptr;
+  const long parsed = std::strtol(value, &end, 10);
+  if (end == value || parsed < 0 || parsed > 65535) {
+    return default_value;
+  }
+  return static_cast<int>(parsed);
+}
+
 } // namespace
 
 void * lpt_whisper_backend_create(const char * model_path, const char * language) {
@@ -64,8 +91,8 @@ void * lpt_whisper_backend_create(const char * model_path, const char * language
   ggml_backend_load_all();
 
   whisper_context_params context_params = whisper_context_default_params();
-  context_params.use_gpu = false;
-  context_params.flash_attn = false;
+  context_params.use_gpu = env_flag_enabled("LPT_WHISPER_USE_GPU", true);
+  context_params.flash_attn = env_flag_enabled("LPT_WHISPER_FLASH_ATTN", true);
   whisper_context * context = whisper_init_from_file_with_params(model_path, context_params);
   if (context == nullptr) {
     std::ostringstream message;
@@ -121,7 +148,9 @@ int lpt_whisper_backend_transcribe(
   params.print_realtime = false;
   params.print_timestamps = false;
   params.no_timestamps = true;
+  params.no_context = true;
   params.single_segment = true;
+  params.audio_ctx = env_int("LPT_WHISPER_AUDIO_CTX", 0);
   params.language = typed->language.c_str();
 
   if (whisper_full(typed->context, params, samples, static_cast<int>(sample_count)) != 0) {

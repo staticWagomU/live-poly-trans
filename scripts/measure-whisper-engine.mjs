@@ -17,6 +17,9 @@ const enginePath = args.engine ?? join(
 );
 const firstPartialBudgetMs = Number(args.firstPartialBudgetMs ?? 2000);
 const finalFlushBudgetMs = Number(args.finalFlushBudgetMs ?? 1500);
+const frameMs = Number(args.frameMs ?? 500);
+const trailingSilenceMs = Number(args.trailingSilenceMs ?? 1000);
+const minAudioMs = Number(args.minAudioMs ?? 30000);
 
 if (!existsSync(enginePath)) {
   throw new Error(`lpt-whisper-engine not found: ${enginePath}`);
@@ -26,6 +29,10 @@ if (!existsSync(modelPath)) {
 }
 
 const wav = readPcm16MonoWav(audioPath);
+const samples = repeatSamplesToAtLeast(
+  wav.samples,
+  Math.round(wav.sampleRate * minAudioMs / 1000)
+);
 const child = spawn(enginePath, [], { stdio: ['pipe', 'pipe', 'pipe'] });
 const metrics = [];
 const transcripts = [];
@@ -45,9 +52,23 @@ child.stdout.on('data', chunk => {
 writeJsonLine(child, { type: 'config', modelPath, language: 'auto', sampleRate: wav.sampleRate });
 let seq = 0;
 let timestampMs = 0;
-const frameSamples = Math.round(wav.sampleRate * 0.75);
-for (let offset = 0; offset < wav.samples.length; offset += frameSamples) {
-  const frame = wav.samples.subarray(offset, Math.min(offset + frameSamples, wav.samples.length));
+const frameSamples = Math.round(wav.sampleRate * frameMs / 1000);
+for (let offset = 0; offset < samples.length; offset += frameSamples) {
+  const frame = samples.subarray(offset, Math.min(offset + frameSamples, samples.length));
+  writeJsonLine(child, {
+    type: 'audio',
+    stream: 'mic',
+    seq,
+    timestampMs,
+    pcm16Base64: Buffer.from(frame.buffer, frame.byteOffset, frame.byteLength).toString('base64')
+  });
+  seq += 1;
+  timestampMs += Math.round(frame.length * 1000 / wav.sampleRate);
+}
+const silenceSamples = Math.round(wav.sampleRate * trailingSilenceMs / 1000);
+for (let offset = 0; offset < silenceSamples; offset += frameSamples) {
+  const length = Math.min(frameSamples, silenceSamples - offset);
+  const frame = new Int16Array(length);
   writeJsonLine(child, {
     type: 'audio',
     stream: 'mic',
@@ -85,6 +106,9 @@ const result = {
   firstPartialP95,
   finalFlushP95,
   transcriptCount: transcripts.length,
+  frameMs,
+  trailingSilenceMs,
+  audioDurationMs: Math.round(samples.length * 1000 / wav.sampleRate),
   firstPartialBudgetMs,
   finalFlushBudgetMs
 };
@@ -132,6 +156,18 @@ function percentile(values, ratio) {
   const sorted = [...values].sort((left, right) => left - right);
   const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * ratio) - 1);
   return sorted[index];
+}
+
+function repeatSamplesToAtLeast(samples, minSamples) {
+  if (samples.length >= minSamples || minSamples <= 0) {
+    return samples;
+  }
+
+  const repeated = new Int16Array(minSamples);
+  for (let offset = 0; offset < minSamples; offset += samples.length) {
+    repeated.set(samples.subarray(0, Math.min(samples.length, minSamples - offset)), offset);
+  }
+  return repeated;
 }
 
 function readPcm16MonoWav(path) {

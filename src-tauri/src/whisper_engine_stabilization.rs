@@ -58,6 +58,15 @@ impl PartialStabilizer {
         Some(stable)
     }
 
+    pub fn observe_with_initial_provisional(&mut self, text: &str) -> Option<String> {
+        if self.previous.is_none() {
+            self.previous = Some(text.to_string());
+            return Some(text.to_string());
+        }
+
+        self.observe(text)
+    }
+
     pub fn reset(&mut self) {
         self.previous = None;
         self.committed_prefix.clear();
@@ -86,6 +95,20 @@ mod tests {
             Some("hello ".to_string())
         );
         assert_eq!(stabilizer.observe("hello world!"), None);
+    }
+
+    #[test]
+    fn stabilizer_can_emit_initial_provisional_result_then_stable_prefixes() {
+        let mut stabilizer = PartialStabilizer::default();
+
+        assert_eq!(
+            stabilizer.observe_with_initial_provisional("hello wor"),
+            Some("hello wor".to_string())
+        );
+        assert_eq!(
+            stabilizer.observe_with_initial_provisional("hello world"),
+            Some("hello ".to_string())
+        );
     }
 
     #[test]

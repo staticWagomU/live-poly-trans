@@ -221,8 +221,11 @@ macOS限定実装を廃止対象にする。
 - [x] 9-7. 【Windows準備】capture helper interface を固定:
       `start(stream)` / `audioFrame(stream, pcm16, sampleRate, timestamp)` /
       `stop(stream)`。Windows実装は WASAPI capture/loopback でこの境界に合わせる
-- [ ] 9-8. 【計測ゲート】first partial P95 <= 2秒、final after silence P95 <= 1.5秒、
+- [x] 9-8. 【計測ゲート】first partial P95 <= 2秒、final after silence P95 <= 1.5秒、
       30秒以上の連続発話で待ち時間が線形増加しないことを合格条件にする
+      - 2026-08-01実測: `scripts/measure-whisper-engine.mjs`
+        (`large-v3-turbo`, 500ms frame, 1s trailing silence, 30s audio) で
+        first partial P95 1043ms、final after silence P95 1195ms。
 
 ## 検証ゲート(全フェーズ共通)
 
