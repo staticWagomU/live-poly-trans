@@ -1,5 +1,8 @@
-use std::path::{Path, PathBuf};
-use crate::whisper_engine_backend::WhisperBackendError;
+use crate::whisper_engine_backend::{WhisperBackendError, WhisperTranscription};
+use std::{
+    ffi::{c_char, CStr},
+    path::{Path, PathBuf},
+};
 
 pub const WHISPER_CPP_SHIM_SYMBOLS: &[&str] = &[
     "lpt_whisper_backend_create",
@@ -43,6 +46,34 @@ impl WhisperCppBackend {
 
         Ok(Self { _library: library })
     }
+}
+
+#[repr(C)]
+pub struct LptWhisperTranscript {
+    pub text: *const c_char,
+    pub language: *const c_char,
+    pub confidence: f64,
+    pub has_confidence: u8,
+}
+
+pub unsafe fn transcript_from_ffi(
+    transcript: &LptWhisperTranscript,
+) -> Result<WhisperTranscription, WhisperBackendError> {
+    if transcript.text.is_null() || transcript.language.is_null() {
+        return Err(WhisperBackendError {
+            message: "whisper cpp shim returned a null transcript string".to_string(),
+        });
+    }
+
+    Ok(WhisperTranscription {
+        text: unsafe { CStr::from_ptr(transcript.text) }
+            .to_string_lossy()
+            .into_owned(),
+        language: unsafe { CStr::from_ptr(transcript.language) }
+            .to_string_lossy()
+            .into_owned(),
+        confidence: (transcript.has_confidence != 0).then_some(transcript.confidence),
+    })
 }
 
 #[cfg(test)]
@@ -95,5 +126,23 @@ mod tests {
                 "lpt_whisper_backend_last_error",
             ]
         );
+    }
+
+    #[test]
+    fn converts_ffi_transcript_to_backend_transcription() {
+        let text = std::ffi::CString::new("hello").unwrap();
+        let language = std::ffi::CString::new("en").unwrap();
+        let ffi = LptWhisperTranscript {
+            text: text.as_ptr(),
+            language: language.as_ptr(),
+            confidence: 0.75,
+            has_confidence: 1,
+        };
+
+        let transcript = unsafe { transcript_from_ffi(&ffi) }.unwrap();
+
+        assert_eq!(transcript.text, "hello");
+        assert_eq!(transcript.language, "en");
+        assert_eq!(transcript.confidence, Some(0.75));
     }
 }
