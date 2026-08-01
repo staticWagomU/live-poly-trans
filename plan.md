@@ -188,7 +188,7 @@ Cargo への HTTP/解凍/ハッシュ依存の追加を避ける。
 `whisper-cli` をチャンクごとに起動する現行方式と、Swift内にWhisperを直結する
 macOS限定実装を廃止対象にする。
 
-- [ ] 9-1. 【Rust】engine JSONL protocol を固定:
+- [x] 9-1. 【Rust】engine JSONL protocol を固定:
       `config` / `audio` / `flush` / `shutdown` input と
       `status` / `transcript(isFinal=false/true)` / `metric` / `error` output。
       protocol は純関数+単体テストで先行し、Tauri/Swift/Windows実装から独立させる
