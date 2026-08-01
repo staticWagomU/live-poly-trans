@@ -206,6 +206,11 @@ macOS限定実装を廃止対象にする。
 - [ ] 9-4. 【Engine】partial安定化:
       local agreement、committed prefix、重複抑制、backlog時のpartial drop/final優先を実装。
       長時間発話で28秒待ちに戻らないことを fixture で検証する
+      - [x] 9-4a. local agreement: 連続するrolling結果の単語境界prefixだけを
+            `isFinal=false` として出す
+      - [x] 9-4b. committed prefix / duplicate suppression: 同じpartialを再emitせず、
+            完全重複したtranscript textを畳む
+      - [ ] 9-4c. backlog時はrolling partialを落としてflush/finalを優先する
 - [ ] 9-5. 【macOS helper】Whisper選択時は `whisper-cli` ではなく
       `lpt-whisper-engine` にPCMを流す。Swift helperは音声取得/録音/権限管理へ責務を寄せる
 - [ ] 9-6. 【Tauri】sidecar bundle/build:
