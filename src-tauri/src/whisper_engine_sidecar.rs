@@ -2,6 +2,8 @@ use crate::whisper_engine_audio::{decode_pcm16_base64, PcmRingBuffer};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 use std::collections::HashMap;
 
+pub const DEFAULT_RING_BUFFER_SAMPLES: usize = 16_000 * 30;
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarAction {
     Continue(Option<WhisperEngineOutput>),
@@ -14,6 +16,10 @@ pub struct WhisperEngineSidecar {
 }
 
 impl WhisperEngineSidecar {
+    pub fn with_default_capacity() -> Self {
+        Self::new(DEFAULT_RING_BUFFER_SAMPLES)
+    }
+
     pub fn new(capacity_samples: usize) -> Self {
         Self {
             capacity_samples,

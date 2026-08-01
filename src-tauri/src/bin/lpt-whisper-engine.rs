@@ -1,10 +1,11 @@
 use live_poly_trans_lib::whisper_engine_protocol::{engine_output_line, parse_engine_input_line};
-use live_poly_trans_lib::whisper_engine_sidecar::{handle_engine_input, SidecarAction};
+use live_poly_trans_lib::whisper_engine_sidecar::{SidecarAction, WhisperEngineSidecar};
 use std::io::{self, BufRead, Write};
 
 fn main() {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
+    let mut sidecar = WhisperEngineSidecar::with_default_capacity();
 
     for line in stdin.lock().lines() {
         let line = match line {
@@ -23,7 +24,7 @@ fn main() {
             }
         };
 
-        match handle_engine_input(input) {
+        match sidecar.handle_input(input) {
             SidecarAction::Continue(Some(output)) => {
                 let line = match engine_output_line(&output) {
                     Ok(line) => line,
