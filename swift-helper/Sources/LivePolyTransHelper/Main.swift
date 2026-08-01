@@ -65,20 +65,35 @@ public struct LivePolyTransHelper {
           transcriptFile: options.transcriptFile
         )
       case .whisper:
-        guard let modelPath = options.whisperModel, let cliPath = options.whisperCli else {
+        guard let modelPath = options.whisperModel else {
           throw CommandLineOptionsError.missingWhisperConfiguration
         }
 
-        try await runWhisperTranscription(
-          stream: stream,
-          sourceLanguage: options.sourceLanguage,
-          targetLanguage: options.targetLanguage,
-          segmentDirectory: options.segmentDirectory,
-          recordFile: options.recordFile,
-          transcriptFile: options.transcriptFile,
-          modelPath: modelPath,
-          cliPath: cliPath
-        )
+        if let enginePath = options.whisperEngine {
+          try await runWhisperEngineTranscription(
+            stream: stream,
+            sourceLanguage: options.sourceLanguage,
+            targetLanguage: options.targetLanguage,
+            segmentDirectory: options.segmentDirectory,
+            recordFile: options.recordFile,
+            transcriptFile: options.transcriptFile,
+            modelPath: modelPath,
+            enginePath: enginePath
+          )
+        } else if let cliPath = options.whisperCli {
+          try await runWhisperTranscription(
+            stream: stream,
+            sourceLanguage: options.sourceLanguage,
+            targetLanguage: options.targetLanguage,
+            segmentDirectory: options.segmentDirectory,
+            recordFile: options.recordFile,
+            transcriptFile: options.transcriptFile,
+            modelPath: modelPath,
+            cliPath: cliPath
+          )
+        } else {
+          throw CommandLineOptionsError.missingWhisperConfiguration
+        }
       }
     }
   }

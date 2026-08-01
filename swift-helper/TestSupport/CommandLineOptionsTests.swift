@@ -69,6 +69,10 @@ struct CommandLineOptionsTests {
     try mapsWhisperLanguageToSessionLanguageByPrefix()
     try fallsBackToLanguageFitnessForUnmatchedWhisperLanguage()
     try buildsWhisperCliArguments()
+    try encodesWhisperEngineConfigLine()
+    try encodesWhisperEngineAudioLineAsPcm16Base64()
+    try buffersWhisperEngineOutputLinesAcrossChunks()
+    try buildsTranscriptEventFromWhisperEngineOutput()
     try await terminatesHungWhisperProcessAfterTimeout()
     try await terminatesWhisperProcessOnTaskCancellation()
     try keepsMeaningfulTranscriptRules()
@@ -563,6 +567,86 @@ struct CommandLineOptionsTests {
     )
   }
 
+  static func encodesWhisperEngineConfigLine() throws {
+    try expectEqual(
+      try whisperEngineConfigLine(
+        modelPath: "/models/ggml-large-v3-turbo.bin",
+        language: "auto",
+        sampleRate: 16_000
+      ),
+      #"{"language":"auto","modelPath":"\/models\/ggml-large-v3-turbo.bin","sampleRate":16000,"type":"config"}"#
+    )
+  }
+
+  static func encodesWhisperEngineAudioLineAsPcm16Base64() throws {
+    let line = try whisperEngineAudioLine(
+      stream: .mic,
+      seq: 7,
+      timestampMs: 125,
+      samples: [0, 1, -1]
+    )
+    let data = Data(line.utf8)
+    let object = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+    let payload = try expectValue(object?["pcm16Base64"] as? String, "missing audio payload")
+    let decoded = try expectValue(Data(base64Encoded: payload), "invalid base64 payload")
+
+    try expectEqual(object?["type"] as? String, "audio")
+    try expectEqual(object?["stream"] as? String, "mic")
+    try expectEqual(object?["seq"] as? Int, 7)
+    try expectEqual(object?["timestampMs"] as? Int, 125)
+    try expectEqual(Array(decoded), [0, 0, 255, 127, 1, 128])
+  }
+
+  static func buffersWhisperEngineOutputLinesAcrossChunks() throws {
+    let accumulator = JsonLineAccumulator()
+
+    try expectEqual(accumulator.consume(Data(#"{"type":"sta"#.utf8)), [])
+    try expectEqual(
+      accumulator.consume(Data(#"tus","state":"ready"}"#.utf8)),
+      []
+    )
+    try expectEqual(
+      accumulator.consume(Data("\n{\"type\":\"status\",\"state\":\"done\"}\n".utf8)),
+      [
+        #"{"type":"status","state":"ready"}"#,
+        #"{"type":"status","state":"done"}"#
+      ]
+    )
+  }
+
+  static func buildsTranscriptEventFromWhisperEngineOutput() throws {
+    let output = WhisperEngineOutputLine(
+      type: "transcript",
+      state: nil,
+      message: nil,
+      fatal: nil,
+      stream: "mic",
+      segmentId: "mic-rolling",
+      startMs: 250,
+      durationMs: 1500,
+      text: "こんにちは",
+      isFinal: false,
+      language: "ja",
+      confidence: 0.82
+    )
+    let event = try expectValue(
+      transcriptEvent(
+        from: output,
+        stream: .mic,
+        sourceLanguage: "ja-JP",
+        targetLanguage: "en-US",
+        timestamp: Date(timeIntervalSince1970: 0)
+      ),
+      "expected transcript event"
+    )
+
+    try expectEqual(event.lang, "ja-JP")
+    try expectEqual(event.text, "こんにちは")
+    try expectEqual(event.isFinal, false)
+    try expectEqual(event.segmentId, "mic-rolling")
+    try expectEqual(event.confidence, 0.82)
+  }
+
   // A wedged whisper-cli (Metal hang, stalled volume) must not block the
   // transcription queue forever: the runner kills it after the timeout and
   // surfaces a normal error so the session moves on to the next chunk.
@@ -671,6 +755,14 @@ struct CommandLineOptionsTests {
     if actual != expected {
       throw TestFailure(message: "Expected \(expected), got \(actual)")
     }
+  }
+
+  static func expectValue<T>(_ value: T?, _ message: String) throws -> T {
+    guard let value else {
+      throw TestFailure(message: message)
+    }
+
+    return value
   }
 
   static func parsesTrimCommand() throws {

@@ -208,7 +208,7 @@ public func runWhisperTranscription(
 }
 
 @available(macOS 26.0, *)
-private func makeWhisperInputSource(
+func makeWhisperInputSource(
   stream: AudioStream,
   recordFile: String?,
   whisperFormat: AVAudioFormat
@@ -267,13 +267,13 @@ final class PendingChunkCounter: @unchecked Sendable {
 
 // MARK: - Graceful shutdown
 
-private let whisperShutdownOnce = ShutdownOnce()
-private nonisolated(unsafe) var whisperShutdownSignalSource: DispatchSourceSignal?
+let whisperShutdownOnce = ShutdownOnce()
+nonisolated(unsafe) var whisperShutdownSignalSource: DispatchSourceSignal?
 
 /// Whisper needs a longer grace than the builtin engine: the pending chunk
 /// still runs one full inference (~2s plus model load) after input ends.
 /// The Rust side extends its SIGKILL patience to match.
-private let whisperShutdownGraceSeconds: Double = 10
+let whisperShutdownGraceSeconds: Double = 10
 
 @available(macOS 26.0, *)
 private func installWhisperShutdownHandlers(

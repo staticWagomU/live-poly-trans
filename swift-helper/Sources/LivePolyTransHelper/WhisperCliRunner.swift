@@ -129,7 +129,7 @@ func runUntilExit(_ process: Process, timeoutSeconds: Double) async throws -> In
 
 /// SIGTERM first so the cli can drop cleanly, SIGKILL two seconds later if
 /// it ignored that.
-private func terminateProcessWithEscalation(_ process: Process) {
+func terminateProcessWithEscalation(_ process: Process) {
   guard process.isRunning else {
     return
   }
@@ -144,7 +144,7 @@ private func terminateProcessWithEscalation(_ process: Process) {
 
 /// Drains a pipe via readabilityHandler so the subprocess never stalls on a
 /// full pipe buffer and no thread blocks on the read.
-private final class PipeCollector: @unchecked Sendable {
+final class PipeCollector: @unchecked Sendable {
   private let lock = NSLock()
   private var collected = Data()
 
