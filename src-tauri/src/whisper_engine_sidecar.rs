@@ -221,4 +221,36 @@ mod tests {
         assert_eq!(sidecar.backend().loaded.len(), 1);
         assert_eq!(sidecar.backend().loaded[0].model_path, "/models/ggml-base.bin");
     }
+
+    struct FailingBackend;
+
+    impl crate::whisper_engine_backend::WhisperBackend for FailingBackend {
+        fn load_model(
+            &mut self,
+            _config: crate::whisper_engine_backend::WhisperBackendConfig,
+        ) -> Result<(), crate::whisper_engine_backend::WhisperBackendError> {
+            Err(crate::whisper_engine_backend::WhisperBackendError {
+                message: "failed to load model".to_string(),
+            })
+        }
+    }
+
+    #[test]
+    fn config_input_reports_backend_load_failures_as_fatal_errors() {
+        let mut sidecar = WhisperEngineSidecar::with_backend(4, FailingBackend);
+
+        let action = sidecar.handle_input(WhisperEngineInput::Config {
+            model_path: "/missing.bin".to_string(),
+            language: "auto".to_string(),
+            sample_rate: 16_000,
+        });
+
+        assert_eq!(
+            action,
+            SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                message: "failed to load model".to_string(),
+                fatal: true
+            }))
+        );
+    }
 }
