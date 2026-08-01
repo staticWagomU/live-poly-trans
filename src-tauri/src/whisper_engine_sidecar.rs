@@ -28,12 +28,17 @@ impl WhisperEngineSidecar {
                 pcm16_base64,
                 ..
             } => {
-                if let Ok(samples) = decode_pcm16_base64(&pcm16_base64) {
-                    self.buffers
-                        .entry(stream)
-                        .or_insert_with(|| PcmRingBuffer::new(self.capacity_samples))
-                        .push(&samples);
-                }
+                let Ok(samples) = decode_pcm16_base64(&pcm16_base64) else {
+                    return SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                        message: "invalid pcm16 audio payload".to_string(),
+                        fatal: false,
+                    }));
+                };
+
+                self.buffers
+                    .entry(stream)
+                    .or_insert_with(|| PcmRingBuffer::new(self.capacity_samples))
+                    .push(&samples);
                 SidecarAction::Continue(None)
             }
             input => handle_engine_input(input),
@@ -123,5 +128,25 @@ mod tests {
 
         assert_eq!(action, SidecarAction::Continue(None));
         assert_eq!(sidecar.samples("mic"), Some(&[1, -1][..]));
+    }
+
+    #[test]
+    fn malformed_audio_input_reports_a_non_fatal_error() {
+        let mut sidecar = WhisperEngineSidecar::new(4);
+
+        let action = sidecar.handle_input(WhisperEngineInput::Audio {
+            stream: "mic".to_string(),
+            seq: 1,
+            timestamp_ms: 0,
+            pcm16_base64: "not valid base64".to_string(),
+        });
+
+        assert_eq!(
+            action,
+            SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                message: "invalid pcm16 audio payload".to_string(),
+                fatal: false
+            }))
+        );
     }
 }
