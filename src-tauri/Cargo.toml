@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "LivePolyTrans desktop app"
 authors = ["staticWagomU"]
 edition = "2021"
+default-run = "live-poly-trans"
 
 [lib]
 name = "live_poly_trans_lib"
