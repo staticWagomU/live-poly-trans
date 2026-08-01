@@ -1,3 +1,4 @@
+use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperBackendConfig};
 use crate::whisper_engine_audio::{decode_pcm16_base64, PcmRingBuffer};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 use std::collections::HashMap;
@@ -10,9 +11,10 @@ pub enum SidecarAction {
     Shutdown,
 }
 
-pub struct WhisperEngineSidecar {
+pub struct WhisperEngineSidecar<B = NoopWhisperBackend> {
     capacity_samples: usize,
     buffers: HashMap<String, PcmRingBuffer>,
+    backend: B,
 }
 
 impl WhisperEngineSidecar {
@@ -24,11 +26,35 @@ impl WhisperEngineSidecar {
         Self {
             capacity_samples,
             buffers: HashMap::new(),
+            backend: NoopWhisperBackend::default(),
+        }
+    }
+}
+
+impl<B: WhisperBackend> WhisperEngineSidecar<B> {
+    pub fn with_backend(capacity_samples: usize, backend: B) -> Self {
+        Self {
+            capacity_samples,
+            buffers: HashMap::new(),
+            backend,
         }
     }
 
     pub fn handle_input(&mut self, input: WhisperEngineInput) -> SidecarAction {
         match input {
+            WhisperEngineInput::Config { .. } => {
+                let config = WhisperBackendConfig::try_from(input)
+                    .expect("config arm only passes config input");
+                match self.backend.load_model(config) {
+                    Ok(()) => SidecarAction::Continue(Some(WhisperEngineOutput::Status {
+                        state: "ready".to_string(),
+                    })),
+                    Err(error) => SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                        message: error.message,
+                        fatal: true,
+                    })),
+                }
+            }
             WhisperEngineInput::Audio {
                 stream,
                 pcm16_base64,
@@ -53,6 +79,10 @@ impl WhisperEngineSidecar {
 
     pub fn samples(&self, stream: &str) -> Option<&[i16]> {
         self.buffers.get(stream).map(PcmRingBuffer::samples)
+    }
+
+    pub fn backend(&self) -> &B {
+        &self.backend
     }
 }
 
@@ -154,5 +184,41 @@ mod tests {
                 fatal: false
             }))
         );
+    }
+
+    #[derive(Default)]
+    struct FakeBackend {
+        loaded: Vec<crate::whisper_engine_backend::WhisperBackendConfig>,
+    }
+
+    impl crate::whisper_engine_backend::WhisperBackend for FakeBackend {
+        fn load_model(
+            &mut self,
+            config: crate::whisper_engine_backend::WhisperBackendConfig,
+        ) -> Result<(), crate::whisper_engine_backend::WhisperBackendError> {
+            self.loaded.push(config);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn config_input_loads_the_backend_model_once() {
+        let backend = FakeBackend::default();
+        let mut sidecar = WhisperEngineSidecar::with_backend(4, backend);
+
+        let action = sidecar.handle_input(WhisperEngineInput::Config {
+            model_path: "/models/ggml-base.bin".to_string(),
+            language: "auto".to_string(),
+            sample_rate: 16_000,
+        });
+
+        assert_eq!(
+            action,
+            SidecarAction::Continue(Some(WhisperEngineOutput::Status {
+                state: "ready".to_string()
+            }))
+        );
+        assert_eq!(sidecar.backend().loaded.len(), 1);
+        assert_eq!(sidecar.backend().loaded[0].model_path, "/models/ggml-base.bin");
     }
 }

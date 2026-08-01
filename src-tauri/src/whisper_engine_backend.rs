@@ -7,6 +7,27 @@ pub struct WhisperBackendConfig {
     pub sample_rate: u32,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WhisperBackendError {
+    pub message: String,
+}
+
+pub trait WhisperBackend {
+    fn load_model(&mut self, config: WhisperBackendConfig) -> Result<(), WhisperBackendError>;
+}
+
+#[derive(Debug, Default)]
+pub struct NoopWhisperBackend {
+    pub loaded_config: Option<WhisperBackendConfig>,
+}
+
+impl WhisperBackend for NoopWhisperBackend {
+    fn load_model(&mut self, config: WhisperBackendConfig) -> Result<(), WhisperBackendError> {
+        self.loaded_config = Some(config);
+        Ok(())
+    }
+}
+
 impl TryFrom<WhisperEngineInput> for WhisperBackendConfig {
     type Error = &'static str;
 
