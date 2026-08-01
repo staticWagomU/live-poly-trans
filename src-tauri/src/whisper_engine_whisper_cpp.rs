@@ -1,6 +1,9 @@
-use crate::whisper_engine_backend::{WhisperBackendError, WhisperTranscription};
+use crate::whisper_engine_backend::{
+    WhisperBackend, WhisperBackendConfig, WhisperBackendError, WhisperTranscription,
+};
 use std::{
-    ffi::{c_char, CStr},
+    ffi::{c_char, c_void, CStr, CString},
+    ptr::NonNull,
     path::{Path, PathBuf},
 };
 
@@ -34,7 +37,20 @@ pub fn whisper_cpp_library_candidates(
 
 pub struct WhisperCppBackend {
     _library: libloading::Library,
+    create: CreateFn,
+    free: FreeFn,
+    transcribe: TranscribeFn,
+    free_transcript: FreeTranscriptFn,
+    last_error: LastErrorFn,
+    handle: Option<NonNull<c_void>>,
 }
+
+type CreateFn = unsafe extern "C" fn(*const c_char, *const c_char) -> *mut c_void;
+type FreeFn = unsafe extern "C" fn(*mut c_void);
+type TranscribeFn =
+    unsafe extern "C" fn(*mut c_void, *const f32, usize, *mut LptWhisperTranscript) -> i32;
+type FreeTranscriptFn = unsafe extern "C" fn(*mut LptWhisperTranscript);
+type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
 
 impl WhisperCppBackend {
     pub fn from_library(path: &Path) -> Result<Self, WhisperBackendError> {
@@ -44,7 +60,90 @@ impl WhisperCppBackend {
             }
         })?;
 
-        Ok(Self { _library: library })
+        let create = unsafe { load_symbol::<CreateFn>(&library, "lpt_whisper_backend_create")? };
+        let free = unsafe { load_symbol::<FreeFn>(&library, "lpt_whisper_backend_free")? };
+        let transcribe =
+            unsafe { load_symbol::<TranscribeFn>(&library, "lpt_whisper_backend_transcribe")? };
+        let free_transcript = unsafe {
+            load_symbol::<FreeTranscriptFn>(&library, "lpt_whisper_backend_free_transcript")?
+        };
+        let last_error =
+            unsafe { load_symbol::<LastErrorFn>(&library, "lpt_whisper_backend_last_error")? };
+
+        Ok(Self {
+            _library: library,
+            create,
+            free,
+            transcribe,
+            free_transcript,
+            last_error,
+            handle: None,
+        })
+    }
+}
+
+impl WhisperBackend for WhisperCppBackend {
+    fn load_model(&mut self, config: WhisperBackendConfig) -> Result<(), WhisperBackendError> {
+        if let Some(handle) = self.handle.take() {
+            unsafe { (self.free)(handle.as_ptr()) };
+        }
+
+        let model_path = CString::new(config.model_path).map_err(|_| WhisperBackendError {
+            message: "model path contains a NUL byte".to_string(),
+        })?;
+        let language = CString::new(config.language).map_err(|_| WhisperBackendError {
+            message: "language contains a NUL byte".to_string(),
+        })?;
+        let handle = unsafe { (self.create)(model_path.as_ptr(), language.as_ptr()) };
+        let Some(handle) = NonNull::new(handle) else {
+            return Err(self.last_error_message("failed to create whisper cpp backend"));
+        };
+
+        self.handle = Some(handle);
+        Ok(())
+    }
+
+    fn transcribe(&mut self, samples: &[f32]) -> Result<Option<WhisperTranscription>, WhisperBackendError> {
+        if samples.is_empty() {
+            return Ok(None);
+        }
+        let Some(handle) = self.handle else {
+            return Err(WhisperBackendError {
+                message: "whisper cpp backend model is not loaded".to_string(),
+            });
+        };
+
+        let mut transcript = LptWhisperTranscript {
+            text: std::ptr::null(),
+            language: std::ptr::null(),
+            confidence: 0.0,
+            has_confidence: 0,
+        };
+        let status = unsafe {
+            (self.transcribe)(
+                handle.as_ptr(),
+                samples.as_ptr(),
+                samples.len(),
+                &mut transcript,
+            )
+        };
+        match status {
+            1.. => {
+                let converted = unsafe { transcript_from_ffi(&transcript) };
+                unsafe { (self.free_transcript)(&mut transcript) };
+                converted.map(Some)
+            }
+            0 => Ok(None),
+            _ => Err(self.last_error_message("whisper cpp transcription failed")),
+        }
+    }
+}
+
+impl Drop for WhisperCppBackend {
+    fn drop(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            unsafe { (self.free)(handle.as_ptr()) };
+        }
     }
 }
 
@@ -74,6 +173,32 @@ pub unsafe fn transcript_from_ffi(
             .into_owned(),
         confidence: (transcript.has_confidence != 0).then_some(transcript.confidence),
     })
+}
+
+unsafe fn load_symbol<T: Copy>(
+    library: &libloading::Library,
+    name: &str,
+) -> Result<T, WhisperBackendError> {
+    let symbol = unsafe { library.get::<T>(format!("{name}\0").as_bytes()) }.map_err(|error| {
+        WhisperBackendError {
+            message: format!("failed to load whisper cpp shim symbol {name}: {error}"),
+        }
+    })?;
+    Ok(*symbol)
+}
+
+impl WhisperCppBackend {
+    fn last_error_message(&self, fallback: &str) -> WhisperBackendError {
+        let message = unsafe {
+            let ptr = (self.last_error)();
+            if ptr.is_null() {
+                fallback.to_string()
+            } else {
+                CStr::from_ptr(ptr).to_string_lossy().into_owned()
+            }
+        };
+        WhisperBackendError { message }
+    }
 }
 
 #[cfg(test)]
