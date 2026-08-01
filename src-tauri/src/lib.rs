@@ -13,6 +13,8 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
+pub mod whisper_engine_protocol;
+
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
 const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
 // Must exceed the Swift helper's 5s shutdown safety net so the helper can
