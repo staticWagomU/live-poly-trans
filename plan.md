@@ -216,7 +216,7 @@ macOS限定実装を廃止対象にする。
 - [x] 9-6. 【Tauri】sidecar bundle/build:
       macOS/Windows targetごとの `lpt-whisper-engine` binary を外部バイナリとして扱う。
       `--whisper-cli` と `whisper-cli` 探索は安定後に削除する
-- [ ] 9-7. 【Windows準備】capture helper interface を固定:
+- [x] 9-7. 【Windows準備】capture helper interface を固定:
       `start(stream)` / `audioFrame(stream, pcm16, sampleRate, timestamp)` /
       `stop(stream)`。Windows実装は WASAPI capture/loopback でこの境界に合わせる
 - [ ] 9-8. 【計測ゲート】first partial P95 <= 2秒、final after silence P95 <= 1.5秒、

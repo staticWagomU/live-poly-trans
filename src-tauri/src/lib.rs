@@ -13,6 +13,7 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
+pub mod capture_helper_protocol;
 pub mod whisper_engine_audio;
 pub mod whisper_engine_backend;
 pub mod whisper_engine_protocol;
