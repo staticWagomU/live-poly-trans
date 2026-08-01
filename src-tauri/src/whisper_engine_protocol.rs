@@ -9,6 +9,13 @@ pub enum WhisperEngineInput {
         language: String,
         sample_rate: u32,
     },
+    #[serde(rename_all = "camelCase")]
+    Audio {
+        stream: String,
+        seq: u64,
+        timestamp_ms: i64,
+        pcm16_base64: String,
+    },
     Shutdown,
 }
 
@@ -96,5 +103,23 @@ mod tests {
         .unwrap();
 
         assert_eq!(line, r#"{"type":"status","state":"ready"}"#);
+    }
+
+    #[test]
+    fn parses_audio_input_line() {
+        let input = parse_engine_input_line(
+            r#"{"type":"audio","stream":"mic","seq":7,"timestampMs":1234,"pcm16Base64":"AAE="}"#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            input,
+            WhisperEngineInput::Audio {
+                stream: "mic".to_string(),
+                seq: 7,
+                timestamp_ms: 1234,
+                pcm16_base64: "AAE=".to_string()
+            }
+        );
     }
 }

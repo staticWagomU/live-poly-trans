@@ -13,6 +13,7 @@ pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
                 state: "ready".to_string(),
             }))
         }
+        WhisperEngineInput::Audio { .. } => SidecarAction::Continue(None),
         WhisperEngineInput::Shutdown => SidecarAction::Shutdown,
     }
 }
