@@ -60,4 +60,14 @@ mod tests {
             SidecarAction::Continue(None)
         );
     }
+
+    #[test]
+    fn flush_input_continues_without_output_until_backend_is_connected() {
+        assert_eq!(
+            handle_engine_input(WhisperEngineInput::Flush {
+                stream: "speaker".to_string()
+            }),
+            SidecarAction::Continue(None)
+        );
+    }
 }
