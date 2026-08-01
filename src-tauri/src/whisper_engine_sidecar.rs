@@ -1,5 +1,5 @@
 use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperBackendConfig};
-use crate::whisper_engine_audio::{decode_pcm16_base64, PcmRingBuffer};
+use crate::whisper_engine_audio::{decode_pcm16_base64, pcm16_to_f32, PcmRingBuffer};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 use std::collections::HashMap;
 
@@ -15,6 +15,7 @@ pub struct WhisperEngineSidecar<B = NoopWhisperBackend> {
     capacity_samples: usize,
     buffers: HashMap<String, PcmRingBuffer>,
     backend: B,
+    sample_rate: u32,
 }
 
 impl WhisperEngineSidecar {
@@ -27,6 +28,7 @@ impl WhisperEngineSidecar {
             capacity_samples,
             buffers: HashMap::new(),
             backend: NoopWhisperBackend::default(),
+            sample_rate: 16_000,
         }
     }
 }
@@ -37,6 +39,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
             capacity_samples,
             buffers: HashMap::new(),
             backend,
+            sample_rate: 16_000,
         }
     }
 
@@ -45,6 +48,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
             WhisperEngineInput::Config { .. } => {
                 let config = WhisperBackendConfig::try_from(input)
                     .expect("config arm only passes config input");
+                self.sample_rate = config.sample_rate;
                 match self.backend.load_model(config) {
                     Ok(()) => SidecarAction::Continue(Some(WhisperEngineOutput::Status {
                         state: "ready".to_string(),
@@ -52,6 +56,31 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                     Err(error) => SidecarAction::Continue(Some(WhisperEngineOutput::Error {
                         message: error.message,
                         fatal: true,
+                    })),
+                }
+            }
+            WhisperEngineInput::Flush { stream } => {
+                let Some(buffer) = self.buffers.get(&stream) else {
+                    return SidecarAction::Continue(None);
+                };
+                let samples = pcm16_to_f32(buffer.samples());
+                match self.backend.transcribe(&samples) {
+                    Ok(Some(transcript)) => SidecarAction::Continue(Some(
+                        WhisperEngineOutput::Transcript {
+                            segment_id: format!("{stream}-flush"),
+                            duration_ms: duration_ms(buffer.samples().len(), self.sample_rate),
+                            start_ms: 0,
+                            stream,
+                            text: transcript.text,
+                            is_final: true,
+                            language: transcript.language,
+                            confidence: transcript.confidence,
+                        },
+                    )),
+                    Ok(None) => SidecarAction::Continue(None),
+                    Err(error) => SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                        message: error.message,
+                        fatal: false,
                     })),
                 }
             }
@@ -84,6 +113,10 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
     pub fn backend(&self) -> &B {
         &self.backend
     }
+}
+
+fn duration_ms(sample_count: usize, sample_rate: u32) -> i64 {
+    ((sample_count as f64 * 1000.0) / f64::from(sample_rate)).round() as i64
 }
 
 pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
@@ -189,6 +222,8 @@ mod tests {
     #[derive(Default)]
     struct FakeBackend {
         loaded: Vec<crate::whisper_engine_backend::WhisperBackendConfig>,
+        transcript: Option<crate::whisper_engine_backend::WhisperTranscription>,
+        transcribed_samples: Vec<Vec<f32>>,
     }
 
     impl crate::whisper_engine_backend::WhisperBackend for FakeBackend {
@@ -207,7 +242,8 @@ mod tests {
             Option<crate::whisper_engine_backend::WhisperTranscription>,
             crate::whisper_engine_backend::WhisperBackendError,
         > {
-            Ok(None)
+            self.transcribed_samples.push(_samples.to_vec());
+            Ok(self.transcript.clone())
         }
     }
 
@@ -270,6 +306,52 @@ mod tests {
             SidecarAction::Continue(Some(WhisperEngineOutput::Error {
                 message: "failed to load model".to_string(),
                 fatal: true
+            }))
+        );
+    }
+
+    #[test]
+    fn flush_input_transcribes_buffered_stream_audio() {
+        let backend = FakeBackend {
+            transcript: Some(crate::whisper_engine_backend::WhisperTranscription {
+                text: "hello".to_string(),
+                language: "en".to_string(),
+                confidence: Some(0.9),
+            }),
+            ..FakeBackend::default()
+        };
+        let mut sidecar = WhisperEngineSidecar::with_backend(16_000, backend);
+        sidecar.handle_input(WhisperEngineInput::Config {
+            model_path: "/models/ggml-base.bin".to_string(),
+            language: "auto".to_string(),
+            sample_rate: 16_000,
+        });
+        sidecar.handle_input(WhisperEngineInput::Audio {
+            stream: "mic".to_string(),
+            seq: 1,
+            timestamp_ms: 0,
+            pcm16_base64: "AIAAAAAA".to_string(),
+        });
+
+        let action = sidecar.handle_input(WhisperEngineInput::Flush {
+            stream: "mic".to_string(),
+        });
+
+        assert_eq!(
+            sidecar.backend().transcribed_samples,
+            vec![vec![-1.0, 0.0, 0.0]]
+        );
+        assert_eq!(
+            action,
+            SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
+                stream: "mic".to_string(),
+                segment_id: "mic-flush".to_string(),
+                text: "hello".to_string(),
+                is_final: true,
+                start_ms: 0,
+                duration_ms: 0,
+                language: "en".to_string(),
+                confidence: Some(0.9)
             }))
         );
     }
