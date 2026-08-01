@@ -1,9 +1,48 @@
+use crate::whisper_engine_audio::{decode_pcm16_base64, PcmRingBuffer};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
+use std::collections::HashMap;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarAction {
     Continue(Option<WhisperEngineOutput>),
     Shutdown,
+}
+
+pub struct WhisperEngineSidecar {
+    capacity_samples: usize,
+    buffers: HashMap<String, PcmRingBuffer>,
+}
+
+impl WhisperEngineSidecar {
+    pub fn new(capacity_samples: usize) -> Self {
+        Self {
+            capacity_samples,
+            buffers: HashMap::new(),
+        }
+    }
+
+    pub fn handle_input(&mut self, input: WhisperEngineInput) -> SidecarAction {
+        match input {
+            WhisperEngineInput::Audio {
+                stream,
+                pcm16_base64,
+                ..
+            } => {
+                if let Ok(samples) = decode_pcm16_base64(&pcm16_base64) {
+                    self.buffers
+                        .entry(stream)
+                        .or_insert_with(|| PcmRingBuffer::new(self.capacity_samples))
+                        .push(&samples);
+                }
+                SidecarAction::Continue(None)
+            }
+            input => handle_engine_input(input),
+        }
+    }
+
+    pub fn samples(&self, stream: &str) -> Option<&[i16]> {
+        self.buffers.get(stream).map(PcmRingBuffer::samples)
+    }
 }
 
 pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
@@ -69,5 +108,20 @@ mod tests {
             }),
             SidecarAction::Continue(None)
         );
+    }
+
+    #[test]
+    fn audio_input_appends_decoded_samples_to_the_stream_buffer() {
+        let mut sidecar = WhisperEngineSidecar::new(4);
+
+        let action = sidecar.handle_input(WhisperEngineInput::Audio {
+            stream: "mic".to_string(),
+            seq: 1,
+            timestamp_ms: 0,
+            pcm16_base64: "AQD//w==".to_string(),
+        });
+
+        assert_eq!(action, SidecarAction::Continue(None));
+        assert_eq!(sidecar.samples("mic"), Some(&[1, -1][..]));
     }
 }
