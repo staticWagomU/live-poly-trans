@@ -1,4 +1,5 @@
 use std::path::{Path, PathBuf};
+use crate::whisper_engine_backend::WhisperBackendError;
 
 pub fn whisper_cpp_library_file_name(target_os: &str) -> &'static str {
     match target_os {
@@ -18,6 +19,22 @@ pub fn whisper_cpp_library_candidates(
         executable_dir.join(file_name),
         manifest_dir.join("binaries").join(file_name),
     ]
+}
+
+pub struct WhisperCppBackend {
+    _library: libloading::Library,
+}
+
+impl WhisperCppBackend {
+    pub fn from_library(path: &Path) -> Result<Self, WhisperBackendError> {
+        let library = unsafe { libloading::Library::new(path) }.map_err(|error| {
+            WhisperBackendError {
+                message: format!("failed to load whisper cpp shim {}: {error}", path.display()),
+            }
+        })?;
+
+        Ok(Self { _library: library })
+    }
 }
 
 #[cfg(test)]
@@ -44,5 +61,17 @@ mod tests {
                 PathBuf::from("/repo/src-tauri/binaries/liblpt_whisper_backend.dylib"),
             ]
         );
+    }
+
+    #[test]
+    fn loading_a_missing_shim_reports_the_path() {
+        let error =
+            match WhisperCppBackend::from_library(Path::new("/missing/liblpt_whisper_backend.dylib"))
+            {
+                Ok(_) => panic!("missing shim unexpectedly loaded"),
+                Err(error) => error,
+            };
+
+        assert!(error.message.contains("/missing/liblpt_whisper_backend.dylib"));
     }
 }
