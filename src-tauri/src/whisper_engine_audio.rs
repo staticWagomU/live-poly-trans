@@ -22,6 +22,32 @@ pub fn decode_pcm16_base64(encoded: &str) -> Result<Vec<i16>, WhisperEngineAudio
         .collect())
 }
 
+pub struct PcmRingBuffer {
+    capacity_samples: usize,
+    samples: Vec<i16>,
+}
+
+impl PcmRingBuffer {
+    pub fn new(capacity_samples: usize) -> Self {
+        Self {
+            capacity_samples,
+            samples: Vec::new(),
+        }
+    }
+
+    pub fn push(&mut self, samples: &[i16]) {
+        self.samples.extend_from_slice(samples);
+        if self.samples.len() > self.capacity_samples {
+            self.samples
+                .drain(0..self.samples.len() - self.capacity_samples);
+        }
+    }
+
+    pub fn samples(&self) -> &[i16] {
+        &self.samples
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -41,5 +67,15 @@ mod tests {
             result,
             Err(WhisperEngineAudioError::OddByteLength { byte_len: 1 })
         ));
+    }
+
+    #[test]
+    fn ring_buffer_keeps_only_the_newest_samples() {
+        let mut buffer = PcmRingBuffer::new(4);
+
+        buffer.push(&[1, 2, 3]);
+        buffer.push(&[4, 5, 6]);
+
+        assert_eq!(buffer.samples(), &[3, 4, 5, 6]);
     }
 }
