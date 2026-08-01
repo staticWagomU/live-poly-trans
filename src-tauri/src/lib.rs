@@ -1169,6 +1169,35 @@ pub fn whisperx_stage_for_line(line: &str) -> Option<&'static str> {
     }
 }
 
+pub const WHISPERX_REPROCESS_MODEL: &str = "large-v3-turbo";
+
+pub fn whisperx_reprocess_args(
+    input: &Path,
+    output_dir: &Path,
+    hf_token: Option<&str>,
+) -> Vec<String> {
+    let mut args = vec![
+        input.display().to_string(),
+        "--output_format".to_string(),
+        "json".to_string(),
+        "--output_dir".to_string(),
+        output_dir.display().to_string(),
+        "--compute_type".to_string(),
+        "int8".to_string(),
+        "--model".to_string(),
+        WHISPERX_REPROCESS_MODEL.to_string(),
+        "--no_align".to_string(),
+    ];
+
+    if let Some(token) = hf_token.filter(|token| !token.trim().is_empty()) {
+        args.push("--diarize".to_string());
+        args.push("--hf_token".to_string());
+        args.push(token.to_string());
+    }
+
+    args
+}
+
 /// Converts whisperx JSON output into our transcript.whisperx.jsonl lines.
 /// Times become integer milliseconds; the speaker tag is passed through
 /// (SPEAKER_00, ...) and mapped to labels/colors in the UI.
@@ -1999,31 +2028,14 @@ pub mod commands {
             let output_dir = dir.join("whisperx-tmp");
             fs::create_dir_all(&output_dir).map_err(|error| error.to_string())?;
 
-            let mut args = runner.prefix_args.clone();
-            args.push(input.display().to_string());
-            args.extend(
-                [
-                    "--output_format",
-                    "json",
-                    "--output_dir",
-                    &output_dir.display().to_string(),
-                    "--compute_type",
-                    "int8",
-                ]
-                .map(String::from),
-            );
-            // No HF token -> no pyannote access -> run without speaker
-            // diarization instead of failing (plan 6-1 fallback).
             let token = hf_token.filter(|token| !token.trim().is_empty());
-            if let Some(token) = &token {
-                args.push("--diarize".to_string());
-                args.push("--hf_token".to_string());
-                args.push(token.clone());
-            }
+            let mut args = runner.prefix_args.clone();
+            args.extend(whisperx_reprocess_args(&input, &output_dir, token.as_deref()));
 
             eprintln!(
-                "live-poly-trans tauri: reprocess-start id={id} runner={} diarize={}",
+                "live-poly-trans tauri: reprocess-start id={id} runner={} model={} no_align=true diarize={}",
                 runner.program,
+                WHISPERX_REPROCESS_MODEL,
                 token.is_some()
             );
             emit_stage("transcribe");
@@ -2734,6 +2746,37 @@ mod tests {
             Some("diarize")
         );
         assert_eq!(whisperx_stage_for_line("Loading model..."), None);
+    }
+
+    #[test]
+    fn whisperx_reprocess_args_skip_unused_alignment_model() {
+        let args = whisperx_reprocess_args(
+            Path::new("/recordings/mixed.m4a"),
+            Path::new("/recordings/whisperx-tmp"),
+            None,
+        );
+
+        assert!(args.contains(&"--no_align".to_string()));
+        assert!(args
+            .windows(2)
+            .any(|window| window[0] == "--model" && window[1] == "large-v3-turbo"));
+        assert!(!args.contains(&"--diarize".to_string()));
+        assert!(!args.contains(&"--hf_token".to_string()));
+    }
+
+    #[test]
+    fn whisperx_reprocess_args_keep_diarization_when_token_is_present() {
+        let args = whisperx_reprocess_args(
+            Path::new("/recordings/mixed.m4a"),
+            Path::new("/recordings/whisperx-tmp"),
+            Some("hf_xxx"),
+        );
+
+        assert!(args.contains(&"--no_align".to_string()));
+        assert!(args.contains(&"--diarize".to_string()));
+        assert!(args
+            .windows(2)
+            .any(|window| window[0] == "--hf_token" && window[1] == "hf_xxx"));
     }
 
     #[test]

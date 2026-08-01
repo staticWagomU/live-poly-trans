@@ -15,7 +15,7 @@
    「音声も保存」トグルは廃止(設定の「録音に音声ファイルを含める」へ)
 5. **録音範囲の可視化**: 字幕ストリームに ⏺開始/⏹終了マーカー+録音中字幕に赤レール
 6. **エンジン2段構え**: ライブ=Apple内蔵/Whisper。録音後の再処理=+WhisperX
-   (transcription + alignment + diarization)
+   (transcription + optional diarization)。単語単位timestampをUIで使うまで alignment は省く
 7. **Recordings**: 外部音声アップロード(スマホ/ボイスレコーダー)、再処理メニュー、
    トリム(kanary式・波形ハンドル)、書き出し、削除
 8. **対面モード(mimi)**: 耳の不自由な方・ご高齢の方向けの全画面特大字幕モード。
@@ -120,6 +120,8 @@ Phase 1-2 のライブ字幕パイプラインをそのまま使う表示モー�
       (実装済みは whisperx。builtin/whisper の再処理は明示エラー+メニューでは未対応表示)
       進捗イベント(transcribe→align→diarize)を emit、結果は `transcript.whisperx.jsonl`
       として元と並存(非破壊)
+      2026-08-01更新: 既存UIは `segments[].words[]` を読まないため、WhisperX は
+      `--no_align --model large-v3-turbo` をデフォルトにして wav2vec2 alignment model を落とさない
 - [x] 6-3. 【Web】再処理メニュー+3段階進捗バー(モック準拠)。完了後は話者ラベル付き
       表示(話者N の色割当は recordings.ts に純関数+テスト)
 - [x] 6-4. 設定「認識モデル」ペインに WhisperX 要件の案内(インストール状況/HFトークン入力)
