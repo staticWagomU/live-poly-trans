@@ -198,7 +198,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                     outputs.extend(outputs_from_action(self.finalize_after_silence(&stream)));
                 }
 
-                return SidecarAction::outputs(outputs);
+                SidecarAction::outputs(outputs)
             }
             WhisperEngineInput::Flush { stream } => {
                 let action = self.flush_stream(&stream);
@@ -208,7 +208,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 self.first_audio_at.remove(&stream);
                 self.first_partial_emitted.remove(&stream);
                 self.trailing_silence_samples.remove(&stream);
-                return action;
+                action
             }
             input => handle_engine_input(input),
         }

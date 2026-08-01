@@ -24,13 +24,13 @@ pub fn stable_common_prefix(left: &str, right: &str) -> Option<String> {
                 .is_whitespace()
                 .then_some(index + character.len_utf8())
         })
-        .last()?;
+        .next_back()?;
     (boundary > 0).then(|| prefix[..boundary].to_string())
 }
 
 pub fn collapse_exact_repeated_text(text: &str) -> String {
     let midpoint = text.len() / 2;
-    if text.len() % 2 == 0
+    if text.len().is_multiple_of(2)
         && text.is_char_boundary(midpoint)
         && text[..midpoint] == text[midpoint..]
     {

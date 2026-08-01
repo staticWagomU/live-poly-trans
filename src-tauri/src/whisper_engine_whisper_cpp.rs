@@ -167,6 +167,12 @@ pub struct LptWhisperTranscript {
     pub has_confidence: u8,
 }
 
+/// Converts a transcript allocated by the whisper C shim into owned Rust data.
+///
+/// # Safety
+///
+/// `transcript.text` and `transcript.language` must be valid, null-terminated C strings for the
+/// duration of this call.
 pub unsafe fn transcript_from_ffi(
     transcript: &LptWhisperTranscript,
 ) -> Result<WhisperTranscription, WhisperBackendError> {
