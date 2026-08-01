@@ -9,6 +9,7 @@ pub enum WhisperEngineInput {
         language: String,
         sample_rate: u32,
     },
+    Shutdown,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -29,6 +30,10 @@ pub enum WhisperEngineOutput {
 
 pub fn engine_input_line(input: &WhisperEngineInput) -> Result<String, serde_json::Error> {
     serde_json::to_string(input)
+}
+
+pub fn parse_engine_input_line(line: &str) -> Result<WhisperEngineInput, serde_json::Error> {
+    serde_json::from_str(line)
 }
 
 pub fn engine_output_line(output: &WhisperEngineOutput) -> Result<String, serde_json::Error> {
@@ -72,5 +77,12 @@ mod tests {
             line,
             r#"{"type":"transcript","stream":"mic","segmentId":"mic-1200","text":"hello","isFinal":false,"startMs":1200,"durationMs":900,"language":"en","confidence":0.82}"#
         );
+    }
+
+    #[test]
+    fn parses_shutdown_input_line() {
+        let input = parse_engine_input_line(r#"{"type":"shutdown"}"#).unwrap();
+
+        assert_eq!(input, WhisperEngineInput::Shutdown);
     }
 }
