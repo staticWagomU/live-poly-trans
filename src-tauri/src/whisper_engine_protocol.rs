@@ -27,6 +27,8 @@ pub enum WhisperEngineOutput {
     #[serde(rename_all = "camelCase")]
     Status { state: String },
     #[serde(rename_all = "camelCase")]
+    Metric { name: String, value: f64 },
+    #[serde(rename_all = "camelCase")]
     Transcript {
         stream: String,
         segment_id: String,
@@ -134,6 +136,20 @@ mod tests {
             WhisperEngineInput::Flush {
                 stream: "speaker".to_string()
             }
+        );
+    }
+
+    #[test]
+    fn serializes_metric_output_as_json_line() {
+        let line = engine_output_line(&WhisperEngineOutput::Metric {
+            name: "first_partial_latency_ms".to_string(),
+            value: 840.0,
+        })
+        .unwrap();
+
+        assert_eq!(
+            line,
+            r#"{"type":"metric","name":"first_partial_latency_ms","value":840.0}"#
         );
     }
 }
