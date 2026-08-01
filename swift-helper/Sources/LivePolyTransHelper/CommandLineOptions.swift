@@ -32,6 +32,7 @@ public struct CommandLineOptions: Equatable, Sendable {
   public let transcriptionEngine: TranscriptionEngine
   public let whisperModel: String?
   public let whisperCli: String?
+  public let whisperEngine: String?
 
   public init(
     command: HelperCommand,
@@ -43,7 +44,8 @@ public struct CommandLineOptions: Equatable, Sendable {
     transcriptFile: String? = nil,
     transcriptionEngine: TranscriptionEngine = .builtin,
     whisperModel: String? = nil,
-    whisperCli: String? = nil
+    whisperCli: String? = nil,
+    whisperEngine: String? = nil
   ) {
     self.command = command
     self.sourceLanguage = sourceLanguage
@@ -55,6 +57,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     self.transcriptionEngine = transcriptionEngine
     self.whisperModel = whisperModel
     self.whisperCli = whisperCli
+    self.whisperEngine = whisperEngine
   }
 
   public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
@@ -125,7 +128,8 @@ public struct CommandLineOptions: Equatable, Sendable {
     let engine = try parsedTranscriptionEngine(in: arguments)
     let whisperModel = value(after: "--whisper-model", in: arguments)
     let whisperCli = value(after: "--whisper-cli", in: arguments)
-    if engine == .whisper, whisperModel == nil || whisperCli == nil {
+    let whisperEngine = value(after: "--whisper-engine", in: arguments)
+    if engine == .whisper, whisperModel == nil || (whisperCli == nil && whisperEngine == nil) {
       throw CommandLineOptionsError.missingWhisperConfiguration
     }
 
@@ -139,7 +143,8 @@ public struct CommandLineOptions: Equatable, Sendable {
       transcriptFile: value(after: "--transcript-file", in: arguments),
       transcriptionEngine: engine,
       whisperModel: whisperModel,
-      whisperCli: whisperCli
+      whisperCli: whisperCli,
+      whisperEngine: whisperEngine
     )
   }
 }

@@ -16,6 +16,7 @@ struct CommandLineOptionsTests {
     try parsesSpeakerStreamCommandWithSegmentDirectory()
     try parsesStreamCommandWithRecordingFiles()
     try parsesStreamCommandWithWhisperEngine()
+    try parsesStreamCommandWithWhisperEngineSidecar()
     try defaultsToBuiltinTranscriptionEngine()
     try rejectsUnknownTranscriptionEngine()
     try rejectsWhisperEngineWithoutModelAndCliPaths()
@@ -210,6 +211,20 @@ struct CommandLineOptionsTests {
     try expectEqual(options.transcriptionEngine, .whisper)
     try expectEqual(options.whisperModel, "/models/ggml-large-v3-turbo.bin")
     try expectEqual(options.whisperCli, "/opt/homebrew/bin/whisper-cli")
+  }
+
+  static func parsesStreamCommandWithWhisperEngineSidecar() throws {
+    let options = try CommandLineOptions.parse([
+      "helper",
+      "--stream", "mic",
+      "--transcription-engine", "whisper",
+      "--whisper-model", "/models/ggml-large-v3-turbo.bin",
+      "--whisper-engine", "/app/lpt-whisper-engine"
+    ])
+
+    try expectEqual(options.transcriptionEngine, .whisper)
+    try expectEqual(options.whisperModel, "/models/ggml-large-v3-turbo.bin")
+    try expectEqual(options.whisperEngine, "/app/lpt-whisper-engine")
   }
 
   static func defaultsToBuiltinTranscriptionEngine() throws {
