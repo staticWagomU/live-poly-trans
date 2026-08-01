@@ -16,6 +16,8 @@
     "profile:speaker": "scripts/profile-speaker-helper.sh",
     "tauri": "tauri",
     "build:helper": "scripts/build-helper.sh",
+    "build:whisper-backend": "scripts/build-whisper-backend.sh",
+    "build:whisper-engine": "bun scripts/build-whisper-engine.mjs",
     "build:dist": "scripts/build-distribution.sh"
   },
   "dependencies": {

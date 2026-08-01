@@ -4,8 +4,8 @@
   "version": "0.1.0",
   "identifier": "com.staticwagomu.live-poly-trans",
   "build": {
-    "beforeDevCommand": "bun run build:helper && bun run dev",
-    "beforeBuildCommand": "bun scripts/prepare-dmg-background.mjs && bun run build:helper && bun run build",
+    "beforeDevCommand": "bun run build:helper && bun run build:whisper-engine && bun run dev",
+    "beforeBuildCommand": "bun scripts/prepare-dmg-background.mjs && bun run build:helper && bun run build:whisper-backend && bun run build:whisper-engine && bun run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../build"
   },
@@ -41,7 +41,8 @@
       "icons/icon.png"
     ],
     "externalBin": [
-      "binaries/helper"
+      "binaries/helper",
+      "binaries/lpt-whisper-engine"
     ],
     "resources": [
       "binaries/LivePolyTransHelper.app"

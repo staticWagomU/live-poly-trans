@@ -4,6 +4,7 @@ build/
 
 src-tauri/target/
 src-tauri/binaries/helper-*
+src-tauri/binaries/lpt-whisper-engine-*
 src-tauri/binaries/liblpt_whisper_backend.*
 src-tauri/binaries/LivePolyTransHelper.app/
 src-tauri/icons/dmg-background.png
