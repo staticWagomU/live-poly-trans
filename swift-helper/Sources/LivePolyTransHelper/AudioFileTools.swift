@@ -145,6 +145,21 @@ public struct WaveformData: Codable, Equatable {
 public let defaultWaveformBuckets = 1_200
 private let audioFileChunkFrames: AVAudioFrameCount = 65_536
 
+/// Reads the next chunk and reports how many frames it holds, 0 at end of file.
+///
+/// AVAudioFile.read(into:) does not return an empty buffer at the end of an AAC
+/// file, it throws _GenericObjCError.nilError, so reads stay inside the frames
+/// the file still has ahead of the current position instead of probing for EOF.
+public func readNextAudioChunk(from file: AVAudioFile, into buffer: AVAudioPCMBuffer) throws -> Int {
+  let remaining = file.length - file.framePosition
+  guard remaining > 0 else {
+    return 0
+  }
+
+  try file.read(into: buffer, frameCount: AVAudioFrameCount(min(Int64(buffer.frameCapacity), remaining)))
+  return Int(buffer.frameLength)
+}
+
 public func waveformBucketIndex(frame: Int64, framesPerBucket: Int64, bucketCount: Int) -> Int {
   guard framesPerBucket > 0, bucketCount > 0 else {
     return 0
@@ -179,8 +194,7 @@ public func computeWaveform(path: String, buckets: Int = defaultWaveformBuckets)
   }
 
   while true {
-    try file.read(into: chunk)
-    let frames = Int(chunk.frameLength)
+    let frames = try readNextAudioChunk(from: file, into: chunk)
     guard frames > 0 else {
       break
     }
@@ -348,8 +362,7 @@ private final class ConvertedAudioReader {
       throw AudioFileToolsError.missingTargetFormat
     }
 
-    try file.read(into: chunk)
-    guard chunk.frameLength > 0 else {
+    guard try readNextAudioChunk(from: file, into: chunk) > 0 else {
       exhausted = true
       return nil
     }
