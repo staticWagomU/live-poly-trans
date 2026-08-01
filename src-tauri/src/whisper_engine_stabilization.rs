@@ -1,6 +1,7 @@
 pub fn stable_common_prefix(left: &str, right: &str) -> Option<String> {
     let mut end = 0;
-    for ((left_index, left_char), (_, right_char)) in left.char_indices().zip(right.char_indices()) {
+    for ((left_index, left_char), (_, right_char)) in left.char_indices().zip(right.char_indices())
+    {
         if left_char != right_char {
             break;
         }
@@ -18,7 +19,11 @@ pub fn stable_common_prefix(left: &str, right: &str) -> Option<String> {
 
     let boundary = prefix
         .char_indices()
-        .filter_map(|(index, character)| character.is_whitespace().then_some(index + character.len_utf8()))
+        .filter_map(|(index, character)| {
+            character
+                .is_whitespace()
+                .then_some(index + character.len_utf8())
+        })
         .last()?;
     (boundary > 0).then(|| prefix[..boundary].to_string())
 }
@@ -76,7 +81,10 @@ mod tests {
         let mut stabilizer = PartialStabilizer::default();
 
         assert_eq!(stabilizer.observe("hello wor"), None);
-        assert_eq!(stabilizer.observe("hello world"), Some("hello ".to_string()));
+        assert_eq!(
+            stabilizer.observe("hello world"),
+            Some("hello ".to_string())
+        );
         assert_eq!(stabilizer.observe("hello world!"), None);
     }
 

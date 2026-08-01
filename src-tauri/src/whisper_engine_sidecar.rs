@@ -1,5 +1,5 @@
-use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperBackendConfig};
 use crate::whisper_engine_audio::{decode_pcm16_base64, pcm16_to_f32, PcmRingBuffer};
+use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperBackendConfig};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 use crate::whisper_engine_scheduler::RollingTranscriptionScheduler;
 use crate::whisper_engine_stabilization::{collapse_exact_repeated_text, PartialStabilizer};
@@ -98,10 +98,9 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 let Some(buffer) = self.buffers.get(&stream) else {
                     return SidecarAction::Continue(None);
                 };
-                let scheduler = self
-                    .schedulers
-                    .entry(stream.clone())
-                    .or_insert_with(|| RollingTranscriptionScheduler::new(self.rolling_step_samples));
+                let scheduler = self.schedulers.entry(stream.clone()).or_insert_with(|| {
+                    RollingTranscriptionScheduler::new(self.rolling_step_samples)
+                });
                 if !scheduler.observe_total_samples(buffer.samples().len()) {
                     return SidecarAction::Continue(None);
                 }
@@ -118,7 +117,12 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
         }
     }
 
-    fn transcribe_buffer(&mut self, stream: &str, is_final: bool, segment_suffix: &str) -> SidecarAction {
+    fn transcribe_buffer(
+        &mut self,
+        stream: &str,
+        is_final: bool,
+        segment_suffix: &str,
+    ) -> SidecarAction {
         let Some(buffer) = self.buffers.get(stream) else {
             return SidecarAction::Continue(None);
         };
@@ -127,10 +131,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
             Ok(Some(mut transcript)) => {
                 transcript.text = collapse_exact_repeated_text(&transcript.text);
                 if !is_final {
-                    let stabilizer = self
-                        .stabilizers
-                        .entry(stream.to_string())
-                        .or_default();
+                    let stabilizer = self.stabilizers.entry(stream.to_string()).or_default();
                     let Some(stable_text) = stabilizer.observe(&transcript.text) else {
                         return SidecarAction::Continue(None);
                     };
@@ -138,14 +139,14 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 }
 
                 SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
-                segment_id: format!("{stream}-{segment_suffix}"),
-                duration_ms: duration_ms(buffer.samples().len(), self.sample_rate),
-                start_ms: 0,
-                stream: stream.to_string(),
-                text: transcript.text,
-                is_final,
-                language: transcript.language,
-                confidence: transcript.confidence,
+                    segment_id: format!("{stream}-{segment_suffix}"),
+                    duration_ms: duration_ms(buffer.samples().len(), self.sample_rate),
+                    start_ms: 0,
+                    stream: stream.to_string(),
+                    text: transcript.text,
+                    is_final,
+                    language: transcript.language,
+                    confidence: transcript.confidence,
                 }))
             }
             Ok(None) => SidecarAction::Continue(None),
@@ -315,7 +316,10 @@ mod tests {
             }))
         );
         assert_eq!(sidecar.backend().loaded.len(), 1);
-        assert_eq!(sidecar.backend().loaded[0].model_path, "/models/ggml-base.bin");
+        assert_eq!(
+            sidecar.backend().loaded[0].model_path,
+            "/models/ggml-base.bin"
+        );
     }
 
     struct FailingBackend;

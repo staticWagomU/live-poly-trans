@@ -21,7 +21,10 @@ pub struct WhisperTranscription {
 
 pub trait WhisperBackend {
     fn load_model(&mut self, config: WhisperBackendConfig) -> Result<(), WhisperBackendError>;
-    fn transcribe(&mut self, samples: &[f32]) -> Result<Option<WhisperTranscription>, WhisperBackendError>;
+    fn transcribe(
+        &mut self,
+        samples: &[f32],
+    ) -> Result<Option<WhisperTranscription>, WhisperBackendError>;
 }
 
 #[derive(Debug, Default)]

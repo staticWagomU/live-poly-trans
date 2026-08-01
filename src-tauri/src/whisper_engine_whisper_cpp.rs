@@ -3,8 +3,8 @@ use crate::whisper_engine_backend::{
 };
 use std::{
     ffi::{c_char, c_void, CStr, CString},
-    ptr::NonNull,
     path::{Path, PathBuf},
+    ptr::NonNull,
 };
 
 pub const WHISPER_CPP_SHIM_SYMBOLS: &[&str] = &[
@@ -36,7 +36,10 @@ pub fn whisper_cpp_library_candidates(
 }
 
 pub fn first_existing_library_candidate(candidates: &[PathBuf]) -> Option<PathBuf> {
-    candidates.iter().find(|candidate| candidate.exists()).cloned()
+    candidates
+        .iter()
+        .find(|candidate| candidate.exists())
+        .cloned()
 }
 
 pub struct WhisperCppBackend {
@@ -58,11 +61,13 @@ type LastErrorFn = unsafe extern "C" fn() -> *const c_char;
 
 impl WhisperCppBackend {
     pub fn from_library(path: &Path) -> Result<Self, WhisperBackendError> {
-        let library = unsafe { libloading::Library::new(path) }.map_err(|error| {
-            WhisperBackendError {
-                message: format!("failed to load whisper cpp shim {}: {error}", path.display()),
-            }
-        })?;
+        let library =
+            unsafe { libloading::Library::new(path) }.map_err(|error| WhisperBackendError {
+                message: format!(
+                    "failed to load whisper cpp shim {}: {error}",
+                    path.display()
+                ),
+            })?;
 
         let create = unsafe { load_symbol::<CreateFn>(&library, "lpt_whisper_backend_create")? };
         let free = unsafe { load_symbol::<FreeFn>(&library, "lpt_whisper_backend_free")? };
@@ -107,7 +112,10 @@ impl WhisperBackend for WhisperCppBackend {
         Ok(())
     }
 
-    fn transcribe(&mut self, samples: &[f32]) -> Result<Option<WhisperTranscription>, WhisperBackendError> {
+    fn transcribe(
+        &mut self,
+        samples: &[f32],
+    ) -> Result<Option<WhisperTranscription>, WhisperBackendError> {
         if samples.is_empty() {
             return Ok(None);
         }
@@ -211,9 +219,18 @@ mod tests {
 
     #[test]
     fn picks_platform_specific_whisper_cpp_shim_library_names() {
-        assert_eq!(whisper_cpp_library_file_name("macos"), "liblpt_whisper_backend.dylib");
-        assert_eq!(whisper_cpp_library_file_name("windows"), "lpt_whisper_backend.dll");
-        assert_eq!(whisper_cpp_library_file_name("linux"), "liblpt_whisper_backend.so");
+        assert_eq!(
+            whisper_cpp_library_file_name("macos"),
+            "liblpt_whisper_backend.dylib"
+        );
+        assert_eq!(
+            whisper_cpp_library_file_name("windows"),
+            "lpt_whisper_backend.dll"
+        );
+        assert_eq!(
+            whisper_cpp_library_file_name("linux"),
+            "liblpt_whisper_backend.so"
+        );
     }
 
     #[test]
@@ -243,14 +260,16 @@ mod tests {
 
     #[test]
     fn loading_a_missing_shim_reports_the_path() {
-        let error =
-            match WhisperCppBackend::from_library(Path::new("/missing/liblpt_whisper_backend.dylib"))
-            {
-                Ok(_) => panic!("missing shim unexpectedly loaded"),
-                Err(error) => error,
-            };
+        let error = match WhisperCppBackend::from_library(Path::new(
+            "/missing/liblpt_whisper_backend.dylib",
+        )) {
+            Ok(_) => panic!("missing shim unexpectedly loaded"),
+            Err(error) => error,
+        };
 
-        assert!(error.message.contains("/missing/liblpt_whisper_backend.dylib"));
+        assert!(error
+            .message
+            .contains("/missing/liblpt_whisper_backend.dylib"));
     }
 
     #[test]

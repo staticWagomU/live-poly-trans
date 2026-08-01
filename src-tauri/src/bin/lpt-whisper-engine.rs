@@ -61,7 +61,8 @@ fn main() {
     }
 }
 
-fn whisper_cpp_backend() -> Result<WhisperCppBackend, live_poly_trans_lib::whisper_engine_backend::WhisperBackendError> {
+fn whisper_cpp_backend(
+) -> Result<WhisperCppBackend, live_poly_trans_lib::whisper_engine_backend::WhisperBackendError> {
     let executable_dir = std::env::current_exe()
         .ok()
         .and_then(|path| path.parent().map(Path::to_path_buf))
@@ -72,9 +73,11 @@ fn whisper_cpp_backend() -> Result<WhisperCppBackend, live_poly_trans_lib::whisp
         std::env::consts::OS,
     );
     let Some(path) = first_existing_library_candidate(&candidates) else {
-        return Err(live_poly_trans_lib::whisper_engine_backend::WhisperBackendError {
-            message: format!("whisper cpp shim was not found in {:?}", candidates),
-        });
+        return Err(
+            live_poly_trans_lib::whisper_engine_backend::WhisperBackendError {
+                message: format!("whisper cpp shim was not found in {:?}", candidates),
+            },
+        );
     };
 
     WhisperCppBackend::from_library(&path)

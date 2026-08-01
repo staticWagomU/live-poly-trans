@@ -13,13 +13,13 @@ use std::{
 };
 use tauri::{AppHandle, Emitter, Manager, State};
 
-pub mod whisper_engine_protocol;
 pub mod whisper_engine_audio;
 pub mod whisper_engine_backend;
+pub mod whisper_engine_protocol;
 pub mod whisper_engine_scheduler;
+pub mod whisper_engine_sidecar;
 pub mod whisper_engine_stabilization;
 pub mod whisper_engine_whisper_cpp;
-pub mod whisper_engine_sidecar;
 
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
 const AI_REQUEST_TIMEOUT: Duration = Duration::from_secs(120);
@@ -84,6 +84,82 @@ pub fn resolve_whisper_cli() -> Result<PathBuf, String> {
         })
 }
 
+pub fn whisper_engine_binary_name_for(
+    target_arch: &str,
+    target_os: &str,
+    target_env: &str,
+) -> String {
+    match (target_arch, target_os, target_env) {
+        ("aarch64", "macos", _) => "lpt-whisper-engine-aarch64-apple-darwin".to_string(),
+        ("x86_64", "macos", _) => "lpt-whisper-engine-x86_64-apple-darwin".to_string(),
+        ("x86_64", "windows", "msvc") => {
+            "lpt-whisper-engine-x86_64-pc-windows-msvc.exe".to_string()
+        }
+        ("x86_64", "linux", _) => "lpt-whisper-engine-x86_64-unknown-linux-gnu".to_string(),
+        _ => {
+            let exe = if target_os == "windows" { ".exe" } else { "" };
+            format!("lpt-whisper-engine-{target_arch}-{target_os}{exe}")
+        }
+    }
+}
+
+pub fn whisper_engine_binary_name() -> String {
+    let target_env = if cfg!(target_env = "msvc") {
+        "msvc"
+    } else if cfg!(target_env = "gnu") {
+        "gnu"
+    } else {
+        ""
+    };
+    whisper_engine_binary_name_for(std::env::consts::ARCH, std::env::consts::OS, target_env)
+}
+
+pub fn whisper_engine_executable_name_for(target_os: &str) -> &'static str {
+    if target_os == "windows" {
+        "lpt-whisper-engine.exe"
+    } else {
+        "lpt-whisper-engine"
+    }
+}
+
+pub fn whisper_engine_executable_name() -> &'static str {
+    whisper_engine_executable_name_for(std::env::consts::OS)
+}
+
+pub fn whisper_engine_sidecar_candidates(manifest_dir: &Path, current_exe: &Path) -> Vec<PathBuf> {
+    let binary = whisper_engine_binary_name();
+    let executable = whisper_engine_executable_name();
+    let exe_dir = current_exe.parent().unwrap_or_else(|| Path::new("."));
+
+    vec![
+        manifest_dir.join("binaries").join(&binary),
+        manifest_dir.join("binaries").join(executable),
+        manifest_dir.join("target/debug").join(executable),
+        manifest_dir.join("target/release").join(executable),
+        exe_dir.join(&binary),
+        exe_dir.join(executable),
+        exe_dir.join("../Resources").join(&binary),
+        exe_dir.join("../Resources").join(executable),
+        exe_dir.join("../Resources/binaries").join(&binary),
+        exe_dir.join("../Resources/binaries").join(executable),
+    ]
+}
+
+pub fn resolve_whisper_engine_sidecar() -> Result<PathBuf, String> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
+
+    whisper_engine_sidecar_candidates(&manifest_dir, &current_exe)
+        .into_iter()
+        .find(|path| path.exists())
+        .ok_or_else(|| {
+            format!(
+                "whisper engine sidecar was not found: {}",
+                whisper_engine_binary_name()
+            )
+        })
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SpeechModelInfo {
@@ -97,6 +173,13 @@ pub struct SpeechModelInfo {
 pub struct SpeechModelsPayload {
     pub models: Vec<SpeechModelInfo>,
     pub cli_available: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedWhisperConfig {
+    pub model_path: String,
+    pub cli_path: String,
+    pub engine_path: String,
 }
 
 pub fn superwhisper_models_dir(home: &Path) -> PathBuf {
@@ -139,7 +222,7 @@ pub fn scan_speech_models(dir: &Path) -> Vec<SpeechModelInfo> {
 pub fn resolve_whisper_config(
     engine: Option<&str>,
     whisper_model: Option<&str>,
-) -> Result<Option<(String, String)>, String> {
+) -> Result<Option<ResolvedWhisperConfig>, String> {
     if engine != Some("whisper") {
         return Ok(None);
     }
@@ -154,7 +237,12 @@ pub fn resolve_whisper_config(
     }
 
     let cli = resolve_whisper_cli()?;
-    Ok(Some((model.to_string(), cli.display().to_string())))
+    let engine = resolve_whisper_engine_sidecar()?;
+    Ok(Some(ResolvedWhisperConfig {
+        model_path: model.to_string(),
+        cli_path: cli.display().to_string(),
+        engine_path: engine.display().to_string(),
+    }))
 }
 
 #[derive(Default)]
@@ -432,6 +520,17 @@ pub fn stop_each_stream(
 pub struct WhisperEngineConfig<'a> {
     pub model_path: &'a str,
     pub cli_path: &'a str,
+    pub engine_path: &'a str,
+}
+
+impl<'a> From<&'a ResolvedWhisperConfig> for WhisperEngineConfig<'a> {
+    fn from(config: &'a ResolvedWhisperConfig) -> Self {
+        Self {
+            model_path: &config.model_path,
+            cli_path: &config.cli_path,
+            engine_path: &config.engine_path,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -478,6 +577,8 @@ pub fn build_stream_helper_args(
         args.push(whisper.model_path.to_string());
         args.push("--whisper-cli".to_string());
         args.push(whisper.cli_path.to_string());
+        args.push("--whisper-engine".to_string());
+        args.push(whisper.engine_path.to_string());
     }
 
     args
@@ -558,8 +659,7 @@ impl AiServer {
             .stdout
             .take()
             .ok_or_else(|| "ai server stdout unavailable".to_string())?;
-        let pending: Arc<Mutex<HashMap<String, mpsc::Sender<AiServerResponse>>>> =
-            Arc::default();
+        let pending: Arc<Mutex<HashMap<String, mpsc::Sender<AiServerResponse>>>> = Arc::default();
 
         let reader_pending = pending.clone();
         std::thread::spawn(move || {
@@ -634,7 +734,9 @@ impl AiServer {
                     Ok(response.response.unwrap_or_default())
                 } else {
                     Err(AiRequestError::Protocol(
-                        response.error.unwrap_or_else(|| "unknown AI error".to_string()),
+                        response
+                            .error
+                            .unwrap_or_else(|| "unknown AI error".to_string()),
                     ))
                 }
             }
@@ -642,7 +744,9 @@ impl AiServer {
                 if let Ok(mut guard) = self.pending.lock() {
                     guard.remove(&id);
                 }
-                Err(AiRequestError::Transport("AI request timed out".to_string()))
+                Err(AiRequestError::Transport(
+                    "AI request timed out".to_string(),
+                ))
             }
         }
     }
@@ -988,8 +1092,9 @@ pub fn install_uv_with(
         "/usr/bin/shasum",
         &["-a".to_string(), "256".to_string(), archive.clone()],
     )?;
-    let digest = sha256_from_shasum_output(&shasum)
-        .ok_or_else(|| "ダウンロードしたファイルのチェックサムを読み取れませんでした。".to_string())?;
+    let digest = sha256_from_shasum_output(&shasum).ok_or_else(|| {
+        "ダウンロードしたファイルのチェックサムを読み取れませんでした。".to_string()
+    })?;
     if digest != download.sha256 {
         return Err(format!(
             "ダウンロードしたファイルのチェックサムが一致しません(期待 {} / 実際 {})。",
@@ -1067,7 +1172,10 @@ pub fn whisperx_stage_for_line(line: &str) -> Option<&'static str> {
 /// Times become integer milliseconds; the speaker tag is passed through
 /// (SPEAKER_00, ...) and mapped to labels/colors in the UI.
 pub fn whisperx_jsonl_lines(output: &Value) -> Vec<String> {
-    let language = output.get("language").and_then(Value::as_str).unwrap_or("und");
+    let language = output
+        .get("language")
+        .and_then(Value::as_str)
+        .unwrap_or("und");
     let Some(segments) = output.get("segments").and_then(Value::as_array) else {
         return Vec::new();
     };
@@ -1149,9 +1257,7 @@ fn wait_for_control_ready(
         let pending: Vec<String> = {
             let guard = children.lock().map_err(|error| error.to_string())?;
             if guard.is_empty() {
-                return Err(
-                    "no capture is running; recording needs live transcription".to_string()
-                );
+                return Err("no capture is running; recording needs live transcription".to_string());
             }
 
             guard
@@ -1354,10 +1460,7 @@ pub mod commands {
                 transcript_file.as_deref(),
                 whisper_config
                     .as_ref()
-                    .map(|(model_path, cli_path)| WhisperEngineConfig {
-                        model_path,
-                        cli_path,
-                    })
+                    .map(WhisperEngineConfig::from)
                     .as_ref(),
             );
 
@@ -1384,25 +1487,27 @@ pub mod commands {
 
             let control_ready = Arc::new(AtomicBool::new(false));
             if let Some(stdout) = child.stdout.take() {
-                read_json_lines(app.clone(), stdout, session_id.clone(), control_ready.clone());
+                read_json_lines(
+                    app.clone(),
+                    stdout,
+                    session_id.clone(),
+                    control_ready.clone(),
+                );
             }
 
             if let Some(stderr) = child.stderr.take() {
                 read_stderr(app.clone(), stderr);
             }
 
-            children
-                .lock()
-                .map_err(|error| error.to_string())?
-                .insert(
-                    stream.clone(),
-                    StreamChild {
-                        session_id: session_id.clone(),
-                        child,
-                        stop_grace,
-                        control_ready,
-                    },
-                );
+            children.lock().map_err(|error| error.to_string())?.insert(
+                stream.clone(),
+                StreamChild {
+                    session_id: session_id.clone(),
+                    child,
+                    stop_grace,
+                    control_ready,
+                },
+            );
 
             watch_helper_exit(app, children.clone(), stream, session_id);
             Ok(())
@@ -1752,9 +1857,8 @@ pub mod commands {
             let _ = fs::remove_dir_all(&work);
             result?;
 
-            resolve_whisperx_runner(Some(&managed)).ok_or_else(|| {
-                "uv を展開しましたが uvx が見つかりませんでした。".to_string()
-            })
+            resolve_whisperx_runner(Some(&managed))
+                .ok_or_else(|| "uv を展開しましたが uvx が見つかりませんでした。".to_string())
         })
         .await
         .map_err(|error| error.to_string())?
@@ -1985,7 +2089,10 @@ pub mod commands {
     /// Copies an external audio file (phone memo, voice recorder) into a new
     /// recording so it can be played, trimmed, and later re-processed.
     #[tauri::command]
-    pub async fn import_audio_file(app: AppHandle, path: String) -> Result<CreatedRecording, String> {
+    pub async fn import_audio_file(
+        app: AppHandle,
+        path: String,
+    ) -> Result<CreatedRecording, String> {
         tauri::async_runtime::spawn_blocking(move || {
             let source = PathBuf::from(&path);
             let extension = source
@@ -2054,7 +2161,10 @@ pub mod commands {
                 return Err(format!("recording file not found: {file_name}"));
             }
 
-            let stem = file_name.rsplit_once('.').map(|(stem, _)| stem).unwrap_or(&file_name);
+            let stem = file_name
+                .rsplit_once('.')
+                .map(|(stem, _)| stem)
+                .unwrap_or(&file_name);
             let output = unique_destination(&dir, &format!("{stem}-trimmed"), "m4a");
 
             let helper_path = resolve_helper_path()?;
@@ -2157,7 +2267,10 @@ pub mod commands {
     }
 
     #[tauri::command]
-    pub async fn read_recording_transcript(app: AppHandle, id: String) -> Result<Vec<Value>, String> {
+    pub async fn read_recording_transcript(
+        app: AppHandle,
+        id: String,
+    ) -> Result<Vec<Value>, String> {
         // An 8-hour session's jsonl runs to tens of MB; parsing it on the
         // main thread freezes the whole window.
         tauri::async_runtime::spawn_blocking(move || read_recording_transcript_blocking(&app, &id))
@@ -2280,9 +2393,7 @@ pub mod commands {
                             .map_err(|error| error.to_string())?;
 
                         if !output.status.success() {
-                            return Err(
-                                String::from_utf8_lossy(&output.stderr).trim().to_owned()
-                            );
+                            return Err(String::from_utf8_lossy(&output.stderr).trim().to_owned());
                         }
                     }
                     mixed
@@ -2419,6 +2530,56 @@ mod tests {
     }
 
     #[test]
+    fn whisper_engine_binary_names_cover_current_distribution_targets() {
+        assert_eq!(
+            whisper_engine_binary_name_for("aarch64", "macos", ""),
+            "lpt-whisper-engine-aarch64-apple-darwin"
+        );
+        assert_eq!(
+            whisper_engine_binary_name_for("x86_64", "macos", ""),
+            "lpt-whisper-engine-x86_64-apple-darwin"
+        );
+        assert_eq!(
+            whisper_engine_binary_name_for("x86_64", "windows", "msvc"),
+            "lpt-whisper-engine-x86_64-pc-windows-msvc.exe"
+        );
+        assert_eq!(
+            whisper_engine_executable_name_for("windows"),
+            "lpt-whisper-engine.exe"
+        );
+    }
+
+    #[test]
+    fn whisper_engine_candidates_include_development_binary_path() {
+        let candidates = whisper_engine_sidecar_candidates(
+            Path::new("/repo/src-tauri"),
+            Path::new("/repo/src-tauri/target/debug/live-poly-trans"),
+        );
+
+        assert!(candidates.contains(&PathBuf::from(
+            "/repo/src-tauri/target/debug/lpt-whisper-engine"
+        )));
+        assert!(candidates.contains(&PathBuf::from(
+            "/repo/src-tauri/binaries/lpt-whisper-engine"
+        )));
+    }
+
+    #[test]
+    fn whisper_engine_candidates_include_bundled_sidecar_path() {
+        let candidates = whisper_engine_sidecar_candidates(
+            Path::new("/repo/src-tauri"),
+            Path::new("/App/LivePolyTrans.app/Contents/MacOS/live-poly-trans"),
+        );
+
+        assert!(candidates.contains(&PathBuf::from(
+            "/App/LivePolyTrans.app/Contents/MacOS/../Resources/lpt-whisper-engine"
+        )));
+        assert!(candidates.contains(&PathBuf::from(
+            "/App/LivePolyTrans.app/Contents/MacOS/../Resources/binaries/lpt-whisper-engine"
+        )));
+    }
+
+    #[test]
     fn whisperx_runner_prefers_uvx_then_pipx_then_direct() {
         let uvx = whisperx_runner_from(|name| {
             (name == "uvx").then(|| "/opt/homebrew/bin/uvx".to_string())
@@ -2492,7 +2653,9 @@ mod tests {
             Path::new("/work"),
             Path::new("/dest"),
             |program, args| {
-                calls.borrow_mut().push(format!("{program} {}", args.join(" ")));
+                calls
+                    .borrow_mut()
+                    .push(format!("{program} {}", args.join(" ")));
                 Ok(if program.ends_with("shasum") {
                     format!("{}  /work/uv.tar.gz", download.sha256)
                 } else {
@@ -2506,7 +2669,11 @@ mod tests {
         let calls = calls.into_inner();
         assert!(calls[0].starts_with("/usr/bin/curl"), "{}", calls[0]);
         assert!(calls[0].contains(&download.url));
-        assert!(calls[1].starts_with("/usr/bin/shasum -a 256"), "{}", calls[1]);
+        assert!(
+            calls[1].starts_with("/usr/bin/shasum -a 256"),
+            "{}",
+            calls[1]
+        );
         assert!(calls[2].starts_with("/usr/bin/tar -xzf"), "{}", calls[2]);
         assert_eq!(
             stages.into_inner(),
@@ -2802,10 +2969,8 @@ mod tests {
 
     #[test]
     fn close_open_recordings_finalizes_only_recordings_without_end() {
-        let root = std::env::temp_dir().join(format!(
-            "lpt-close-open-recordings-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("lpt-close-open-recordings-{}", std::process::id()));
         let open_dir = root.join("rec-open");
         let closed_dir = root.join("rec-closed");
         fs::create_dir_all(&open_dir).unwrap();
@@ -2852,7 +3017,8 @@ mod tests {
 
     #[test]
     fn delete_recording_dir_removes_the_directory_with_contents() {
-        let root = std::env::temp_dir().join(format!("lpt-delete-recording-{}", std::process::id()));
+        let root =
+            std::env::temp_dir().join(format!("lpt-delete-recording-{}", std::process::id()));
         let dir = root.join("rec-1");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("mic.m4a"), b"audio").unwrap();
@@ -2913,10 +3079,17 @@ mod tests {
             Some(&WhisperEngineConfig {
                 model_path: "/models/ggml-large-v3-turbo.bin",
                 cli_path: "/opt/homebrew/bin/whisper-cli",
+                engine_path: "/app/lpt-whisper-engine",
             }),
         );
 
-        let tail: Vec<&str> = args.iter().rev().take(6).rev().map(String::as_str).collect();
+        let tail: Vec<&str> = args
+            .iter()
+            .rev()
+            .take(8)
+            .rev()
+            .map(String::as_str)
+            .collect();
         assert_eq!(
             tail,
             vec![
@@ -2926,6 +3099,8 @@ mod tests {
                 "/models/ggml-large-v3-turbo.bin",
                 "--whisper-cli",
                 "/opt/homebrew/bin/whisper-cli",
+                "--whisper-engine",
+                "/app/lpt-whisper-engine",
             ]
         );
     }

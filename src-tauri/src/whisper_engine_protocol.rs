@@ -17,7 +17,9 @@ pub enum WhisperEngineInput {
         pcm16_base64: String,
     },
     #[serde(rename_all = "camelCase")]
-    Flush { stream: String },
+    Flush {
+        stream: String,
+    },
     Shutdown,
 }
 
