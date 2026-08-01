@@ -16,6 +16,8 @@ pub enum WhisperEngineInput {
 #[serde(tag = "type", rename_all = "camelCase")]
 pub enum WhisperEngineOutput {
     #[serde(rename_all = "camelCase")]
+    Status { state: String },
+    #[serde(rename_all = "camelCase")]
     Transcript {
         stream: String,
         segment_id: String,
@@ -84,5 +86,15 @@ mod tests {
         let input = parse_engine_input_line(r#"{"type":"shutdown"}"#).unwrap();
 
         assert_eq!(input, WhisperEngineInput::Shutdown);
+    }
+
+    #[test]
+    fn serializes_status_output_as_json_line() {
+        let line = engine_output_line(&WhisperEngineOutput::Status {
+            state: "ready".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(line, r#"{"type":"status","state":"ready"}"#);
     }
 }
