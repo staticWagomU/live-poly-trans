@@ -35,6 +35,10 @@ pub fn whisper_cpp_library_candidates(
     ]
 }
 
+pub fn first_existing_library_candidate(candidates: &[PathBuf]) -> Option<PathBuf> {
+    candidates.iter().find(|candidate| candidate.exists()).cloned()
+}
+
 pub struct WhisperCppBackend {
     _library: libloading::Library,
     create: CreateFn,
@@ -224,6 +228,16 @@ mod tests {
                 PathBuf::from("/app/Contents/MacOS/liblpt_whisper_backend.dylib"),
                 PathBuf::from("/repo/src-tauri/binaries/liblpt_whisper_backend.dylib"),
             ]
+        );
+    }
+
+    #[test]
+    fn first_existing_library_candidate_skips_missing_paths() {
+        let existing = std::env::current_dir().unwrap().join("Cargo.toml");
+
+        assert_eq!(
+            first_existing_library_candidate(&[PathBuf::from("/missing"), existing.clone()]),
+            Some(existing)
         );
     }
 
