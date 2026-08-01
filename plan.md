@@ -211,9 +211,9 @@ macOS限定実装を廃止対象にする。
       - [x] 9-4b. committed prefix / duplicate suppression: 同じpartialを再emitせず、
             完全重複したtranscript textを畳む
       - [ ] 9-4c. backlog時はrolling partialを落としてflush/finalを優先する
-- [ ] 9-5. 【macOS helper】Whisper選択時は `whisper-cli` ではなく
+- [x] 9-5. 【macOS helper】Whisper選択時は `whisper-cli` ではなく
       `lpt-whisper-engine` にPCMを流す。Swift helperは音声取得/録音/権限管理へ責務を寄せる
-- [ ] 9-6. 【Tauri】sidecar bundle/build:
+- [x] 9-6. 【Tauri】sidecar bundle/build:
       macOS/Windows targetごとの `lpt-whisper-engine` binary を外部バイナリとして扱う。
       `--whisper-cli` と `whisper-cli` 探索は安定後に削除する
 - [ ] 9-7. 【Windows準備】capture helper interface を固定:
