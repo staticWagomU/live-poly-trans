@@ -47,4 +47,17 @@ mod tests {
             SidecarAction::Shutdown
         );
     }
+
+    #[test]
+    fn audio_input_continues_without_output_until_backend_is_connected() {
+        assert_eq!(
+            handle_engine_input(WhisperEngineInput::Audio {
+                stream: "mic".to_string(),
+                seq: 1,
+                timestamp_ms: 0,
+                pcm16_base64: "AAE=".to_string()
+            }),
+            SidecarAction::Continue(None)
+        );
+    }
 }
