@@ -196,13 +196,13 @@ macOS限定実装を廃止対象にする。
       stdin JSONL → protocol parse → stdout JSONL。まず `config` で `status:ready`、
       `shutdown` で終了する最小実装を作り、後続でC++ Whisper backendを差し替えられる
       境界にする
-- [ ] 9-3. 【C++】whisper.cpp backend:
+- [x] 9-3. 【C++】whisper.cpp backend:
       モデルをプロセス起動後に1回だけロードし、PCM ring buffer を rolling window で推論。
       `stepMs` / `windowMs` / `finalizeSilenceMs` は計測ログで調整する
       - [x] 9-3a. `pcm16Base64` を little-endian PCM16 samples へdecodeし、stream別ring
             bufferに保持する。壊れたpayloadは非fatal `error` outputにする
       - [x] 9-3b. whisper.cpp C++ backend を接続し、モデルロードを1回にする
-      - [ ] 9-3c. rolling window 推論スケジューラを実装する
+      - [x] 9-3c. rolling window 推論スケジューラを実装する
 - [ ] 9-4. 【Engine】partial安定化:
       local agreement、committed prefix、重複抑制、backlog時のpartial drop/final優先を実装。
       長時間発話で28秒待ちに戻らないことを fixture で検証する
