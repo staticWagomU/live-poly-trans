@@ -22,6 +22,13 @@ pub fn decode_pcm16_base64(encoded: &str) -> Result<Vec<i16>, WhisperEngineAudio
         .collect())
 }
 
+pub fn pcm16_to_f32(samples: &[i16]) -> Vec<f32> {
+    samples
+        .iter()
+        .map(|sample| f32::from(*sample) / 32768.0)
+        .collect()
+}
+
 pub struct PcmRingBuffer {
     capacity_samples: usize,
     samples: Vec<i16>,
@@ -77,5 +84,12 @@ mod tests {
         buffer.push(&[4, 5, 6]);
 
         assert_eq!(buffer.samples(), &[3, 4, 5, 6]);
+    }
+
+    #[test]
+    fn converts_pcm16_samples_to_whisper_float_samples() {
+        let samples = pcm16_to_f32(&[-32768, 0, 32767]);
+
+        assert_eq!(samples, vec![-1.0, 0.0, 32767.0 / 32768.0]);
     }
 }
