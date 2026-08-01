@@ -199,6 +199,16 @@ mod tests {
             self.loaded.push(config);
             Ok(())
         }
+
+        fn transcribe(
+            &mut self,
+            _samples: &[f32],
+        ) -> Result<
+            Option<crate::whisper_engine_backend::WhisperTranscription>,
+            crate::whisper_engine_backend::WhisperBackendError,
+        > {
+            Ok(None)
+        }
     }
 
     #[test]
@@ -232,6 +242,16 @@ mod tests {
             Err(crate::whisper_engine_backend::WhisperBackendError {
                 message: "failed to load model".to_string(),
             })
+        }
+
+        fn transcribe(
+            &mut self,
+            _samples: &[f32],
+        ) -> Result<
+            Option<crate::whisper_engine_backend::WhisperTranscription>,
+            crate::whisper_engine_backend::WhisperBackendError,
+        > {
+            Ok(None)
         }
     }
 
