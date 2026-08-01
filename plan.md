@@ -203,14 +203,14 @@ macOS限定実装を廃止対象にする。
             bufferに保持する。壊れたpayloadは非fatal `error` outputにする
       - [x] 9-3b. whisper.cpp C++ backend を接続し、モデルロードを1回にする
       - [x] 9-3c. rolling window 推論スケジューラを実装する
-- [ ] 9-4. 【Engine】partial安定化:
+- [x] 9-4. 【Engine】partial安定化:
       local agreement、committed prefix、重複抑制、backlog時のpartial drop/final優先を実装。
       長時間発話で28秒待ちに戻らないことを fixture で検証する
       - [x] 9-4a. local agreement: 連続するrolling結果の単語境界prefixだけを
             `isFinal=false` として出す
       - [x] 9-4b. committed prefix / duplicate suppression: 同じpartialを再emitせず、
             完全重複したtranscript textを畳む
-      - [ ] 9-4c. backlog時はrolling partialを落としてflush/finalを優先する
+      - [x] 9-4c. backlog時はrolling partialを落としてflush/finalを優先する
 - [x] 9-5. 【macOS helper】Whisper選択時は `whisper-cli` ではなく
       `lpt-whisper-engine` にPCMを流す。Swift helperは音声取得/録音/権限管理へ責務を寄せる
 - [x] 9-6. 【Tauri】sidecar bundle/build:

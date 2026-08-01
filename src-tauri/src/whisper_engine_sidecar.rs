@@ -1,12 +1,15 @@
 use crate::whisper_engine_audio::{decode_pcm16_base64, pcm16_to_f32, PcmRingBuffer};
 use crate::whisper_engine_backend::{NoopWhisperBackend, WhisperBackend, WhisperBackendConfig};
 use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
-use crate::whisper_engine_scheduler::RollingTranscriptionScheduler;
+use crate::whisper_engine_scheduler::{
+    RollingTranscriptionDecision, RollingTranscriptionScheduler,
+};
 use crate::whisper_engine_stabilization::{collapse_exact_repeated_text, PartialStabilizer};
 use std::collections::HashMap;
 
 pub const DEFAULT_RING_BUFFER_SAMPLES: usize = 16_000 * 30;
 pub const DEFAULT_ROLLING_STEP_SAMPLES: usize = 16_000 * 750 / 1000;
+pub const DEFAULT_MAX_ROLLING_BACKLOG_STEPS: usize = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarAction {
@@ -101,8 +104,15 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 let scheduler = self.schedulers.entry(stream.clone()).or_insert_with(|| {
                     RollingTranscriptionScheduler::new(self.rolling_step_samples)
                 });
-                if !scheduler.observe_total_samples(buffer.samples().len()) {
-                    return SidecarAction::Continue(None);
+                match scheduler.observe_total_samples_with_backlog_limit(
+                    buffer.samples().len(),
+                    DEFAULT_MAX_ROLLING_BACKLOG_STEPS,
+                ) {
+                    RollingTranscriptionDecision::Wait
+                    | RollingTranscriptionDecision::DropBacklog => {
+                        return SidecarAction::Continue(None);
+                    }
+                    RollingTranscriptionDecision::Transcribe => {}
                 }
                 return self.transcribe_buffer(&stream, false, "rolling");
             }
@@ -187,6 +197,7 @@ pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
 mod tests {
     use super::*;
     use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
+    use base64::{engine::general_purpose::STANDARD, Engine as _};
 
     #[test]
     fn config_input_reports_ready_status() {
@@ -453,6 +464,53 @@ mod tests {
                 is_final: false,
                 start_ms: 0,
                 duration_ms: 0,
+                language: "en".to_string(),
+                confidence: None
+            }))
+        );
+    }
+
+    #[test]
+    fn audio_input_drops_backlogged_rolling_work_but_flush_still_transcribes() {
+        let backend = FakeBackend {
+            transcript: Some(crate::whisper_engine_backend::WhisperTranscription {
+                text: "hello".to_string(),
+                language: "en".to_string(),
+                confidence: None,
+            }),
+            ..FakeBackend::default()
+        };
+        let mut sidecar = WhisperEngineSidecar::with_backend_and_step_samples(16_000, 2, backend);
+        sidecar.handle_input(WhisperEngineInput::Config {
+            model_path: "/models/ggml-base.bin".to_string(),
+            language: "auto".to_string(),
+            sample_rate: 16_000,
+        });
+
+        let action = sidecar.handle_input(WhisperEngineInput::Audio {
+            stream: "mic".to_string(),
+            seq: 1,
+            timestamp_ms: 0,
+            pcm16_base64: STANDARD.encode([0u8; 16]),
+        });
+
+        assert_eq!(action, SidecarAction::Continue(None));
+        assert!(sidecar.backend().transcribed_samples.is_empty());
+
+        let action = sidecar.handle_input(WhisperEngineInput::Flush {
+            stream: "mic".to_string(),
+        });
+
+        assert_eq!(sidecar.backend().transcribed_samples.len(), 1);
+        assert_eq!(
+            action,
+            SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
+                stream: "mic".to_string(),
+                segment_id: "mic-flush".to_string(),
+                text: "hello".to_string(),
+                is_final: true,
+                start_ms: 0,
+                duration_ms: 1,
                 language: "en".to_string(),
                 confidence: None
             }))
