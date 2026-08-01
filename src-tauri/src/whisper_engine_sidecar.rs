@@ -3,6 +3,7 @@ use crate::whisper_engine_protocol::{WhisperEngineInput, WhisperEngineOutput};
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarAction {
     Continue(Option<WhisperEngineOutput>),
+    Shutdown,
 }
 
 pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
@@ -12,7 +13,7 @@ pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
                 state: "ready".to_string(),
             }))
         }
-        WhisperEngineInput::Shutdown => SidecarAction::Continue(None),
+        WhisperEngineInput::Shutdown => SidecarAction::Shutdown,
     }
 }
 
@@ -34,6 +35,14 @@ mod tests {
             SidecarAction::Continue(Some(WhisperEngineOutput::Status {
                 state: "ready".to_string()
             }))
+        );
+    }
+
+    #[test]
+    fn shutdown_input_stops_the_sidecar_loop() {
+        assert_eq!(
+            handle_engine_input(WhisperEngineInput::Shutdown),
+            SidecarAction::Shutdown
         );
     }
 }
