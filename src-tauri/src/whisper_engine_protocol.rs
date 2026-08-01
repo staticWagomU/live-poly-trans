@@ -29,6 +29,8 @@ pub enum WhisperEngineOutput {
     #[serde(rename_all = "camelCase")]
     Metric { name: String, value: f64 },
     #[serde(rename_all = "camelCase")]
+    Error { message: String, fatal: bool },
+    #[serde(rename_all = "camelCase")]
     Transcript {
         stream: String,
         segment_id: String,
@@ -150,6 +152,20 @@ mod tests {
         assert_eq!(
             line,
             r#"{"type":"metric","name":"first_partial_latency_ms","value":840.0}"#
+        );
+    }
+
+    #[test]
+    fn serializes_error_output_as_json_line() {
+        let line = engine_output_line(&WhisperEngineOutput::Error {
+            message: "model failed to load".to_string(),
+            fatal: true,
+        })
+        .unwrap();
+
+        assert_eq!(
+            line,
+            r#"{"type":"error","message":"model failed to load","fatal":true}"#
         );
     }
 }
