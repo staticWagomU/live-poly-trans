@@ -38,24 +38,25 @@ fn main() {
         };
 
         match sidecar.handle_input(input) {
-            SidecarAction::Continue(Some(output)) => {
-                let line = match engine_output_line(&output) {
-                    Ok(line) => line,
-                    Err(error) => {
-                        eprintln!("failed to encode whisper engine output: {error}");
+            SidecarAction::Continue(outputs) => {
+                for output in outputs {
+                    let line = match engine_output_line(&output) {
+                        Ok(line) => line,
+                        Err(error) => {
+                            eprintln!("failed to encode whisper engine output: {error}");
+                            std::process::exit(1);
+                        }
+                    };
+                    if let Err(error) = writeln!(stdout, "{line}") {
+                        eprintln!("failed to write whisper engine output: {error}");
                         std::process::exit(1);
                     }
-                };
-                if let Err(error) = writeln!(stdout, "{line}") {
-                    eprintln!("failed to write whisper engine output: {error}");
-                    std::process::exit(1);
-                }
-                if let Err(error) = stdout.flush() {
-                    eprintln!("failed to flush whisper engine output: {error}");
-                    std::process::exit(1);
+                    if let Err(error) = stdout.flush() {
+                        eprintln!("failed to flush whisper engine output: {error}");
+                        std::process::exit(1);
+                    }
                 }
             }
-            SidecarAction::Continue(None) => {}
             SidecarAction::Shutdown => break,
         }
     }

@@ -5,7 +5,8 @@ use crate::whisper_engine_scheduler::{
     RollingTranscriptionDecision, RollingTranscriptionScheduler,
 };
 use crate::whisper_engine_stabilization::{collapse_exact_repeated_text, PartialStabilizer};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 pub const DEFAULT_RING_BUFFER_SAMPLES: usize = 16_000 * 30;
 pub const DEFAULT_ROLLING_STEP_SAMPLES: usize = 16_000 * 750 / 1000;
@@ -13,8 +14,22 @@ pub const DEFAULT_MAX_ROLLING_BACKLOG_STEPS: usize = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum SidecarAction {
-    Continue(Option<WhisperEngineOutput>),
+    Continue(Vec<WhisperEngineOutput>),
     Shutdown,
+}
+
+impl SidecarAction {
+    pub fn none() -> Self {
+        SidecarAction::Continue(Vec::new())
+    }
+
+    pub fn output(output: WhisperEngineOutput) -> Self {
+        SidecarAction::Continue(vec![output])
+    }
+
+    pub fn outputs(outputs: Vec<WhisperEngineOutput>) -> Self {
+        SidecarAction::Continue(outputs)
+    }
 }
 
 pub struct WhisperEngineSidecar<B = NoopWhisperBackend> {
@@ -22,6 +37,8 @@ pub struct WhisperEngineSidecar<B = NoopWhisperBackend> {
     buffers: HashMap<String, PcmRingBuffer>,
     schedulers: HashMap<String, RollingTranscriptionScheduler>,
     stabilizers: HashMap<String, PartialStabilizer>,
+    first_audio_at: HashMap<String, Instant>,
+    first_partial_emitted: HashSet<String>,
     backend: B,
     sample_rate: u32,
     rolling_step_samples: usize,
@@ -38,6 +55,8 @@ impl WhisperEngineSidecar {
             buffers: HashMap::new(),
             schedulers: HashMap::new(),
             stabilizers: HashMap::new(),
+            first_audio_at: HashMap::new(),
+            first_partial_emitted: HashSet::new(),
             backend: NoopWhisperBackend::default(),
             sample_rate: 16_000,
             rolling_step_samples: DEFAULT_ROLLING_STEP_SAMPLES,
@@ -60,6 +79,8 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
             buffers: HashMap::new(),
             schedulers: HashMap::new(),
             stabilizers: HashMap::new(),
+            first_audio_at: HashMap::new(),
+            first_partial_emitted: HashSet::new(),
             backend,
             sample_rate: 16_000,
             rolling_step_samples,
@@ -73,13 +94,13 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                     .expect("config arm only passes config input");
                 self.sample_rate = config.sample_rate;
                 match self.backend.load_model(config) {
-                    Ok(()) => SidecarAction::Continue(Some(WhisperEngineOutput::Status {
+                    Ok(()) => SidecarAction::output(WhisperEngineOutput::Status {
                         state: "ready".to_string(),
-                    })),
-                    Err(error) => SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                    }),
+                    Err(error) => SidecarAction::output(WhisperEngineOutput::Error {
                         message: error.message,
                         fatal: true,
-                    })),
+                    }),
                 }
             }
             WhisperEngineInput::Audio {
@@ -88,18 +109,21 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 ..
             } => {
                 let Ok(samples) = decode_pcm16_base64(&pcm16_base64) else {
-                    return SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+                    return SidecarAction::output(WhisperEngineOutput::Error {
                         message: "invalid pcm16 audio payload".to_string(),
                         fatal: false,
-                    }));
+                    });
                 };
 
+                self.first_audio_at
+                    .entry(stream.clone())
+                    .or_insert_with(Instant::now);
                 self.buffers
                     .entry(stream.clone())
                     .or_insert_with(|| PcmRingBuffer::new(self.capacity_samples))
                     .push(&samples);
                 let Some(buffer) = self.buffers.get(&stream) else {
-                    return SidecarAction::Continue(None);
+                    return SidecarAction::none();
                 };
                 let scheduler = self.schedulers.entry(stream.clone()).or_insert_with(|| {
                     RollingTranscriptionScheduler::new(self.rolling_step_samples)
@@ -110,7 +134,7 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                 ) {
                     RollingTranscriptionDecision::Wait
                     | RollingTranscriptionDecision::DropBacklog => {
-                        return SidecarAction::Continue(None);
+                        return SidecarAction::none();
                     }
                     RollingTranscriptionDecision::Transcribe => {}
                 }
@@ -134,21 +158,40 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
         segment_suffix: &str,
     ) -> SidecarAction {
         let Some(buffer) = self.buffers.get(stream) else {
-            return SidecarAction::Continue(None);
+            return SidecarAction::none();
         };
         let samples = pcm16_to_f32(buffer.samples());
+        let started_at = Instant::now();
         match self.backend.transcribe(&samples) {
             Ok(Some(mut transcript)) => {
+                let elapsed_ms = started_at.elapsed().as_secs_f64() * 1000.0;
                 transcript.text = collapse_exact_repeated_text(&transcript.text);
                 if !is_final {
                     let stabilizer = self.stabilizers.entry(stream.to_string()).or_default();
                     let Some(stable_text) = stabilizer.observe(&transcript.text) else {
-                        return SidecarAction::Continue(None);
+                        return SidecarAction::none();
                     };
                     transcript.text = stable_text;
                 }
 
-                SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
+                let mut outputs = vec![WhisperEngineOutput::Metric {
+                    name: if is_final {
+                        "whisper_final_flush_ms".to_string()
+                    } else {
+                        "whisper_rolling_inference_ms".to_string()
+                    },
+                    value: elapsed_ms,
+                }];
+                if !is_final && self.first_partial_emitted.insert(stream.to_string()) {
+                    if let Some(first_audio_at) = self.first_audio_at.get(stream) {
+                        outputs.push(WhisperEngineOutput::Metric {
+                            name: "first_partial_latency_ms".to_string(),
+                            value: first_audio_at.elapsed().as_secs_f64() * 1000.0,
+                        });
+                    }
+                }
+
+                outputs.push(WhisperEngineOutput::Transcript {
                     segment_id: format!("{stream}-{segment_suffix}"),
                     duration_ms: duration_ms(buffer.samples().len(), self.sample_rate),
                     start_ms: 0,
@@ -157,13 +200,14 @@ impl<B: WhisperBackend> WhisperEngineSidecar<B> {
                     is_final,
                     language: transcript.language,
                     confidence: transcript.confidence,
-                }))
+                });
+                SidecarAction::outputs(outputs)
             }
-            Ok(None) => SidecarAction::Continue(None),
-            Err(error) => SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+            Ok(None) => SidecarAction::none(),
+            Err(error) => SidecarAction::output(WhisperEngineOutput::Error {
                 message: error.message,
                 fatal: false,
-            })),
+            }),
         }
     }
 
@@ -182,13 +226,11 @@ fn duration_ms(sample_count: usize, sample_rate: u32) -> i64 {
 
 pub fn handle_engine_input(input: WhisperEngineInput) -> SidecarAction {
     match input {
-        WhisperEngineInput::Config { .. } => {
-            SidecarAction::Continue(Some(WhisperEngineOutput::Status {
-                state: "ready".to_string(),
-            }))
-        }
-        WhisperEngineInput::Audio { .. } => SidecarAction::Continue(None),
-        WhisperEngineInput::Flush { .. } => SidecarAction::Continue(None),
+        WhisperEngineInput::Config { .. } => SidecarAction::output(WhisperEngineOutput::Status {
+            state: "ready".to_string(),
+        }),
+        WhisperEngineInput::Audio { .. } => SidecarAction::none(),
+        WhisperEngineInput::Flush { .. } => SidecarAction::none(),
         WhisperEngineInput::Shutdown => SidecarAction::Shutdown,
     }
 }
@@ -209,9 +251,9 @@ mod tests {
 
         assert_eq!(
             action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Status {
+            SidecarAction::output(WhisperEngineOutput::Status {
                 state: "ready".to_string()
-            }))
+            })
         );
     }
 
@@ -232,7 +274,7 @@ mod tests {
                 timestamp_ms: 0,
                 pcm16_base64: "AAE=".to_string()
             }),
-            SidecarAction::Continue(None)
+            SidecarAction::none()
         );
     }
 
@@ -242,7 +284,7 @@ mod tests {
             handle_engine_input(WhisperEngineInput::Flush {
                 stream: "speaker".to_string()
             }),
-            SidecarAction::Continue(None)
+            SidecarAction::none()
         );
     }
 
@@ -257,7 +299,7 @@ mod tests {
             pcm16_base64: "AQD//w==".to_string(),
         });
 
-        assert_eq!(action, SidecarAction::Continue(None));
+        assert_eq!(action, SidecarAction::none());
         assert_eq!(sidecar.samples("mic"), Some(&[1, -1][..]));
     }
 
@@ -274,10 +316,10 @@ mod tests {
 
         assert_eq!(
             action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+            SidecarAction::output(WhisperEngineOutput::Error {
                 message: "invalid pcm16 audio payload".to_string(),
                 fatal: false
-            }))
+            })
         );
     }
 
@@ -322,9 +364,9 @@ mod tests {
 
         assert_eq!(
             action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Status {
+            SidecarAction::output(WhisperEngineOutput::Status {
                 state: "ready".to_string()
-            }))
+            })
         );
         assert_eq!(sidecar.backend().loaded.len(), 1);
         assert_eq!(
@@ -368,10 +410,10 @@ mod tests {
 
         assert_eq!(
             action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Error {
+            SidecarAction::output(WhisperEngineOutput::Error {
                 message: "failed to load model".to_string(),
                 fatal: true
-            }))
+            })
         );
     }
 
@@ -406,19 +448,20 @@ mod tests {
             sidecar.backend().transcribed_samples,
             vec![vec![-1.0, 0.0, 0.0]]
         );
-        assert_eq!(
-            action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
-                stream: "mic".to_string(),
-                segment_id: "mic-flush".to_string(),
-                text: "hello".to_string(),
-                is_final: true,
-                start_ms: 0,
-                duration_ms: 0,
-                language: "en".to_string(),
-                confidence: Some(0.9)
-            }))
-        );
+        let SidecarAction::Continue(outputs) = action else {
+            panic!("expected output");
+        };
+        assert_metric_named(&outputs, "whisper_final_flush_ms");
+        assert!(outputs.contains(&WhisperEngineOutput::Transcript {
+            stream: "mic".to_string(),
+            segment_id: "mic-flush".to_string(),
+            text: "hello".to_string(),
+            is_final: true,
+            start_ms: 0,
+            duration_ms: 0,
+            language: "en".to_string(),
+            confidence: Some(0.9)
+        }));
     }
 
     #[test]
@@ -445,7 +488,7 @@ mod tests {
                 timestamp_ms: 0,
                 pcm16_base64: "AIAAAA==".to_string(),
             }),
-            SidecarAction::Continue(None)
+            SidecarAction::none()
         );
 
         let action = sidecar.handle_input(WhisperEngineInput::Audio {
@@ -455,19 +498,21 @@ mod tests {
             pcm16_base64: "AIAAAA==".to_string(),
         });
 
-        assert_eq!(
-            action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
-                stream: "mic".to_string(),
-                segment_id: "mic-rolling".to_string(),
-                text: "hel".to_string(),
-                is_final: false,
-                start_ms: 0,
-                duration_ms: 0,
-                language: "en".to_string(),
-                confidence: None
-            }))
-        );
+        let SidecarAction::Continue(outputs) = action else {
+            panic!("expected output");
+        };
+        assert_metric_named(&outputs, "whisper_rolling_inference_ms");
+        assert_metric_named(&outputs, "first_partial_latency_ms");
+        assert!(outputs.contains(&WhisperEngineOutput::Transcript {
+            stream: "mic".to_string(),
+            segment_id: "mic-rolling".to_string(),
+            text: "hel".to_string(),
+            is_final: false,
+            start_ms: 0,
+            duration_ms: 0,
+            language: "en".to_string(),
+            confidence: None
+        }));
     }
 
     #[test]
@@ -494,7 +539,7 @@ mod tests {
             pcm16_base64: STANDARD.encode([0u8; 16]),
         });
 
-        assert_eq!(action, SidecarAction::Continue(None));
+        assert_eq!(action, SidecarAction::none());
         assert!(sidecar.backend().transcribed_samples.is_empty());
 
         let action = sidecar.handle_input(WhisperEngineInput::Flush {
@@ -502,18 +547,29 @@ mod tests {
         });
 
         assert_eq!(sidecar.backend().transcribed_samples.len(), 1);
-        assert_eq!(
-            action,
-            SidecarAction::Continue(Some(WhisperEngineOutput::Transcript {
-                stream: "mic".to_string(),
-                segment_id: "mic-flush".to_string(),
-                text: "hello".to_string(),
-                is_final: true,
-                start_ms: 0,
-                duration_ms: 1,
-                language: "en".to_string(),
-                confidence: None
-            }))
-        );
+        let SidecarAction::Continue(outputs) = action else {
+            panic!("expected output");
+        };
+        assert_metric_named(&outputs, "whisper_final_flush_ms");
+        assert!(outputs.contains(&WhisperEngineOutput::Transcript {
+            stream: "mic".to_string(),
+            segment_id: "mic-flush".to_string(),
+            text: "hello".to_string(),
+            is_final: true,
+            start_ms: 0,
+            duration_ms: 1,
+            language: "en".to_string(),
+            confidence: None
+        }));
+    }
+
+    fn assert_metric_named(outputs: &[WhisperEngineOutput], name: &str) {
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            WhisperEngineOutput::Metric {
+                name: metric_name,
+                value
+            } if metric_name == name && *value >= 0.0
+        )));
     }
 }

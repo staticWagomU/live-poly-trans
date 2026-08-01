@@ -18,6 +18,7 @@
     "build:helper": "scripts/build-helper.sh",
     "build:whisper-backend": "scripts/build-whisper-backend.sh",
     "build:whisper-engine": "bun scripts/build-whisper-engine.mjs",
+    "measure:whisper-engine": "bun scripts/measure-whisper-engine.mjs",
     "build:dist": "scripts/build-distribution.sh"
   },
   "dependencies": {
