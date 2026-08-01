@@ -14,6 +14,7 @@ use std::{
 use tauri::{AppHandle, Emitter, Manager, State};
 
 pub mod whisper_engine_protocol;
+pub mod whisper_engine_audio;
 pub mod whisper_engine_sidecar;
 
 const HELPER_DEBUG_PREFIX: &str = "live-poly-trans-helper debug:";
