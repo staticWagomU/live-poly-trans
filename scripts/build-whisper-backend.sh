@@ -17,6 +17,8 @@ case "$(uname -s)" in
       "$SRC_DIR/lpt_whisper_backend.cpp" \
       -L"$LIB_DIR" \
       -lwhisper \
+      -lggml \
+      -lggml-base \
       -Wl,-rpath,"$LIB_DIR" \
       -o "$OUTPUT"
     ;;
@@ -30,6 +32,8 @@ case "$(uname -s)" in
       "$SRC_DIR/lpt_whisper_backend.cpp" \
       -L"$LIB_DIR" \
       -lwhisper \
+      -lggml \
+      -lggml-base \
       -Wl,-rpath,"$LIB_DIR" \
       -o "$OUTPUT"
     ;;

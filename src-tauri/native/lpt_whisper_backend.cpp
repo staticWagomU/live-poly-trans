@@ -1,5 +1,6 @@
 #include "lpt_whisper_backend.h"
 
+#include "ggml-backend.h"
 #include "whisper.h"
 
 #include <cstdlib>
@@ -60,7 +61,11 @@ void * lpt_whisper_backend_create(const char * model_path, const char * language
     return nullptr;
   }
 
+  ggml_backend_load_all();
+
   whisper_context_params context_params = whisper_context_default_params();
+  context_params.use_gpu = false;
+  context_params.flash_attn = false;
   whisper_context * context = whisper_init_from_file_with_params(model_path, context_params);
   if (context == nullptr) {
     std::ostringstream message;
