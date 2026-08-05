@@ -178,6 +178,11 @@
   let translationFallbackEnabled = $state(true);
   let ollamaEndpoint = $state('');
   let ollamaModel = $state('');
+  let deeplApiKeyInput = $state('');
+  let deeplApiKeyConfigured = $state(false);
+  let deeplKeyBusy = $state<'save' | 'test' | null>(null);
+  let translationSettingsError = $state<string | null>(null);
+  let translationSettingsNotice = $state<string | null>(null);
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -199,6 +204,18 @@
   const reservedIds = $derived(new Set((payload?.reserved ?? []).map((language) => language.id)));
   const translationStatus = $derived(
     translationEngineStatus(translationEngine, ollamaEndpoint, ollamaModel)
+  );
+  const displayedTranslationStatus = $derived(
+    translationEngine === 'deepl'
+      ? {
+          detail: deeplApiKeyConfigured ? 'DeepL API · APIキー保存済み' : 'DeepL API · APIキー未設定',
+          badge: deeplApiKeyConfigured ? '保存済み' : '未設定',
+          ok: deeplApiKeyConfigured
+        }
+      : translationStatus
+  );
+  const deeplKeyActionLabel = $derived(
+    deeplApiKeyInput.trim() ? '保存' : deeplApiKeyConfigured ? '削除' : '保存'
   );
   const previewFileName = $derived(
     `${renderFileName(fileNameTemplate, {
@@ -232,6 +249,7 @@
     translationFallbackEnabled = getTranslationFallbackEnabled();
     ollamaEndpoint = getOllamaEndpoint();
     ollamaModel = getOllamaModel();
+    void refreshDeeplApiKeyStatus();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -518,6 +536,47 @@
   function saveOllamaModel(model: string) {
     setOllamaModel(model);
     ollamaModel = getOllamaModel();
+  }
+
+  async function refreshDeeplApiKeyStatus() {
+    try {
+      deeplApiKeyConfigured = await invoke<boolean>('deepl_api_key_configured');
+    } catch (keyStatusError) {
+      translationSettingsError = String(keyStatusError);
+    }
+  }
+
+  async function saveDeepLApiKey() {
+    deeplKeyBusy = 'save';
+    translationSettingsError = null;
+    translationSettingsNotice = null;
+    try {
+      await invoke('set_deepl_api_key', { apiKey: deeplApiKeyInput });
+      deeplApiKeyInput = '';
+      await refreshDeeplApiKeyStatus();
+      translationSettingsNotice = deeplApiKeyConfigured ? '保存しました。' : '削除しました。';
+    } catch (keySaveError) {
+      translationSettingsError = String(keySaveError);
+    } finally {
+      deeplKeyBusy = null;
+    }
+  }
+
+  async function testDeepLTranslation() {
+    deeplKeyBusy = 'test';
+    translationSettingsError = null;
+    translationSettingsNotice = null;
+    try {
+      const inlineKey = deeplApiKeyInput.trim();
+      const result = await invoke<string>('test_deepl_translation', {
+        apiKey: inlineKey || null
+      });
+      translationSettingsNotice = `接続できました: ${result}`;
+    } catch (keyTestError) {
+      translationSettingsError = String(keyTestError);
+    } finally {
+      deeplKeyBusy = null;
+    }
   }
 
   async function refreshModels() {
@@ -1193,6 +1252,13 @@
       <h2>翻訳</h2>
       <p class="lede">字幕の翻訳に使うエンジンを選びます。</p>
 
+      {#if translationSettingsError}
+        <p class="settings-error" role="alert">{translationSettingsError}</p>
+      {/if}
+      {#if translationSettingsNotice}
+        <p class="settings-warning">{translationSettingsNotice}</p>
+      {/if}
+
       <div class="set-group">
         <h3>エンジン</h3>
         <div class="set-card">
@@ -1218,9 +1284,11 @@
           <div class="set-row">
             <div>
               ステータス
-              <div class="d">{translationStatus.detail}</div>
+              <div class="d">{displayedTranslationStatus.detail}</div>
             </div>
-            <span class="tag" class:ok={translationStatus.ok}>{translationStatus.badge}</span>
+            <span class="tag" class:ok={displayedTranslationStatus.ok}>
+              {displayedTranslationStatus.badge}
+            </span>
           </div>
           <div class="set-row">
             <div>
@@ -1241,17 +1309,32 @@
             <div class="set-row">
               <div>
                 DeepL API キー
-                <div class="d">Keychain 保存は後続実装。平文では保存しません。</div>
+                <div class="d">キーは Keychain に保存され、平文では書き込まれません。</div>
               </div>
               <div class="translation-secret-action">
                 <input
                   class="token-input"
                   type="password"
-                  placeholder="未設定"
+                  placeholder={deeplApiKeyConfigured ? '保存済み' : '未設定'}
                   aria-label="DeepL API キー"
-                  disabled
+                  bind:value={deeplApiKeyInput}
                 />
-                <button type="button" class="link-btn" disabled>接続テスト</button>
+                <button
+                  type="button"
+                  class="link-btn"
+                  disabled={deeplKeyBusy !== null || (!deeplApiKeyInput.trim() && !deeplApiKeyConfigured)}
+                  onclick={testDeepLTranslation}
+                >
+                  {deeplKeyBusy === 'test' ? '確認中…' : '接続テスト'}
+                </button>
+                <button
+                  type="button"
+                  class="link-btn"
+                  disabled={deeplKeyBusy !== null || (!deeplApiKeyInput.trim() && !deeplApiKeyConfigured)}
+                  onclick={saveDeepLApiKey}
+                >
+                  {deeplKeyBusy === 'save' ? '保存中…' : deeplKeyActionLabel}
+                </button>
               </div>
             </div>
           {/if}
@@ -1878,11 +1961,11 @@
     align-items: center;
     justify-content: flex-end;
     gap: 10px;
-    min-width: min(300px, 48%);
+    min-width: min(390px, 58%);
   }
 
   .translation-secret-action .token-input {
-    width: min(180px, 100%);
+    width: min(170px, 100%);
   }
 
   .filter {
