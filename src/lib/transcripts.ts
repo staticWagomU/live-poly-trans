@@ -45,7 +45,17 @@ export type StatusEvent = {
   sessionId: string;
 };
 
-export type HelperEvent = TranscriptEvent | TranslationEvent | StatusEvent;
+export type AudioLevelEvent = {
+  type: 'audio-level';
+  stream: 'mic' | 'speaker';
+  sampleCount: number;
+  rms: number;
+  peak: number;
+  timestamp: string;
+  sessionId: string;
+};
+
+export type HelperEvent = TranscriptEvent | TranslationEvent | StatusEvent | AudioLevelEvent;
 
 export type ChatMessage = {
   id: string;
