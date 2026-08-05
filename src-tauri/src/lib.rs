@@ -1722,6 +1722,10 @@ pub fn close_open_recordings(root: &Path, ended_at: &str) {
 
 pub mod commands {
     use super::*;
+    use crate::translation_backend::{
+        read_deepl_api_key_from_keychain, write_deepl_api_key_to_keychain, DeepLHttpBackend,
+        TranslationBackend, TranslationRequest,
+    };
 
     /// Non-async commands run on the main thread in Tauri v2; this one blocks
     /// on a helper subprocess, so it must not.
@@ -1788,6 +1792,54 @@ pub mod commands {
     #[tauri::command]
     pub async fn uninstall_language(language: String) -> Result<LanguageDetectionPayload, String> {
         run_language_pack_command("--uninstall-language", language).await
+    }
+
+    #[tauri::command]
+    pub async fn deepl_api_key_configured() -> Result<bool, String> {
+        tauri::async_runtime::spawn_blocking(|| {
+            read_deepl_api_key_from_keychain()
+                .map(|key| key.is_some())
+                .map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn set_deepl_api_key(api_key: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            write_deepl_api_key_to_keychain(&api_key).map_err(|error| error.to_string())
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
+    pub async fn test_deepl_translation(api_key: Option<String>) -> Result<String, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let key = match api_key
+                .map(|key| key.trim().to_string())
+                .filter(|key| !key.is_empty())
+            {
+                Some(key) => key,
+                None => read_deepl_api_key_from_keychain()?.ok_or_else(|| {
+                    crate::translation_backend::TranslationError::MissingCredential(
+                        "DeepL API key is not configured".to_string(),
+                    )
+                })?,
+            };
+            let backend = DeepLHttpBackend::new(key);
+            let request = TranslationRequest::new("Hello", "en-US", "ja-JP")
+                .expect("fixed test phrase requires translation");
+            backend.translate(&request)?.ok_or_else(|| {
+                crate::translation_backend::TranslationError::InvalidResponse(
+                    "DeepL returned no translation".to_string(),
+                )
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())?
+        .map_err(|error| error.to_string())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -2997,6 +3049,9 @@ pub fn run() {
             commands::detect_languages,
             commands::install_language,
             commands::uninstall_language,
+            commands::deepl_api_key_configured,
+            commands::set_deepl_api_key,
+            commands::test_deepl_translation,
             commands::start_stream_session,
             commands::stop_stream_session,
             commands::list_speech_models,

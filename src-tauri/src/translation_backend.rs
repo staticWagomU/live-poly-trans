@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::fmt;
 use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -50,6 +51,19 @@ pub enum TranslationError {
     Keychain(String),
     InvalidResponse(String),
 }
+
+impl fmt::Display for TranslationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TranslationError::MissingCredential(message)
+            | TranslationError::Network(message)
+            | TranslationError::Keychain(message)
+            | TranslationError::InvalidResponse(message) => formatter.write_str(message),
+        }
+    }
+}
+
+impl std::error::Error for TranslationError {}
 
 pub const DEEPL_API_ENDPOINT: &str = "https://api.deepl.com/v2/translate";
 pub const DEEPL_FREE_API_ENDPOINT: &str = "https://api-free.deepl.com/v2/translate";
