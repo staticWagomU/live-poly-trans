@@ -19,6 +19,13 @@
   } from '$lib/recordings';
   import { createLatestRequestGuard } from '$lib/latestRequest';
   import { getHfTokenOrNull } from '$lib/settingsStore';
+  import {
+    buildTextExport,
+    saveTextExportToFile,
+    uniqueSpeakerLabels,
+    type TextExportFormat
+  } from '$lib/export/saveTextExport';
+  import { recordingItemToTranscriptEntry } from '$lib/export/types';
 
   let recordings = $state<RecordingSummary[]>([]);
   let selectedRecording = $state<RecordingSummary | null>(null);
@@ -442,6 +449,50 @@
     }
   }
 
+  async function exportText(format: TextExportFormat) {
+    const recording = selectedRecording;
+    if (!recording || isExporting || displayTranscript.length === 0) {
+      return;
+    }
+
+    actionsOpen = false;
+    isExporting = true;
+    notice = null;
+    error = null;
+    try {
+      const startedAt = new Date(recording.startedAt);
+      const entries = displayTranscript.map((item) =>
+        recordingItemToTranscriptEntry(
+          item,
+          Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
+        )
+      );
+      const file = buildTextExport(format, entries, {
+        baseName: `LivePolyTrans-${recording.id}-transcript`,
+        markdownMeta: {
+          title: recordingTitle(recording),
+          ...(Number.isNaN(startedAt.getTime())
+            ? {}
+            : {
+                dateLabel: startedAt.toLocaleString('ja-JP', {
+                  dateStyle: 'medium',
+                  timeStyle: 'short'
+                })
+              }),
+          participants: uniqueSpeakerLabels(entries)
+        }
+      });
+      const destination = await saveTextExportToFile(file);
+      if (destination !== null) {
+        notice = `書き出しました: ${destination}`;
+      }
+    } catch (exportError) {
+      error = String(exportError);
+    } finally {
+      isExporting = false;
+    }
+  }
+
   async function deleteSelectedRecording() {
     const recording = selectedRecording;
     if (!recording || isDeleting) {
@@ -622,13 +673,14 @@
           </button>
           {#if actionsOpen}
             <nav class="menu">
+              <div class="cap">音声</div>
               <button
                 type="button"
                 class="mi"
                 disabled={isExporting || !hasStream('mic')}
                 onclick={() => exportVariant('mic')}
               >
-                書き出し: Mic 音声…
+                マイク音声 <span class="mk">.m4a</span>
               </button>
               <button
                 type="button"
@@ -636,7 +688,7 @@
                 disabled={isExporting || !hasStream('speaker')}
                 onclick={() => exportVariant('speaker')}
               >
-                書き出し: Speaker 音声…
+                スピーカー音声 <span class="mk">.m4a</span>
               </button>
               <button
                 type="button"
@@ -644,7 +696,41 @@
                 disabled={isExporting || !hasStream('mic') || !hasStream('speaker')}
                 onclick={() => exportVariant('mixed')}
               >
-                書き出し: ミックス音声…
+                ミックス <span class="mk">.m4a</span>
+              </button>
+              <div class="sep"></div>
+              <div class="cap">テキスト</div>
+              <button
+                type="button"
+                class="mi"
+                disabled={isExporting || displayTranscript.length === 0}
+                onclick={() => exportText('markdown')}
+              >
+                議事録 <span class="mk">.md</span>
+              </button>
+              <button
+                type="button"
+                class="mi"
+                disabled={isExporting || displayTranscript.length === 0}
+                onclick={() => exportText('srt')}
+              >
+                字幕 SubRip <span class="mk">.srt</span>
+              </button>
+              <button
+                type="button"
+                class="mi"
+                disabled={isExporting || displayTranscript.length === 0}
+                onclick={() => exportText('vtt')}
+              >
+                字幕 WebVTT <span class="mk">.vtt</span>
+              </button>
+              <button
+                type="button"
+                class="mi"
+                disabled={isExporting || displayTranscript.length === 0}
+                onclick={() => exportText('txt')}
+              >
+                従来形式 <span class="mk">.txt</span>
               </button>
               <div class="sep"></div>
               <button
@@ -1113,6 +1199,25 @@
     height: 1px;
     background: var(--divider);
     margin: 5px 8px;
+  }
+
+  .menu .cap {
+    padding: 7px 11px 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+
+  .menu .mi .mk {
+    margin-left: auto;
+    font-size: 11px;
+    color: var(--muted);
+  }
+
+  .menu .mi:hover:not(:disabled) .mk {
+    color: rgba(255, 255, 255, 0.75);
   }
 
   .notice {
