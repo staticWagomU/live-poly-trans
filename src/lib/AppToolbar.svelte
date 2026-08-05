@@ -1,6 +1,6 @@
 <script lang="ts">
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
-  import type { TextExportFormat } from '$lib/export/saveTextExport';
+  import { TEXT_EXPORT_FORMATS, type TextExportFormat } from '$lib/export/saveTextExport';
   import { formatRecordingTimer } from '$lib/captureState';
   import { languageControlLabel, type LanguageInfo } from '$lib/languages';
   import {
@@ -32,6 +32,10 @@
   export let onCopy: () => void;
   export let onSave: () => void;
   export let onSaveAs: (format: TextExportFormat) => void;
+
+  // txt is omitted here because ファイルへ保存… (⌘S) already writes the
+  // legacy plain-text format.
+  const saveAsFormats: TextExportFormat[] = ['markdown', 'srt', 'vtt'];
   export let onFontScaleChange: (scale: number) => void;
   export let onEnterMimi: () => void;
 
@@ -265,36 +269,19 @@
               ファイルへ保存… <span class="kbd">⌘S</span>
             </button>
             <div class="mlabel">形式を選んで保存</div>
-            <button
-              type="button"
-              class="mi no-check"
-              on:click={() => {
-                onSaveAs('markdown');
-                closeMenus();
-              }}
-            >
-              議事録 <span class="kbd">.md</span>
-            </button>
-            <button
-              type="button"
-              class="mi no-check"
-              on:click={() => {
-                onSaveAs('srt');
-                closeMenus();
-              }}
-            >
-              字幕 SubRip <span class="kbd">.srt</span>
-            </button>
-            <button
-              type="button"
-              class="mi no-check"
-              on:click={() => {
-                onSaveAs('vtt');
-                closeMenus();
-              }}
-            >
-              字幕 WebVTT <span class="kbd">.vtt</span>
-            </button>
+            {#each saveAsFormats as format (format)}
+              <button
+                type="button"
+                class="mi no-check"
+                on:click={() => {
+                  onSaveAs(format);
+                  closeMenus();
+                }}
+              >
+                {TEXT_EXPORT_FORMATS[format].menuLabel}
+                <span class="kbd">.{TEXT_EXPORT_FORMATS[format].extension}</span>
+              </button>
+            {/each}
             <div class="sep"></div>
             <div class="mlabel">文字サイズ: {Math.round(transcriptFontScale * 100)}%</div>
             <!-- stopPropagation keeps the menu open for repeated size taps;

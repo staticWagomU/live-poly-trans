@@ -6,7 +6,17 @@ import { toSrt } from './srt';
 import { toVtt } from './vtt';
 import type { ExportOptions, TranscriptEntry } from './types';
 
-export type TextExportFormat = 'markdown' | 'srt' | 'vtt' | 'txt';
+/// Single source of truth for per-format metadata: the file extension, the
+/// save dialog's file-type filter label, and the label shown by the
+/// format-picking menus (AppToolbar / RecordingsView).
+export const TEXT_EXPORT_FORMATS = {
+  markdown: { extension: 'md', filterName: 'Markdown', menuLabel: '議事録' },
+  srt: { extension: 'srt', filterName: 'SubRip 字幕', menuLabel: '字幕 SubRip' },
+  vtt: { extension: 'vtt', filterName: 'WebVTT 字幕', menuLabel: '字幕 WebVTT' },
+  txt: { extension: 'txt', filterName: 'テキスト', menuLabel: '従来形式' }
+} as const;
+
+export type TextExportFormat = keyof typeof TEXT_EXPORT_FORMATS;
 
 export type TextExportFile = {
   contents: string;
@@ -57,30 +67,21 @@ export function buildTextExport(
   opts: { baseName: string; markdownMeta?: MarkdownMeta; exportOptions?: ExportOptions }
 ): TextExportFile {
   const exportOptions = opts.exportOptions ?? DEFAULT_TEXT_EXPORT_OPTIONS;
+  const { extension, filterName } = TEXT_EXPORT_FORMATS[format];
 
   let contents: string;
-  let extension: string;
-  let filterName: string;
   switch (format) {
     case 'markdown':
       contents = toMarkdown(entries, opts.markdownMeta ?? {}, exportOptions);
-      extension = 'md';
-      filterName = 'Markdown';
       break;
     case 'srt':
       contents = toSrt(entries, exportOptions);
-      extension = 'srt';
-      filterName = 'SubRip 字幕';
       break;
     case 'vtt':
       contents = toVtt(entries, exportOptions);
-      extension = 'vtt';
-      filterName = 'WebVTT 字幕';
       break;
     case 'txt':
       contents = toPlainText(entries);
-      extension = 'txt';
-      filterName = 'テキスト';
       break;
   }
 

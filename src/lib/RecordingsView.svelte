@@ -23,8 +23,11 @@
     buildTextExport,
     saveTextExportToFile,
     uniqueSpeakerLabels,
+    TEXT_EXPORT_FORMATS,
     type TextExportFormat
   } from '$lib/export/saveTextExport';
+
+  const textExportFormats: TextExportFormat[] = ['markdown', 'srt', 'vtt', 'txt'];
   import { recordingItemToTranscriptEntry } from '$lib/export/types';
 
   let recordings = $state<RecordingSummary[]>([]);
@@ -700,38 +703,17 @@
               </button>
               <div class="sep"></div>
               <div class="cap">テキスト</div>
-              <button
-                type="button"
-                class="mi"
-                disabled={isExporting || displayTranscript.length === 0}
-                onclick={() => exportText('markdown')}
-              >
-                議事録 <span class="mk">.md</span>
-              </button>
-              <button
-                type="button"
-                class="mi"
-                disabled={isExporting || displayTranscript.length === 0}
-                onclick={() => exportText('srt')}
-              >
-                字幕 SubRip <span class="mk">.srt</span>
-              </button>
-              <button
-                type="button"
-                class="mi"
-                disabled={isExporting || displayTranscript.length === 0}
-                onclick={() => exportText('vtt')}
-              >
-                字幕 WebVTT <span class="mk">.vtt</span>
-              </button>
-              <button
-                type="button"
-                class="mi"
-                disabled={isExporting || displayTranscript.length === 0}
-                onclick={() => exportText('txt')}
-              >
-                従来形式 <span class="mk">.txt</span>
-              </button>
+              {#each textExportFormats as format (format)}
+                <button
+                  type="button"
+                  class="mi"
+                  disabled={isExporting || displayTranscript.length === 0}
+                  onclick={() => exportText(format)}
+                >
+                  {TEXT_EXPORT_FORMATS[format].menuLabel}
+                  <span class="mk">.{TEXT_EXPORT_FORMATS[format].extension}</span>
+                </button>
+              {/each}
               <div class="sep"></div>
               <button
                 type="button"
