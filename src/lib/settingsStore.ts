@@ -69,6 +69,17 @@ function remove(key: SettingsKey) {
   notify(key);
 }
 
+/// Write for settings whose empty state is "not set": the value is trimmed
+/// and a blank result removes the key instead of storing ''.
+function writeTrimmedOrRemove(key: SettingsKey, value: string) {
+  const trimmed = value.trim();
+  if (trimmed) {
+    write(key, trimmed);
+  } else {
+    remove(key);
+  }
+}
+
 export function getAutoStart(): boolean {
   return read(SETTINGS_KEYS.autoStart) !== '0';
 }
@@ -128,12 +139,7 @@ export function getHfTokenOrNull(): string | null {
 }
 
 export function setHfToken(value: string) {
-  const trimmed = value.trim();
-  if (trimmed) {
-    write(SETTINGS_KEYS.hfToken, trimmed);
-  } else {
-    remove(SETTINGS_KEYS.hfToken);
-  }
+  writeTrimmedOrRemove(SETTINGS_KEYS.hfToken, value);
 }
 
 /// Custom display names for the two live speakers. Empty string means "not
@@ -143,7 +149,7 @@ export function getSelfSpeakerName(): string {
 }
 
 export function setSelfSpeakerName(value: string) {
-  setSpeakerName(SETTINGS_KEYS.selfSpeakerName, value);
+  writeTrimmedOrRemove(SETTINGS_KEYS.selfSpeakerName, value);
 }
 
 export function getOtherSpeakerName(): string {
@@ -151,16 +157,7 @@ export function getOtherSpeakerName(): string {
 }
 
 export function setOtherSpeakerName(value: string) {
-  setSpeakerName(SETTINGS_KEYS.otherSpeakerName, value);
-}
-
-function setSpeakerName(key: SettingsKey, value: string) {
-  const trimmed = value.trim();
-  if (trimmed) {
-    write(key, trimmed);
-  } else {
-    remove(key);
-  }
+  writeTrimmedOrRemove(SETTINGS_KEYS.otherSpeakerName, value);
 }
 
 /// Speakers-map view of the live name settings, keyed by the helper's fixed
