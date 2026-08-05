@@ -38,6 +38,8 @@
     getCaptionLineHeight,
     getGlossaryRules,
     getMarkdownAutoExport,
+    getOllamaEndpoint,
+    getOllamaModel,
     getExportDirectory,
     getFileNameTemplate,
     getGlobalShortcutsEnabled,
@@ -51,12 +53,16 @@
     getOverlayShortcut,
     getSelfSpeakerName,
     getTranscriptFontScale,
+    getTranslationEngine,
+    getTranslationFallbackEnabled,
     setCaptionFontFamily,
     setCaptionLineHeight,
     setHfToken,
     getThemePreference,
     setGlossaryRules,
     setMarkdownAutoExport,
+    setOllamaEndpoint,
+    setOllamaModel,
     setExportDirectory,
     setFileNameTemplate,
     setGlobalShortcutsEnabled,
@@ -70,7 +76,9 @@
     setOverlayShortcut,
     setSelfSpeakerName,
     setThemePreference,
-    setTranscriptFontScale
+    setTranscriptFontScale,
+    setTranslationEngine,
+    setTranslationFallbackEnabled
   } from '$lib/settingsStore';
   import {
     DEFAULT_CAPTION_FONT_FAMILY,
@@ -79,6 +87,12 @@
     type CaptionLineHeight
   } from '$lib/captionAppearance';
   import type { ThemePreference } from '$lib/themePreference';
+  import {
+    translationEngineDescription,
+    translationEngineLabel,
+    translationEngineStatus,
+    type TranslationEngine
+  } from '$lib/translationSettings';
   import {
     DEFAULT_TRANSCRIPT_FONT_SCALE,
     TRANSCRIPT_FONT_SCALE_STEPS
@@ -95,6 +109,7 @@
     | 'appearance'
     | 'privacy'
     | 'model'
+    | 'translation'
     | 'langs'
     | 'glossary'
     | 'save';
@@ -159,6 +174,10 @@
   let captionFontFamily = $state<CaptionFontFamily>(DEFAULT_CAPTION_FONT_FAMILY);
   let captionLineHeight = $state<CaptionLineHeight>(DEFAULT_CAPTION_LINE_HEIGHT);
   let transcriptFontScale = $state(DEFAULT_TRANSCRIPT_FONT_SCALE);
+  let translationEngine = $state<TranslationEngine>('apple');
+  let translationFallbackEnabled = $state(true);
+  let ollamaEndpoint = $state('');
+  let ollamaModel = $state('');
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -178,6 +197,9 @@
   const visibleInstalled = $derived(filterLanguagePacks(groups.installed, query));
   const visibleAvailable = $derived(filterLanguagePacks(groups.available, query));
   const reservedIds = $derived(new Set((payload?.reserved ?? []).map((language) => language.id)));
+  const translationStatus = $derived(
+    translationEngineStatus(translationEngine, ollamaEndpoint, ollamaModel)
+  );
   const previewFileName = $derived(
     `${renderFileName(fileNameTemplate, {
       date: new Date(2026, 7, 5, 14, 0),
@@ -206,6 +228,10 @@
     captionFontFamily = getCaptionFontFamily();
     captionLineHeight = getCaptionLineHeight();
     transcriptFontScale = getTranscriptFontScale();
+    translationEngine = getTranslationEngine();
+    translationFallbackEnabled = getTranslationFallbackEnabled();
+    ollamaEndpoint = getOllamaEndpoint();
+    ollamaModel = getOllamaModel();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -474,6 +500,26 @@
     transcriptFontScale = getTranscriptFontScale();
   }
 
+  function saveTranslationEngine(engine: TranslationEngine) {
+    setTranslationEngine(engine);
+    translationEngine = getTranslationEngine();
+  }
+
+  function saveTranslationFallbackEnabled(enabled: boolean) {
+    setTranslationFallbackEnabled(enabled);
+    translationFallbackEnabled = getTranslationFallbackEnabled();
+  }
+
+  function saveOllamaEndpoint(endpoint: string) {
+    setOllamaEndpoint(endpoint);
+    ollamaEndpoint = getOllamaEndpoint();
+  }
+
+  function saveOllamaModel(model: string) {
+    setOllamaModel(model);
+    ollamaModel = getOllamaModel();
+  }
+
   async function refreshModels() {
     modelsError = null;
     try {
@@ -564,6 +610,13 @@
     </button>
     <button type="button" class:active={pane === 'model'} onclick={() => (pane = 'model')}>
       🧠 認識モデル
+    </button>
+    <button
+      type="button"
+      class:active={pane === 'translation'}
+      onclick={() => (pane = 'translation')}
+    >
+      🌐 翻訳
     </button>
     <button type="button" class:active={pane === 'glossary'} onclick={() => (pane = 'glossary')}>
       📖 用語集
@@ -1135,6 +1188,104 @@
         </div>
       </div>
     </div>
+  {:else if pane === 'translation'}
+    <div class="set-pane">
+      <h2>翻訳</h2>
+      <p class="lede">字幕の翻訳に使うエンジンを選びます。</p>
+
+      <div class="set-group">
+        <h3>エンジン</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              翻訳エンジン
+              <div class="d">
+                {translationEngineDescription(translationEngine)}
+              </div>
+            </div>
+            <select
+              class="compact-select"
+              aria-label="翻訳エンジン"
+              value={translationEngine}
+              onchange={(event) =>
+                saveTranslationEngine(event.currentTarget.value as TranslationEngine)}
+            >
+              <option value="apple">{translationEngineLabel('apple')}</option>
+              <option value="deepl">{translationEngineLabel('deepl')}</option>
+              <option value="ollama">{translationEngineLabel('ollama')}</option>
+            </select>
+          </div>
+          <div class="set-row">
+            <div>
+              ステータス
+              <div class="d">{translationStatus.detail}</div>
+            </div>
+            <span class="tag" class:ok={translationStatus.ok}>{translationStatus.badge}</span>
+          </div>
+          <div class="set-row">
+            <div>
+              フォールバック
+              <div class="d">選択中のエンジンが失敗したとき Apple 翻訳に切り替える</div>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              class:on={translationFallbackEnabled}
+              role="switch"
+              aria-checked={translationFallbackEnabled}
+              aria-label="翻訳失敗時に Apple 翻訳へフォールバック"
+              onclick={() => saveTranslationFallbackEnabled(!translationFallbackEnabled)}
+            ></button>
+          </div>
+          {#if translationEngine === 'deepl'}
+            <div class="set-row">
+              <div>
+                DeepL API キー
+                <div class="d">Keychain 保存は後続実装。平文では保存しません。</div>
+              </div>
+              <div class="translation-secret-action">
+                <input
+                  class="token-input"
+                  type="password"
+                  placeholder="未設定"
+                  aria-label="DeepL API キー"
+                  disabled
+                />
+                <button type="button" class="link-btn" disabled>接続テスト</button>
+              </div>
+            </div>
+          {/if}
+          {#if translationEngine === 'ollama'}
+            <div class="set-row">
+              <div>
+                エンドポイント
+                <div class="d">Ollama のローカル HTTP API。</div>
+              </div>
+              <input
+                class="endpoint-input"
+                type="url"
+                aria-label="Ollama エンドポイント"
+                value={ollamaEndpoint}
+                onchange={(event) => saveOllamaEndpoint(event.currentTarget.value)}
+              />
+            </div>
+            <div class="set-row">
+              <div>
+                モデル
+                <div class="d">翻訳に使うローカルモデル名。</div>
+              </div>
+              <input
+                class="model-input"
+                type="text"
+                aria-label="Ollama モデル"
+                value={ollamaModel}
+                onchange={(event) => saveOllamaModel(event.currentTarget.value)}
+              />
+            </div>
+          {/if}
+        </div>
+      </div>
+    </div>
   {:else if pane === 'glossary'}
     <div class="set-pane">
       <h2>用語集</h2>
@@ -1407,7 +1558,8 @@
   }
 
   button:focus-visible,
-  input:focus-visible {
+  input:focus-visible,
+  select:focus-visible {
     outline: 2px solid var(--blue-focus);
     outline-offset: 2px;
     border-radius: 8px;
@@ -1671,6 +1823,8 @@
 
   .token-input,
   .name-input,
+  .endpoint-input,
+  .model-input,
   .template-input,
   .shortcut-input,
   .compact-select,
@@ -1702,6 +1856,33 @@
   .shortcut-input {
     width: min(260px, 46%);
     font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  }
+
+  .endpoint-input {
+    width: min(260px, 46%);
+    font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  }
+
+  .model-input {
+    width: min(180px, 36%);
+    font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  }
+
+  .token-input:disabled {
+    opacity: 0.58;
+    cursor: not-allowed;
+  }
+
+  .translation-secret-action {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 10px;
+    min-width: min(300px, 48%);
+  }
+
+  .translation-secret-action .token-input {
+    width: min(180px, 100%);
   }
 
   .filter {
