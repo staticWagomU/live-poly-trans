@@ -46,6 +46,7 @@
     getOverlayShortcut,
     getRecordingShortcut,
     getSpeechModel,
+    getThemePreference,
     getTranscriptFontScale,
     SETTINGS_KEYS,
     setAutoStart as storeAutoStart,
@@ -118,6 +119,7 @@
   } from '$lib/captureState';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
   import { completeCaptureStop } from '$lib/captureLifecycle';
+  import { themeDataAttribute, type ThemePreference } from '$lib/themePreference';
   import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
   import {
     maxRestartAttempts,
@@ -195,6 +197,7 @@
   let recordingShortcut = 'CommandOrControl+Alt+R';
   let overlayShortcut = 'CommandOrControl+Alt+L';
   let keepInMenuBar = false;
+  let themePreference: ThemePreference = 'auto';
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -247,6 +250,8 @@
     recordingShortcut = getRecordingShortcut();
     overlayShortcut = getOverlayShortcut();
     keepInMenuBar = getKeepInMenuBar();
+    themePreference = getThemePreference();
+    applyThemePreference(themePreference);
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -293,6 +298,10 @@
       }),
       subscribeSettings(SETTINGS_KEYS.keepInMenuBar, () => {
         keepInMenuBar = getKeepInMenuBar();
+      }),
+      subscribeSettings(SETTINGS_KEYS.themePreference, () => {
+        themePreference = getThemePreference();
+        applyThemePreference(themePreference);
       })
     ];
     const autoStart = autoStartEnabled;
@@ -369,6 +378,7 @@
       unsubscribeSpeakerNames.forEach((unsubscribe) => unsubscribe());
       unsubscribeGlossary();
       unsubscribeOverlaySettings.forEach((unsubscribe) => unsubscribe());
+      applyThemePreference('auto');
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
       }
@@ -576,6 +586,15 @@
   function setTranscriptFontScale(scale: number) {
     transcriptFontScale = scale;
     storeTranscriptFontScale(scale);
+  }
+
+  function applyThemePreference(preference: ThemePreference) {
+    const attribute = themeDataAttribute(preference);
+    if (attribute === null) {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.dataset.theme = attribute;
+    }
   }
 
   function setAutoStartEnabled(enabled: boolean) {

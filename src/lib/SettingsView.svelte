@@ -49,6 +49,7 @@
     getOverlayShortcut,
     getSelfSpeakerName,
     setHfToken,
+    getThemePreference,
     setGlossaryRules,
     setMarkdownAutoExport,
     setExportDirectory,
@@ -62,8 +63,10 @@
     setOtherSpeakerName,
     setRecordingShortcut,
     setOverlayShortcut,
-    setSelfSpeakerName
+    setSelfSpeakerName,
+    setThemePreference
   } from '$lib/settingsStore';
+  import type { ThemePreference } from '$lib/themePreference';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -71,7 +74,14 @@
     reserved?: LanguageInfo[];
   };
 
-  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs' | 'glossary' | 'save';
+  type SettingsPane =
+    | 'general'
+    | 'appearance'
+    | 'privacy'
+    | 'model'
+    | 'langs'
+    | 'glossary'
+    | 'save';
 
   let {
     isRecording = false,
@@ -129,6 +139,7 @@
   let recordingShortcut = $state('CommandOrControl+Alt+R');
   let overlayShortcut = $state('CommandOrControl+Alt+L');
   let keepInMenuBar = $state(false);
+  let themePreference = $state<ThemePreference>('auto');
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -172,6 +183,7 @@
     recordingShortcut = getRecordingShortcut();
     overlayShortcut = getOverlayShortcut();
     keepInMenuBar = getKeepInMenuBar();
+    themePreference = getThemePreference();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -420,6 +432,11 @@
     keepInMenuBar = getKeepInMenuBar();
   }
 
+  function saveThemePreference(preference: ThemePreference) {
+    setThemePreference(preference);
+    themePreference = getThemePreference();
+  }
+
   async function refreshModels() {
     modelsError = null;
     try {
@@ -497,6 +514,13 @@
   <aside class="set-side">
     <button type="button" class:active={pane === 'general'} onclick={() => (pane = 'general')}>
       ⚙︎ 一般
+    </button>
+    <button
+      type="button"
+      class:active={pane === 'appearance'}
+      onclick={() => (pane = 'appearance')}
+    >
+      ◐ 外観
     </button>
     <button type="button" class:active={pane === 'privacy'} onclick={() => (pane = 'privacy')}>
       🔐 プライバシー
@@ -745,6 +769,62 @@
               onclick={() => saveKeepInMenuBar(!keepInMenuBar)}
             ></button>
           </div>
+        </div>
+      </div>
+    </div>
+  {:else if pane === 'appearance'}
+    <div class="set-pane">
+      <h2>外観</h2>
+      <p class="lede">画面の見た目を環境や作業場所に合わせます。</p>
+
+      <div class="set-group">
+        <h3>テーマ</h3>
+        <div class="set-card">
+          <label class="set-row selectable">
+            <span class="name-col">
+              <input
+                type="radio"
+                name="theme-preference"
+                checked={themePreference === 'auto'}
+                onchange={() => saveThemePreference('auto')}
+              />
+              <span>
+                自動
+                <span class="d">macOS の外観設定に合わせます。</span>
+              </span>
+            </span>
+            <span class="theme-swatch split" aria-hidden="true"></span>
+          </label>
+          <label class="set-row selectable">
+            <span class="name-col">
+              <input
+                type="radio"
+                name="theme-preference"
+                checked={themePreference === 'light'}
+                onchange={() => saveThemePreference('light')}
+              />
+              <span>
+                ライト
+                <span class="d">明るい背景で固定します。</span>
+              </span>
+            </span>
+            <span class="theme-swatch light" aria-hidden="true"></span>
+          </label>
+          <label class="set-row selectable">
+            <span class="name-col">
+              <input
+                type="radio"
+                name="theme-preference"
+                checked={themePreference === 'dark'}
+                onchange={() => saveThemePreference('dark')}
+              />
+              <span>
+                ダーク
+                <span class="d">暗い背景で固定します。</span>
+              </span>
+            </span>
+            <span class="theme-swatch dark" aria-hidden="true"></span>
+          </label>
         </div>
       </div>
     </div>
@@ -1366,6 +1446,27 @@
 
   .name-col .d {
     display: block;
+  }
+
+  .theme-swatch {
+    width: 34px;
+    height: 22px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    flex: 0 0 auto;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.16);
+  }
+
+  .theme-swatch.light {
+    background: #f5f5f7;
+  }
+
+  .theme-swatch.dark {
+    background: #1c1c1e;
+  }
+
+  .theme-swatch.split {
+    background: linear-gradient(90deg, #f5f5f7 0 50%, #1c1c1e 50% 100%);
   }
 
   .switch {
