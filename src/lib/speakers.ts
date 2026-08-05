@@ -41,6 +41,24 @@ export function resolveSpeakerName(
   return name !== undefined && name.trim() !== '' ? name : entry.speakerLabel;
 }
 
+/// resolveSpeakerName over a whole transcript: returns entries whose labels
+/// reflect the `speakers` map. Without a map the input is returned as-is;
+/// the input entries are never mutated. This is the one place exports and
+/// clipboard text rewrite labels — stored transcripts stay raw.
+export function resolveSpeakerLabels<T extends { speakerId?: string; speakerLabel: string }>(
+  entries: T[],
+  speakers: Record<string, RecordingSpeaker> | null | undefined
+): T[] {
+  if (!speakers) {
+    return entries;
+  }
+
+  return entries.map((entry) => ({
+    ...entry,
+    speakerLabel: resolveSpeakerName(entry, speakers)
+  }));
+}
+
 /// Dot color for an entry: a custom color from the `speakers` map wins,
 /// diarized entries fall back to the shared palette, and live-stream
 /// entries return undefined so callers keep their stream-based styling.

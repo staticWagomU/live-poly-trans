@@ -35,7 +35,7 @@
     setTranscriptFontScale as storeTranscriptFontScale,
     subscribeSettings
   } from '$lib/settingsStore';
-  import { resolveSpeakerName } from '$lib/speakers';
+  import { resolveSpeakerLabels } from '$lib/speakers';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import { chatMessagesToTranscriptEntries, type TranscriptEntry } from '$lib/export/types';
   import { toPlainText } from '$lib/export/plainText';
@@ -943,13 +943,7 @@
   // frontend-generated text (clipboard / save-as) resolves labels here.
   // The ⌘S JSON path stays raw on purpose: it is the faithful record.
   function resolveLiveEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
-    if (!liveSpeakerOverrides) {
-      return entries;
-    }
-    return entries.map((entry) => ({
-      ...entry,
-      speakerLabel: resolveSpeakerName(entry, liveSpeakerOverrides)
-    }));
+    return resolveSpeakerLabels(entries, liveSpeakerOverrides);
   }
 
   async function copyTranscript() {

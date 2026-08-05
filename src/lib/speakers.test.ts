@@ -5,6 +5,7 @@ import {
   defaultStreamSpeakerLabel,
   diarizedSpeakerLabel,
   resolveSpeakerColor,
+  resolveSpeakerLabels,
   resolveSpeakerName,
   speakerColor,
   speakerStats,
@@ -80,6 +81,32 @@ describe('resolveSpeakerName', () => {
   it('falls back to the entry label when the entry has no speaker id', () => {
     const entry = { speakerLabel: '話者' };
     expect(resolveSpeakerName(entry, { 'speaker-0': { name: '田中さん' } })).toBe('話者');
+  });
+});
+
+describe('resolveSpeakerLabels', () => {
+  it('rewrites each entry label through the speakers map', () => {
+    const entries = [
+      { speakerId: 'speaker-0', speakerLabel: '話者1', text: 'a' },
+      { speakerId: 'speaker-1', speakerLabel: '話者2', text: 'b' }
+    ];
+
+    expect(resolveSpeakerLabels(entries, { 'speaker-0': { name: '田中さん' } })).toEqual([
+      { speakerId: 'speaker-0', speakerLabel: '田中さん', text: 'a' },
+      { speakerId: 'speaker-1', speakerLabel: '話者2', text: 'b' }
+    ]);
+  });
+
+  it('returns the input list untouched without a speakers map', () => {
+    const entries = [{ speakerId: 'mic', speakerLabel: 'Speaker A' }];
+    expect(resolveSpeakerLabels(entries, null)).toBe(entries);
+    expect(resolveSpeakerLabels(entries, undefined)).toBe(entries);
+  });
+
+  it('does not mutate the input entries', () => {
+    const entries = [{ speakerId: 'mic', speakerLabel: 'Speaker A' }];
+    resolveSpeakerLabels(entries, { mic: { name: '自分' } });
+    expect(entries[0].speakerLabel).toBe('Speaker A');
   });
 });
 

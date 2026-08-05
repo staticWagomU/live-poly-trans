@@ -22,6 +22,7 @@
   import {
     applySpeakerRename,
     resolveSpeakerColor,
+    resolveSpeakerLabels,
     resolveSpeakerName,
     speakerStats,
     transcriptItemSpeakerId,
@@ -36,8 +37,9 @@
     type TextExportFormat
   } from '$lib/export/saveTextExport';
 
-  const textExportFormats: TextExportFormat[] = ['markdown', 'srt', 'vtt', 'txt'];
   import { recordingItemToTranscriptEntry } from '$lib/export/types';
+
+  const textExportFormats: TextExportFormat[] = ['markdown', 'srt', 'vtt', 'txt'];
 
   let recordings = $state<RecordingSummary[]>([]);
   let selectedRecording = $state<RecordingSummary | null>(null);
@@ -483,13 +485,15 @@
       // Custom speaker names live in meta.json, not the transcript, so
       // exports resolve labels here (participants included, via
       // uniqueSpeakerLabels over the resolved entries).
-      const entries = displayTranscript.map((item) => {
-        const entry = recordingItemToTranscriptEntry(
-          item,
-          Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
-        );
-        return { ...entry, speakerLabel: resolveSpeakerName(entry, recording.speakers) };
-      });
+      const entries = resolveSpeakerLabels(
+        displayTranscript.map((item) =>
+          recordingItemToTranscriptEntry(
+            item,
+            Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
+          )
+        ),
+        recording.speakers
+      );
       const file = buildTextExport(format, entries, {
         baseName: `LivePolyTrans-${recording.id}-transcript`,
         markdownMeta: {
