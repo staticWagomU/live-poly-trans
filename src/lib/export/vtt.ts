@@ -1,6 +1,5 @@
 import { entryLines } from './entryLines';
-import { formatCueTimestamp } from './srt';
-import { withResolvedTimings } from './timing';
+import { formatCueTimestamp, withResolvedTimings } from './timing';
 import type { ExportOptions, TranscriptEntry } from './types';
 
 export function formatVttTimestamp(ms: number): string {
