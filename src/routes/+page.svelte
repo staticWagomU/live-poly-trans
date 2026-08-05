@@ -1183,6 +1183,14 @@
     }
   }
 
+  async function toggleOverlay() {
+    try {
+      await invoke<boolean>('toggle_overlay');
+    } catch (error) {
+      appError = String(error);
+    }
+  }
+
   // Clear wipes the whole meeting (transcript, summary, chat) with no undo
   // and sits right next to Save, so it asks for a second click and disarms
   // by itself.
@@ -1253,6 +1261,7 @@
       onCopy={copyTranscript}
       onSave={saveTranscript}
       onSaveAs={saveTranscriptAs}
+      onToggleOverlay={toggleOverlay}
       onFontScaleChange={setTranscriptFontScale}
       onEnterMimi={() => void enterMimi()}
     />

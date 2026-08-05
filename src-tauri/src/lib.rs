@@ -11,7 +11,7 @@ use std::{
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 
 pub mod capture_helper_protocol;
 pub mod whisper_engine_audio;
@@ -1973,6 +1973,40 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn toggle_overlay(app: AppHandle) -> Result<bool, String> {
+        if let Some(window) = app.get_webview_window("overlay") {
+            let visible = window.is_visible().map_err(|error| error.to_string())?;
+            if visible {
+                window.hide().map_err(|error| error.to_string())?;
+                return Ok(false);
+            }
+
+            window.show().map_err(|error| error.to_string())?;
+            window
+                .set_ignore_cursor_events(true)
+                .map_err(|error| error.to_string())?;
+            return Ok(true);
+        }
+
+        let window = WebviewWindowBuilder::new(&app, "overlay", WebviewUrl::App("overlay".into()))
+            .title("LivePolyTrans Overlay")
+            .inner_size(980.0, 180.0)
+            .min_inner_size(360.0, 96.0)
+            .decorations(false)
+            .background_color(tauri::utils::config::Color(0, 0, 0, 0))
+            .always_on_top(true)
+            .visible_on_all_workspaces(true)
+            .skip_taskbar(true)
+            .resizable(true)
+            .build()
+            .map_err(|error| error.to_string())?;
+        window
+            .set_ignore_cursor_events(true)
+            .map_err(|error| error.to_string())?;
+        Ok(true)
+    }
+
+    #[tauri::command]
     pub async fn ai_ask(
         state: State<'_, HelperSession>,
         question: String,
@@ -2774,6 +2808,7 @@ pub fn run() {
             commands::ai_suggest_questions,
             commands::ai_extract_actions,
             commands::ai_ask,
+            commands::toggle_overlay,
             commands::create_recording,
             commands::finalize_recording,
             commands::start_recording_session,

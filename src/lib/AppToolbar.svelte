@@ -32,6 +32,7 @@
   export let onCopy: () => void;
   export let onSave: () => void;
   export let onSaveAs: (format: TextExportFormat) => void;
+  export let onToggleOverlay: () => void;
 
   // txt is omitted here because ファイルへ保存… (⌘S) already writes the
   // legacy plain-text format.
@@ -282,6 +283,17 @@
                 <span class="kbd">.{TEXT_EXPORT_FORMATS[format].extension}</span>
               </button>
             {/each}
+            <div class="sep"></div>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onToggleOverlay();
+                closeMenus();
+              }}
+            >
+              字幕オーバーレイを切り替え
+            </button>
             <div class="sep"></div>
             <div class="mlabel">文字サイズ: {Math.round(transcriptFontScale * 100)}%</div>
             <!-- stopPropagation keeps the menu open for repeated size taps;
