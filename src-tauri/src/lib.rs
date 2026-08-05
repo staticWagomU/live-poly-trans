@@ -21,6 +21,7 @@ use tauri::{
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub mod capture_helper_protocol;
+pub mod translation_backend;
 pub mod whisper_engine_audio;
 pub mod whisper_engine_backend;
 pub mod whisper_engine_protocol;
