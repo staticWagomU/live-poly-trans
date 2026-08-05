@@ -79,7 +79,8 @@ public func runWhisperEngineTranscription(
   recordFile: String? = nil,
   transcriptFile: String? = nil,
   modelPath: String,
-  enginePath: String
+  enginePath: String,
+  translationEnabled: Bool = true
 ) async throws {
   helperDebugLog(
     "whisper-engine-stream-start stream=\(stream.rawValue) source=\(sourceLanguage ?? "-") target=\(targetLanguage ?? "-") model=\(modelPath) engine=\(enginePath) record=\(recordFile ?? "-")"
@@ -105,7 +106,7 @@ public func runWhisperEngineTranscription(
     sourceLanguage: sourceLanguage,
     targetLanguage: targetLanguage
   )
-  let translators = Dictionary(uniqueKeysWithValues: languages.map { language in
+  let translators = translationEnabled ? Dictionary(uniqueKeysWithValues: languages.map { language in
     (
       language,
       LiveTranslator(
@@ -117,7 +118,7 @@ public func runWhisperEngineTranscription(
         )
       )
     )
-  })
+  }) : [:]
 
   let inputSource = try await makeWhisperInputSource(
     stream: stream,

@@ -15,6 +15,7 @@ struct CommandLineOptionsTests {
     try parsesMicStreamCommandWithLocales()
     try parsesSpeakerStreamCommandWithSegmentDirectory()
     try parsesStreamCommandWithRecordingFiles()
+    try parsesStreamCommandWithDisabledTranslation()
     try parsesStreamCommandWithWhisperEngine()
     try parsesStreamCommandWithWhisperEngineSidecar()
     try defaultsToBuiltinTranscriptionEngine()
@@ -203,6 +204,17 @@ struct CommandLineOptionsTests {
 
     try expectEqual(options.recordFile, "/tmp/rec/mic.m4a")
     try expectEqual(options.transcriptFile, "/tmp/rec/mic.jsonl")
+  }
+
+  static func parsesStreamCommandWithDisabledTranslation() throws {
+    let options = try CommandLineOptions.parse([
+      "helper",
+      "--stream",
+      "mic",
+      "--disable-translation"
+    ])
+
+    try expectEqual(options.translationEnabled, false)
   }
 
   static func parsesStreamCommandWithWhisperEngine() throws {

@@ -29,7 +29,8 @@ public func runWhisperTranscription(
   recordFile: String? = nil,
   transcriptFile: String? = nil,
   modelPath: String,
-  cliPath: String
+  cliPath: String,
+  translationEnabled: Bool = true
 ) async throws {
   helperDebugLog(
     "whisper-stream-start stream=\(stream.rawValue) source=\(sourceLanguage ?? "-") target=\(targetLanguage ?? "-") model=\(modelPath) cli=\(cliPath) record=\(recordFile ?? "-")"
@@ -56,7 +57,7 @@ public func runWhisperTranscription(
     sourceLanguage: sourceLanguage,
     targetLanguage: targetLanguage
   )
-  let translators = Dictionary(uniqueKeysWithValues: languages.map { language in
+  let translators = translationEnabled ? Dictionary(uniqueKeysWithValues: languages.map { language in
     (
       language,
       LiveTranslator(
@@ -68,7 +69,7 @@ public func runWhisperTranscription(
         )
       )
     )
-  })
+  }) : [:]
 
   let chunker = UtteranceChunker(
     sampleRate: whisperSampleRate,

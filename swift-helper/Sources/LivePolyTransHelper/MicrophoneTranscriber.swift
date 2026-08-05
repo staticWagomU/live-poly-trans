@@ -11,7 +11,8 @@ public func runMicrophoneTranscription(
   languages requestedLanguages: [String],
   segmentDirectory: String?,
   recordFile: String? = nil,
-  transcriptFile: String? = nil
+  transcriptFile: String? = nil,
+  translationEnabled: Bool = true
 ) async throws {
   let languages = transcriptionLanguages(
     requestedLanguages: requestedLanguages,
@@ -50,7 +51,7 @@ public func runMicrophoneTranscription(
     emitter: emitter
   )
 
-  let translators = Dictionary(uniqueKeysWithValues: languages.map { language in
+  let translators = translationEnabled ? Dictionary(uniqueKeysWithValues: languages.map { language in
     (
       language,
       LiveTranslator(
@@ -62,7 +63,7 @@ public func runMicrophoneTranscription(
         )
       )
     )
-  })
+  }) : [:]
   let arbiter = TranscriptArbiter(languageCount: languages.count) { output in
     await emitArbitratedOutput(
       output,

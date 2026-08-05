@@ -29,6 +29,7 @@ public struct CommandLineOptions: Equatable, Sendable {
   public let segmentDirectory: String?
   public let recordFile: String?
   public let transcriptFile: String?
+  public let translationEnabled: Bool
   public let transcriptionEngine: TranscriptionEngine
   public let whisperModel: String?
   public let whisperCli: String?
@@ -42,6 +43,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     segmentDirectory: String? = nil,
     recordFile: String? = nil,
     transcriptFile: String? = nil,
+    translationEnabled: Bool = true,
     transcriptionEngine: TranscriptionEngine = .builtin,
     whisperModel: String? = nil,
     whisperCli: String? = nil,
@@ -54,6 +56,7 @@ public struct CommandLineOptions: Equatable, Sendable {
     self.segmentDirectory = segmentDirectory
     self.recordFile = recordFile
     self.transcriptFile = transcriptFile
+    self.translationEnabled = translationEnabled
     self.transcriptionEngine = transcriptionEngine
     self.whisperModel = whisperModel
     self.whisperCli = whisperCli
@@ -141,6 +144,7 @@ public struct CommandLineOptions: Equatable, Sendable {
       segmentDirectory: value(after: "--segment-directory", in: arguments),
       recordFile: value(after: "--record-file", in: arguments),
       transcriptFile: value(after: "--transcript-file", in: arguments),
+      translationEnabled: !arguments.contains("--disable-translation"),
       transcriptionEngine: engine,
       whisperModel: whisperModel,
       whisperCli: whisperCli,

@@ -645,6 +645,7 @@ pub fn build_stream_helper_args(
     record_file: Option<&str>,
     transcript_file: Option<&str>,
     whisper: Option<&WhisperEngineConfig>,
+    helper_translation_enabled: bool,
 ) -> Vec<String> {
     let mut args = vec![
         "--stream".to_string(),
@@ -681,6 +682,10 @@ pub fn build_stream_helper_args(
         args.push(whisper.cli_path.to_string());
         args.push("--whisper-engine".to_string());
         args.push(whisper.engine_path.to_string());
+    }
+
+    if !helper_translation_enabled {
+        args.push("--disable-translation".to_string());
     }
 
     args
@@ -1912,6 +1917,7 @@ pub mod commands {
                     .as_ref()
                     .map(WhisperEngineConfig::from)
                     .as_ref(),
+                true,
             );
 
             let helper_path = resolve_helper_path()?;
@@ -3813,6 +3819,7 @@ mod tests {
             Some("/tmp/rec/mic.m4a"),
             Some("/tmp/rec/mic.jsonl"),
             None,
+            true,
         );
 
         assert_eq!(
@@ -3849,10 +3856,28 @@ mod tests {
             None,
             None,
             None,
+            true,
         );
 
         assert!(!args.contains(&"--record-file".to_string()));
         assert!(!args.contains(&"--transcript-file".to_string()));
+    }
+
+    #[test]
+    fn builds_stream_helper_args_with_disabled_translation() {
+        let args = build_stream_helper_args(
+            "mic",
+            "en-US",
+            "ja-JP",
+            &["en-US".to_string(), "ja-JP".to_string()],
+            "/tmp/segments/mic",
+            None,
+            None,
+            None,
+            false,
+        );
+
+        assert!(args.contains(&"--disable-translation".to_string()));
     }
 
     #[test]
@@ -4382,6 +4407,7 @@ mod tests {
                 cli_path: "/opt/homebrew/bin/whisper-cli",
                 engine_path: "/app/lpt-whisper-engine",
             }),
+            true,
         );
 
         let tail: Vec<&str> = args
@@ -4417,6 +4443,7 @@ mod tests {
             None,
             None,
             None,
+            true,
         );
 
         // Builtin sessions must produce byte-identical args to the
