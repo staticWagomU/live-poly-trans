@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::process::Command;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,11 +47,130 @@ impl TranslationRequest {
 pub enum TranslationError {
     MissingCredential(String),
     Network(String),
+    Keychain(String),
     InvalidResponse(String),
 }
 
 pub const DEEPL_API_ENDPOINT: &str = "https://api.deepl.com/v2/translate";
 pub const DEEPL_FREE_API_ENDPOINT: &str = "https://api-free.deepl.com/v2/translate";
+pub const KEYCHAIN_SERVICE: &str = "live-poly-trans";
+pub const DEEPL_API_KEY_ACCOUNT: &str = "deepl-api-key";
+
+pub fn keychain_find_password_args(service: &str, account: &str) -> Vec<String> {
+    vec![
+        "find-generic-password".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+        "-w".to_string(),
+    ]
+}
+
+pub fn keychain_write_password_args(service: &str, account: &str, password: &str) -> Vec<String> {
+    vec![
+        "add-generic-password".to_string(),
+        "-U".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+        "-w".to_string(),
+        password.to_string(),
+    ]
+}
+
+pub fn keychain_delete_password_args(service: &str, account: &str) -> Vec<String> {
+    vec![
+        "delete-generic-password".to_string(),
+        "-s".to_string(),
+        service.to_string(),
+        "-a".to_string(),
+        account.to_string(),
+    ]
+}
+
+pub fn read_deepl_api_key_from_keychain() -> Result<Option<String>, TranslationError> {
+    read_keychain_password(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT)
+}
+
+pub fn write_deepl_api_key_to_keychain(api_key: &str) -> Result<(), TranslationError> {
+    let trimmed = api_key.trim();
+    if trimmed.is_empty() {
+        delete_deepl_api_key_from_keychain()
+    } else {
+        write_keychain_password(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT, trimmed)
+    }
+}
+
+pub fn delete_deepl_api_key_from_keychain() -> Result<(), TranslationError> {
+    delete_keychain_password(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT)
+}
+
+fn read_keychain_password(
+    service: &'static str,
+    account: &'static str,
+) -> Result<Option<String>, TranslationError> {
+    let output = Command::new("security")
+        .args(keychain_find_password_args(service, account))
+        .output()
+        .map_err(|error| TranslationError::Keychain(error.to_string()))?;
+    if output.status.success() {
+        let password = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        return Ok((!password.is_empty()).then_some(password));
+    }
+    if keychain_output_is_not_found(&output) {
+        return Ok(None);
+    }
+    Err(TranslationError::Keychain(keychain_error_message(&output)))
+}
+
+fn write_keychain_password(
+    service: &'static str,
+    account: &'static str,
+    password: &str,
+) -> Result<(), TranslationError> {
+    let output = Command::new("security")
+        .args(keychain_write_password_args(service, account, password))
+        .output()
+        .map_err(|error| TranslationError::Keychain(error.to_string()))?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(TranslationError::Keychain(keychain_error_message(&output)))
+    }
+}
+
+fn delete_keychain_password(
+    service: &'static str,
+    account: &'static str,
+) -> Result<(), TranslationError> {
+    let output = Command::new("security")
+        .args(keychain_delete_password_args(service, account))
+        .output()
+        .map_err(|error| TranslationError::Keychain(error.to_string()))?;
+    if output.status.success() || keychain_output_is_not_found(&output) {
+        Ok(())
+    } else {
+        Err(TranslationError::Keychain(keychain_error_message(&output)))
+    }
+}
+
+fn keychain_output_is_not_found(output: &std::process::Output) -> bool {
+    output.status.code() == Some(44)
+        || keychain_error_message(output)
+            .to_ascii_lowercase()
+            .contains("could not be found")
+}
+
+fn keychain_error_message(output: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    if stderr.is_empty() {
+        format!("security exited with {}", output.status)
+    } else {
+        stderr
+    }
+}
 
 pub fn deepl_language_code(language: &str) -> String {
     let upper = language.replace('_', "-").to_ascii_uppercase();
@@ -343,6 +463,44 @@ mod tests {
         );
         assert_eq!(deepl_endpoint_for_key("secret"), DEEPL_API_ENDPOINT);
         assert_eq!(deepl_endpoint_for_key("secret:fx"), DEEPL_FREE_API_ENDPOINT);
+    }
+
+    #[test]
+    fn builds_keychain_security_command_args() {
+        assert_eq!(
+            keychain_find_password_args(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT),
+            vec![
+                "find-generic-password",
+                "-s",
+                "live-poly-trans",
+                "-a",
+                "deepl-api-key",
+                "-w",
+            ]
+        );
+        assert_eq!(
+            keychain_write_password_args(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT, "secret"),
+            vec![
+                "add-generic-password",
+                "-U",
+                "-s",
+                "live-poly-trans",
+                "-a",
+                "deepl-api-key",
+                "-w",
+                "secret",
+            ]
+        );
+        assert_eq!(
+            keychain_delete_password_args(KEYCHAIN_SERVICE, DEEPL_API_KEY_ACCOUNT),
+            vec![
+                "delete-generic-password",
+                "-s",
+                "live-poly-trans",
+                "-a",
+                "deepl-api-key",
+            ]
+        );
     }
 
     #[test]
