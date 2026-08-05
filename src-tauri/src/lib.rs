@@ -12,6 +12,7 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{
+    image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
@@ -38,6 +39,7 @@ const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 // control channel. Helpers announce right after capture setup, so in practice
 // this only delays a Record press that races the very first stream start.
 const CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
+pub const TRAY_WAVEFORM_ICON_SIZE: u32 = 18;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayWindowState {
@@ -3102,12 +3104,66 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         .tooltip("LivePolyTrans")
         .show_menu_on_left_click(true)
         .icon_as_template(true);
-    if let Some(icon) = app.default_window_icon().cloned() {
-        tray = tray.icon(icon);
-    }
+    tray = tray.icon(tray_waveform_icon(false));
 
     tray.build(app)?;
     Ok(())
+}
+
+pub fn tray_waveform_icon(recording: bool) -> Image<'static> {
+    Image::new_owned(
+        tray_waveform_icon_rgba(recording),
+        TRAY_WAVEFORM_ICON_SIZE,
+        TRAY_WAVEFORM_ICON_SIZE,
+    )
+}
+
+pub fn tray_waveform_icon_rgba(recording: bool) -> Vec<u8> {
+    let size = TRAY_WAVEFORM_ICON_SIZE;
+    let mut rgba = vec![0; (size * size * 4) as usize];
+    for (x, y, width, height) in [
+        (3, 6, 2, 7),
+        (6, 3, 2, 12),
+        (9, 5, 2, 9),
+        (12, 4, 2, 11),
+    ] {
+        set_rgba_rect(&mut rgba, size, x, y, width, height, [0, 0, 0, 255]);
+    }
+
+    if recording {
+        set_rgba_rect(&mut rgba, size, 14, 2, 3, 3, [255, 59, 48, 255]);
+    }
+
+    rgba
+}
+
+pub fn set_rgba_rect(
+    rgba: &mut [u8],
+    image_width: u32,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: [u8; 4],
+) {
+    for row in y..(y + height) {
+        for column in x..(x + width) {
+            let start = ((row * image_width + column) * 4) as usize;
+            if start + 4 <= rgba.len() {
+                rgba[start..start + 4].copy_from_slice(&color);
+            }
+        }
+    }
+}
+
+pub fn rgba_pixel(rgba: &[u8], image_width: u32, x: u32, y: u32) -> [u8; 4] {
+    let start = ((y * image_width + x) * 4) as usize;
+    [
+        rgba.get(start).copied().unwrap_or(0),
+        rgba.get(start + 1).copied().unwrap_or(0),
+        rgba.get(start + 2).copied().unwrap_or(0),
+        rgba.get(start + 3).copied().unwrap_or(0),
+    ]
 }
 
 fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
@@ -4344,6 +4400,22 @@ mod tests {
             Some(TRAY_COMMAND_ADJUST_OVERLAY)
         );
         assert_eq!(tray_command_for_menu_id("tray-quit"), None);
+    }
+
+    #[test]
+    fn tray_waveform_icon_draws_template_bars() {
+        let rgba = tray_waveform_icon_rgba(false);
+
+        assert_eq!(rgba.len(), (TRAY_WAVEFORM_ICON_SIZE * TRAY_WAVEFORM_ICON_SIZE * 4) as usize);
+        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 4, 8), [0, 0, 0, 255]);
+        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 0, 0), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn tray_waveform_icon_draws_recording_dot() {
+        let rgba = tray_waveform_icon_rgba(true);
+
+        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 15, 3), [255, 59, 48, 255]);
     }
 
     #[test]
