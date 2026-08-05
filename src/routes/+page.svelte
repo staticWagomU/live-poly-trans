@@ -22,8 +22,10 @@
     DEFAULT_TRANSCRIPT_FONT_SCALE,
     increaseTranscriptFontScale
   } from '$lib/transcriptFontSize';
+  import { applyGlossaryToEntries, type GlossaryRule } from '$lib/glossary';
   import {
     getAutoStart,
+    getGlossaryRules,
     getIncludeAudio,
     getLiveSpeakerOverrides,
     getSpeechModel,
@@ -166,6 +168,7 @@
   let permissionNotice: string | null = null;
   let settingsPane: 'general' | 'privacy' = 'general';
   let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
+  let glossaryRules: GlossaryRule[] = [];
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');
@@ -194,6 +197,7 @@
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
+    glossaryRules = getGlossaryRules();
     // A name edited in Settings shows up in the live captions right away;
     // the incoming events and stored transcripts keep their original labels.
     const unsubscribeSpeakerNames = [
@@ -204,6 +208,11 @@
         liveSpeakerOverrides = getLiveSpeakerOverrides();
       })
     );
+    // Same deal for glossary edits: final captions re-render corrected while
+    // the underlying messages stay raw.
+    const unsubscribeGlossary = subscribeSettings(SETTINGS_KEYS.glossary, () => {
+      glossaryRules = getGlossaryRules();
+    });
     const autoStart = autoStartEnabled;
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
@@ -256,6 +265,7 @@
     return () => {
       cleanupRegistry.dispose();
       unsubscribeSpeakerNames.forEach((unsubscribe) => unsubscribe());
+      unsubscribeGlossary();
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
       }
@@ -940,11 +950,15 @@
     }, 5000);
   }
 
-  // Custom live speaker names live in settings, not the messages, so
-  // frontend-generated text (clipboard / save-as) resolves labels here.
-  // The ⌘S JSON path stays raw on purpose: it is the faithful record.
+  // Custom live speaker names and glossary corrections live in settings, not
+  // the messages, so frontend-generated text (clipboard / save-as) resolves
+  // labels and applies the glossary here. The ⌘S JSON path stays raw on
+  // purpose: it is the faithful record.
   function resolveLiveEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
-    return resolveSpeakerLabels(entries, liveSpeakerOverrides);
+    return applyGlossaryToEntries(
+      resolveSpeakerLabels(entries, liveSpeakerOverrides),
+      glossaryRules
+    );
   }
 
   async function copyTranscript() {
@@ -1114,6 +1128,7 @@
           {speechModel}
           {confirmingClear}
           speakerOverrides={liveSpeakerOverrides}
+          {glossaryRules}
           onTogglePause={toggleTranscription}
           onCopy={copyTranscript}
           onSave={saveTranscript}

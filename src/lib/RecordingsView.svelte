@@ -28,7 +28,13 @@
     transcriptItemSpeakerId,
     type SpeakerStat
   } from '$lib/speakers';
-  import { getHfTokenOrNull } from '$lib/settingsStore';
+  import { applyGlossary, applyGlossaryToEntries, type GlossaryRule } from '$lib/glossary';
+  import {
+    getGlossaryRules,
+    getHfTokenOrNull,
+    SETTINGS_KEYS,
+    subscribeSettings
+  } from '$lib/settingsStore';
   import {
     buildTextExport,
     saveTextExportToFile,
@@ -72,6 +78,10 @@
   // in-progress name.
   let editingSpeakerId = $state<string | null>(null);
   let editingSpeakerName = $state('');
+
+  // Glossary corrections from settings, applied to displayed and exported
+  // transcript text only; the stored transcript (live and whisperx) stays raw.
+  let glossaryRules = $state<GlossaryRule[]>([]);
 
   // Trim selection in source-file milliseconds; null = trim mode off.
   let trimRange = $state<{ startMs: number; endMs: number } | null>(null);
@@ -119,6 +129,11 @@
   onMount(() => {
     void refreshRecordings();
 
+    glossaryRules = getGlossaryRules();
+    const unsubscribeGlossary = subscribeSettings(SETTINGS_KEYS.glossary, () => {
+      glossaryRules = getGlossaryRules();
+    });
+
     const unlistenProgress = listen<{ id: string; stage: string }>(
       'reprocess-progress',
       (event) => {
@@ -148,6 +163,7 @@
     return () => {
       recordingRequest.invalidate();
       fileRequest.invalidate();
+      unsubscribeGlossary();
       void unlistenDrop.then((unlisten) => unlisten());
       void unlistenProgress.then((unlisten) => unlisten());
     };
@@ -482,17 +498,21 @@
     error = null;
     try {
       const startedAt = new Date(recording.startedAt);
-      // Custom speaker names live in meta.json, not the transcript, so
-      // exports resolve labels here (participants included, via
-      // uniqueSpeakerLabels over the resolved entries).
-      const entries = resolveSpeakerLabels(
-        displayTranscript.map((item) =>
-          recordingItemToTranscriptEntry(
-            item,
-            Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
-          )
+      // Custom speaker names live in meta.json and glossary rules in
+      // settings, not the transcript, so exports resolve labels and apply
+      // the glossary here (participants included, via uniqueSpeakerLabels
+      // over the resolved entries).
+      const entries = applyGlossaryToEntries(
+        resolveSpeakerLabels(
+          displayTranscript.map((item) =>
+            recordingItemToTranscriptEntry(
+              item,
+              Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
+            )
+          ),
+          recording.speakers
         ),
-        recording.speakers
+        glossaryRules
       );
       const file = buildTextExport(format, entries, {
         baseName: `LivePolyTrans-${recording.id}-transcript`,
@@ -1073,7 +1093,7 @@
                     <i class:mic={item.stream === 'mic'} style={rowDotStyle(item)}></i>
                     {rowSpeakerName(item)}
                   </span>
-                  <span class="text">{item.text}</span>
+                  <span class="text">{applyGlossary(item.text, glossaryRules)}</span>
                   {#if item.translation}
                     <span class="sub">{item.translation}</span>
                   {/if}

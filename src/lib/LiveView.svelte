@@ -2,6 +2,7 @@
   import AiPanel from '$lib/AiPanel.svelte';
   import CaptionThread from '$lib/CaptionThread.svelte';
   import type { ChatTurn } from '$lib/aiContext';
+  import type { GlossaryRule } from '$lib/glossary';
   import type { LiveSpeakerOverrides } from '$lib/settingsStore';
   import type { SpeechModelSelection } from '$lib/speechModels';
   import type { ThreadItem } from '$lib/transcripts';
@@ -20,6 +21,7 @@
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
   export let speakerOverrides: LiveSpeakerOverrides | null = null;
+  export let glossaryRules: GlossaryRule[] = [];
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
@@ -68,6 +70,7 @@
     {speechModel}
     {confirmingClear}
     {speakerOverrides}
+    {glossaryRules}
     {onTogglePause}
     {onCopy}
     {onSave}

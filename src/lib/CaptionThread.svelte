@@ -1,9 +1,15 @@
 <script lang="ts">
   import { formatRecordingTimer } from '$lib/captureState';
+  import { applyGlossary, type GlossaryRule } from '$lib/glossary';
   import { isScrolledToBottom } from '$lib/scroll';
   import { resolveSpeakerName } from '$lib/speakers';
   import { displayTranscriptMessage } from '$lib/transcriptDisplay';
-  import { isRecordingMarker, windowThreadItems, type ThreadItem } from '$lib/transcripts';
+  import {
+    isRecordingMarker,
+    windowThreadItems,
+    type ChatMessage,
+    type ThreadItem
+  } from '$lib/transcripts';
   import type { LiveSpeakerOverrides } from '$lib/settingsStore';
   import type { SpeechModelSelection } from '$lib/speechModels';
 
@@ -23,6 +29,10 @@
   // Custom names from settings for the two live speakers; resolution stays
   // at display time so the underlying messages keep their original labels.
   export let speakerOverrides: LiveSpeakerOverrides | null = null;
+  // Glossary corrections from settings, applied to final captions only at
+  // render time; interim text stays raw and the stored messages are never
+  // rewritten.
+  export let glossaryRules: GlossaryRule[] = [];
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
@@ -83,6 +93,15 @@
     syncJumpToLatestButton();
   }
 
+  // Glossary substitution appears the moment a message flips to final;
+  // translations stay engine output.
+  function withGlossary(item: ChatMessage, rules: GlossaryRule[]): ChatMessage {
+    if (!item.isFinal || rules.length === 0) {
+      return item;
+    }
+    return { ...item, text: applyGlossary(item.text, rules) };
+  }
+
   function markerTime(timestamp: string): string {
     const parsed = new Date(timestamp);
     if (Number.isNaN(parsed.getTime())) {
@@ -136,7 +155,11 @@
               : `⏹ 録音終了 ${markerTime(item.timestamp)} · ${formatRecordingTimer(item.durationSeconds ?? 0)}`}
           </div>
         {:else}
-          {@const transcriptDisplay = displayTranscriptMessage(item, mainLanguage, subLanguage)}
+          {@const transcriptDisplay = displayTranscriptMessage(
+            withGlossary(item, glossaryRules),
+            mainLanguage,
+            subLanguage
+          )}
           <div
             class="cap"
             class:mic={item.role === 'self'}
