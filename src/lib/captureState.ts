@@ -42,6 +42,7 @@ export type RecordingSession = {
   id: string;
   dir: string;
   startedAtMs: number;
+  startMessageIndex: number;
 };
 
 export function recordingElapsedSeconds(

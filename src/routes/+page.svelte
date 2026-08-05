@@ -25,9 +25,12 @@
   import { applyGlossaryToEntries, type GlossaryRule } from '$lib/glossary';
   import {
     getAutoStart,
+    getExportDirectory,
+    getFileNameTemplate,
     getGlossaryRules,
     getIncludeAudio,
     getLiveSpeakerOverrides,
+    getMarkdownAutoExport,
     getSpeechModel,
     getTranscriptFontScale,
     SETTINGS_KEYS,
@@ -38,6 +41,7 @@
     subscribeSettings,
     type LiveSpeakerOverrides
   } from '$lib/settingsStore';
+  import { markdownExportPath } from '$lib/saveSettings';
   import { resolveSpeakerLabels } from '$lib/speakers';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import { chatMessagesToTranscriptEntries, type TranscriptEntry } from '$lib/export/types';
@@ -645,7 +649,12 @@
       const created = await invoke<CreatedRecording>('start_recording_session', {
         includeAudio: includeAudioEnabled
       });
-      recordingSession = { id: created.id, dir: created.dir, startedAtMs: Date.now() };
+      recordingSession = {
+        id: created.id,
+        dir: created.dir,
+        startedAtMs: Date.now(),
+        startMessageIndex: messages.length
+      };
       recordingElapsed = 0;
       recordingTimer = setInterval(() => {
         if (recordingSession) {
@@ -678,10 +687,49 @@
         ...markers,
         recordingStopMarker(session.id, new Date().toISOString(), messages.length, durationSeconds)
       ];
-      showActionNotice('Saved to Recordings.');
+      const autoExportPath = await autoExportRecordingMarkdown(session);
+      showActionNotice(
+        autoExportPath
+          ? `Saved to Recordings and exported: ${autoExportPath.split('/').pop() ?? autoExportPath}`
+          : 'Saved to Recordings.'
+      );
     } catch (error) {
       appError = String(error);
     }
+  }
+
+  async function autoExportRecordingMarkdown(session: RecordingSession): Promise<string | null> {
+    if (!getMarkdownAutoExport()) {
+      return null;
+    }
+
+    const exportDirectory = getExportDirectory();
+    if (exportDirectory === '') {
+      return null;
+    }
+
+    const recordingMessages = messages.slice(session.startMessageIndex);
+    if (recordingMessages.length === 0) {
+      return null;
+    }
+
+    const entries = resolveLiveEntries(chatMessagesToTranscriptEntries(recordingMessages));
+    const startedAt = new Date(session.startedAtMs);
+    const path = markdownExportPath(exportDirectory, getFileNameTemplate(), {
+      date: startedAt,
+      title: session.id,
+      lang: `${mainLanguage}-${subLanguage || 'none'}`
+    });
+    const file = buildTextExport('markdown', entries, {
+      baseName: session.id,
+      markdownMeta: {
+        dateLabel: startedAt.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
+        participants: uniqueSpeakerLabels(entries)
+      }
+    });
+
+    await invoke('save_text_file', { path, contents: file.contents });
+    return path;
   }
 
   async function selectCaptureMode(mode: CaptureMode) {
