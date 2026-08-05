@@ -15,7 +15,7 @@ export type SilenceState = 'unknown' | 'active' | 'silent';
 
 export const AUDIO_LEVEL_HISTORY_LIMIT = 32;
 export const AUDIO_SILENCE_WINDOW_MS = 3_000;
-export const AUDIO_SILENCE_THRESHOLD_PEAK = 0.01;
+export const AUDIO_SILENCE_THRESHOLD_DB = -40;
 
 export function emptyAudioLevelHistory(): AudioLevelHistory {
   return {
@@ -66,18 +66,46 @@ export function latestAudioLevel(
 export function streamSilenceState(
   history: AudioLevelHistory,
   stream: AudioStream,
-  options: { nowMs?: number; windowMs?: number; thresholdPeak?: number } = {}
+  options: { nowMs?: number; windowMs?: number; thresholdDb?: number } = {}
 ): SilenceState {
   const nowMs = options.nowMs ?? Date.now();
   const windowMs = options.windowMs ?? AUDIO_SILENCE_WINDOW_MS;
-  const thresholdPeak = options.thresholdPeak ?? AUDIO_SILENCE_THRESHOLD_PEAK;
+  const thresholdDb = options.thresholdDb ?? AUDIO_SILENCE_THRESHOLD_DB;
   const recent = history[stream].filter((level) => nowMs - level.receivedAtMs <= windowMs);
 
   if (recent.length === 0) {
     return 'unknown';
   }
 
-  return recent.some((level) => level.peak >= thresholdPeak) ? 'active' : 'silent';
+  return silenceFor(recent, thresholdDb, windowMs, nowMs) >= windowMs ? 'silent' : 'active';
+}
+
+export function silenceFor(
+  levels: readonly Pick<StreamAudioLevel, 'rms' | 'receivedAtMs'>[],
+  thresholdDb: number,
+  windowMs: number,
+  nowMs = Date.now()
+): number {
+  const recent = levels.filter((level) => nowMs - level.receivedAtMs <= windowMs);
+  if (recent.length === 0) {
+    return 0;
+  }
+
+  const lastActiveIndex = recent.findLastIndex((level) => rmsDb(level.rms) >= thresholdDb);
+  const silenceStartedAt =
+    lastActiveIndex >= 0
+      ? (recent[lastActiveIndex + 1]?.receivedAtMs ?? nowMs)
+      : (recent[0]?.receivedAtMs ?? nowMs);
+
+  return Math.max(0, nowMs - silenceStartedAt);
+}
+
+export function rmsDb(rms: number): number {
+  if (!Number.isFinite(rms) || rms <= 0) {
+    return -Infinity;
+  }
+
+  return 20 * Math.log10(rms);
 }
 
 function clampLevel(value: number): number {

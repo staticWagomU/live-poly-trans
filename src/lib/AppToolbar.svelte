@@ -3,7 +3,10 @@
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
   import {
     audioLevelMeter,
+    AUDIO_SILENCE_THRESHOLD_DB,
+    AUDIO_SILENCE_WINDOW_MS,
     latestAudioLevel,
+    silenceFor,
     streamSilenceState,
     type AudioLevelHistory,
     type SilenceState
@@ -88,6 +91,17 @@
     }
 
     return streamSilenceState(audioLevelHistory, stream, { nowMs: meterNow });
+  }
+
+  function silenceSeconds(stream: AudioStream): number {
+    return Math.floor(
+      silenceFor(
+        audioLevelHistory[stream],
+        AUDIO_SILENCE_THRESHOLD_DB,
+        AUDIO_SILENCE_WINDOW_MS,
+        meterNow
+      ) / 1000
+    );
   }
 
   onMount(() => {
@@ -189,7 +203,7 @@
                 <span style={`transform: scaleX(${meterValue(stream)})`}></span>
               </span>
               {#if state === 'silent'}
-                <span class="level-warning">無音</span>
+                <span class="level-warning">無音 {silenceSeconds(stream)}s</span>
               {/if}
             </div>
           {/each}
@@ -499,13 +513,13 @@
   .level-lanes {
     display: grid;
     gap: 4px;
-    width: 132px;
+    width: 168px;
     flex: 0 0 auto;
   }
 
   .level-lane {
     display: grid;
-    grid-template-columns: 36px minmax(42px, 1fr) 28px;
+    grid-template-columns: 36px minmax(42px, 1fr) 54px;
     align-items: center;
     gap: 6px;
     min-height: 16px;

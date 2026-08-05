@@ -3,6 +3,7 @@ import {
   appendAudioLevel,
   audioLevelMeter,
   emptyAudioLevelHistory,
+  silenceFor,
   streamSilenceState
 } from './audioLevels';
 import type { AudioLevelHistory } from './audioLevels';
@@ -58,7 +59,7 @@ describe('streamSilenceState', () => {
       streamSilenceState(history, 'mic', {
         nowMs: 2_000,
         windowMs: 2_000,
-        thresholdPeak: 0.01
+        thresholdDb: -40
       })
     ).toBe('silent');
   });
@@ -76,9 +77,22 @@ describe('streamSilenceState', () => {
       streamSilenceState(history, 'mic', {
         nowMs: 1_000,
         windowMs: 2_000,
-        thresholdPeak: 0.01
+        thresholdDb: -40
       })
     ).toBe('active');
+  });
+});
+
+describe('silenceFor', () => {
+  it('returns how long recent RMS has stayed below the dB threshold', () => {
+    const levels = [
+      { rms: 0.2, receivedAtMs: 0 },
+      { rms: 0.001, receivedAtMs: 1_000 },
+      { rms: 0.001, receivedAtMs: 2_000 },
+      { rms: 0.001, receivedAtMs: 3_000 }
+    ];
+
+    expect(silenceFor(levels, -40, 5_000, 3_000)).toBe(2_000);
   });
 });
 
