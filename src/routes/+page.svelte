@@ -36,6 +36,13 @@
   import { chatMessagesToTranscriptEntries } from '$lib/export/types';
   import { toPlainText } from '$lib/export/plainText';
   import {
+    buildTextExport,
+    saveTextExportToFile,
+    timestampLabel,
+    uniqueSpeakerLabels,
+    type TextExportFormat
+  } from '$lib/export/saveTextExport';
+  import {
     applyTranslationEvent,
     interleaveThreadItems,
     recordingStartMarker,
@@ -942,6 +949,33 @@
     }
   }
 
+  // Format-picking save (Phase 1-4): unlike ⌘S it generates the text on the
+  // frontend and lets the user choose the destination in a save dialog.
+  async function saveTranscriptAs(format: TextExportFormat) {
+    if (messages.length === 0) {
+      return;
+    }
+
+    const entries = chatMessagesToTranscriptEntries(messages);
+    const now = new Date();
+    try {
+      const file = buildTextExport(format, entries, {
+        baseName: `LivePolyTrans-transcript-${timestampLabel(now)}`,
+        markdownMeta: {
+          dateLabel: now.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
+          participants: uniqueSpeakerLabels(entries)
+        }
+      });
+      const destination = await saveTextExportToFile(file);
+      if (destination !== null) {
+        const fileName = destination.split('/').pop() ?? destination;
+        showActionNotice(`Saved: ${fileName}`);
+      }
+    } catch (error) {
+      appError = String(error);
+    }
+  }
+
   // Clear wipes the whole meeting (transcript, summary, chat) with no undo
   // and sits right next to Save, so it asks for a second click and disarms
   // by itself.
@@ -1006,6 +1040,7 @@
       onToggleRecordingSession={toggleRecordingSession}
       onCopy={copyTranscript}
       onSave={saveTranscript}
+      onSaveAs={saveTranscriptAs}
       onFontScaleChange={setTranscriptFontScale}
       onEnterMimi={() => void enterMimi()}
     />

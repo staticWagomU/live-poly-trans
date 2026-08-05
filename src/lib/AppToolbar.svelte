@@ -1,5 +1,6 @@
 <script lang="ts">
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
+  import type { TextExportFormat } from '$lib/export/saveTextExport';
   import { formatRecordingTimer } from '$lib/captureState';
   import { languageControlLabel, type LanguageInfo } from '$lib/languages';
   import {
@@ -30,6 +31,7 @@
   export let onToggleRecordingSession: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
+  export let onSaveAs: (format: TextExportFormat) => void;
   export let onFontScaleChange: (scale: number) => void;
   export let onEnterMimi: () => void;
 
@@ -261,6 +263,37 @@
               }}
             >
               ファイルへ保存… <span class="kbd">⌘S</span>
+            </button>
+            <div class="mlabel">形式を選んで保存</div>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onSaveAs('markdown');
+                closeMenus();
+              }}
+            >
+              議事録 <span class="kbd">.md</span>
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onSaveAs('srt');
+                closeMenus();
+              }}
+            >
+              字幕 SubRip <span class="kbd">.srt</span>
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onSaveAs('vtt');
+                closeMenus();
+              }}
+            >
+              字幕 WebVTT <span class="kbd">.vtt</span>
             </button>
             <div class="sep"></div>
             <div class="mlabel">文字サイズ: {Math.round(transcriptFontScale * 100)}%</div>
