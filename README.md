@@ -30,6 +30,14 @@ The app automatically detects installed Apple speech languages and picks a langu
 - `Ask` is a chat with history: follow-up questions see the previous turns and the recent transcript.
 - Both run on Apple Intelligence via a persistent helper process, so responses do not pay model startup cost on every request.
 
+Apple Intelligence is only required for these AI summary/chat features. Live transcription, recording, and Whisper-based recognition can still run without Apple Intelligence.
+
+## Translation Backends
+
+Open `Settings` > `Translation` to choose the translation engine. Apple Translation is the default on-device path. DeepL API keys are stored in macOS Keychain, and Ollama stores only the local endpoint and model name.
+
+The external DeepL/Ollama HTTP backends are available in the Rust layer and are being wired into the live transcript event flow. The intended Apple Intelligence-free setup is Whisper recognition plus Ollama translation on a local model.
+
 ## Recordings
 
 Enable `Save audio` and record; then open the `Recordings` tab:
@@ -63,6 +71,8 @@ Recordings live under `recordings/<recording-id>/` with per-lane audio (`mic.m4a
 - Apple Speech language packs for the languages you want (auto-downloaded when missing)
 - Microphone permission
 - Audio capture permission for speaker/system audio
-- Apple Intelligence enabled for the summary/chat features
+- Apple Intelligence enabled for the summary/chat features only
+- Optional: Whisper model/engine for non-Apple Speech recognition
+- Optional: Ollama for local translation without Apple Intelligence
 
 Speaker capture depends on ScreenCaptureKit system-audio capture and macOS privacy approval.
