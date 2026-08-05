@@ -330,6 +330,7 @@
       if (typeof selected !== 'string') {
         return;
       }
+      await invoke('validate_export_directory', { path: selected });
       setExportDirectory(selected);
       exportDirectory = getExportDirectory();
     } catch (directoryError) {

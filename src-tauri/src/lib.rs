@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
     collections::HashMap,
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::Write,
     io::{BufRead, BufReader},
     path::{Path, PathBuf},
@@ -930,6 +930,30 @@ pub fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
     }
 
     fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+pub fn validate_export_directory_path(path: &Path) -> Result<(), String> {
+    if path.as_os_str().is_empty() {
+        return Err("export directory is empty".to_string());
+    }
+    if !path.is_dir() {
+        return Err(format!(
+            "export directory is not a directory: {}",
+            path.display()
+        ));
+    }
+
+    let probe = path.join(format!(
+        ".live-poly-trans-write-test-{}",
+        std::process::id()
+    ));
+    let file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&probe)
+        .map_err(|error| format!("export directory is not writable: {error}"))?;
+    drop(file);
+    fs::remove_file(&probe).map_err(|error| error.to_string())
 }
 
 fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2490,6 +2514,15 @@ pub mod commands {
             .await
             .map_err(|error| error.to_string())?
     }
+
+    #[tauri::command]
+    pub async fn validate_export_directory(path: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            validate_export_directory_path(Path::new(&path))
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
 }
 
 pub fn run() {
@@ -2528,7 +2561,8 @@ pub fn run() {
             commands::read_recording_transcript,
             commands::recording_waveform,
             commands::export_recording,
-            commands::save_text_file
+            commands::save_text_file,
+            commands::validate_export_directory
         ])
         .setup(|app| {
             let _ = app.get_webview_window("main");
@@ -3321,6 +3355,28 @@ mod tests {
     #[test]
     fn write_text_file_rejects_an_empty_path() {
         assert!(write_text_file("  ", "text").is_err());
+    }
+
+    #[test]
+    fn validate_export_directory_accepts_existing_writable_directory() {
+        let dir = std::env::temp_dir().join(format!("lpt-export-dir-ok-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let result = validate_export_directory_path(&dir);
+        let _ = fs::remove_dir_all(&dir);
+
+        assert_eq!(result, Ok(()));
+    }
+
+    #[test]
+    fn validate_export_directory_rejects_empty_and_non_directories() {
+        let dir = std::env::temp_dir().join(format!("lpt-export-dir-file-{}", std::process::id()));
+        fs::write(&dir, "not a dir").unwrap();
+
+        assert!(validate_export_directory_path(Path::new("")).is_err());
+        assert!(validate_export_directory_path(&dir).is_err());
+
+        let _ = fs::remove_file(&dir);
     }
 
     #[test]
