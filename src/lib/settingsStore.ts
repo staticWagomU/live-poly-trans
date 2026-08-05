@@ -8,6 +8,7 @@ import {
   type GlossaryRule
 } from './glossary';
 import { parseMimiScale } from './mimiDisplay';
+import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
 import {
   parseSpeechModelPreference,
   speechModelPreferenceValue,
@@ -25,7 +26,10 @@ export const SETTINGS_KEYS = {
   hfToken: 'lpt-hf-token',
   selfSpeakerName: 'lpt-self-speaker-name',
   otherSpeakerName: 'lpt-other-speaker-name',
-  glossary: 'lpt-glossary'
+  glossary: 'lpt-glossary',
+  exportDirectory: 'lpt-export-directory',
+  fileNameTemplate: 'lpt-file-name-template',
+  markdownAutoExport: 'lpt-markdown-auto-export'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -179,6 +183,30 @@ export function setGlossaryRules(rules: GlossaryRule[]) {
   } else {
     remove(SETTINGS_KEYS.glossary);
   }
+}
+
+export function getExportDirectory(): string {
+  return read(SETTINGS_KEYS.exportDirectory) ?? '';
+}
+
+export function setExportDirectory(path: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.exportDirectory, path);
+}
+
+export function getFileNameTemplate(): string {
+  return read(SETTINGS_KEYS.fileNameTemplate) ?? DEFAULT_FILE_NAME_TEMPLATE;
+}
+
+export function setFileNameTemplate(template: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.fileNameTemplate, template);
+}
+
+export function getMarkdownAutoExport(): boolean {
+  return read(SETTINGS_KEYS.markdownAutoExport) === '1';
+}
+
+export function setMarkdownAutoExport(enabled: boolean) {
+  write(SETTINGS_KEYS.markdownAutoExport, enabled ? '1' : '0');
 }
 
 /// Custom names for the two live speakers, shaped like a recording's

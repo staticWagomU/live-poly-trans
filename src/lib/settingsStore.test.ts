@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getAutoStart,
   getGlossaryRules,
+  getMarkdownAutoExport,
+  getExportDirectory,
+  getFileNameTemplate,
   getHfToken,
   getHfTokenOrNull,
   getIncludeAudio,
@@ -15,6 +18,9 @@ import {
   SETTINGS_KEYS,
   setAutoStart,
   setGlossaryRules,
+  setMarkdownAutoExport,
+  setExportDirectory,
+  setFileNameTemplate,
   setHfToken,
   setIncludeAudio,
   setMimiInvert,
@@ -26,6 +32,7 @@ import {
   subscribeSettings
 } from './settingsStore';
 import { DEFAULT_MIMI_SCALE } from './mimiDisplay';
+import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
 import { DEFAULT_TRANSCRIPT_FONT_SCALE } from './transcriptFontSize';
 
 function createMemoryStorage(): Storage {
@@ -239,6 +246,32 @@ describe('settings store', () => {
     setHfToken('');
     expect(notified).toBe(2);
   });
+
+  it('round-trips export directory and removes it when blank', () => {
+    expect(getExportDirectory()).toBe('');
+    setExportDirectory('  /Users/me/Documents/Meetings  ');
+    expect(getExportDirectory()).toBe('/Users/me/Documents/Meetings');
+
+    setExportDirectory(' ');
+    expect(getExportDirectory()).toBe('');
+  });
+
+  it('round-trips the file name template and falls back to the default when blank', () => {
+    expect(getFileNameTemplate()).toBe(DEFAULT_FILE_NAME_TEMPLATE);
+    setFileNameTemplate('{date} {title}');
+    expect(getFileNameTemplate()).toBe('{date} {title}');
+
+    setFileNameTemplate(' ');
+    expect(getFileNameTemplate()).toBe(DEFAULT_FILE_NAME_TEMPLATE);
+  });
+
+  it('round-trips markdown auto export as a 1/0 flag', () => {
+    expect(getMarkdownAutoExport()).toBe(false);
+    setMarkdownAutoExport(true);
+    expect(getMarkdownAutoExport()).toBe(true);
+    setMarkdownAutoExport(false);
+    expect(getMarkdownAutoExport()).toBe(false);
+  });
 });
 
 describe('settings store without localStorage', () => {
@@ -255,6 +288,9 @@ describe('settings store without localStorage', () => {
     expect(getOtherSpeakerName()).toBe('');
     expect(getLiveSpeakerOverrides()).toBeNull();
     expect(getGlossaryRules()).toEqual([]);
+    expect(getExportDirectory()).toBe('');
+    expect(getFileNameTemplate()).toBe(DEFAULT_FILE_NAME_TEMPLATE);
+    expect(getMarkdownAutoExport()).toBe(false);
     expect(() => setAutoStart(false)).not.toThrow();
     expect(() =>
       setGlossaryRules([{ from: 'a', to: 'b', matchType: 'text', enabled: true }])
