@@ -55,6 +55,13 @@ export type RecordingTranscriptItem = {
   speakerIndex?: number;
 };
 
+export type RecordingSearchHit = {
+  recordingId: string;
+  entryIndex: number;
+  snippet: string;
+  timestampMs: number;
+};
+
 export function parseSegmentStartMs(segmentId: unknown): number {
   if (typeof segmentId !== 'string') {
     return 0;

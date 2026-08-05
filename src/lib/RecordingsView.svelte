@@ -3,7 +3,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWebview } from '@tauri-apps/api/webview';
   import { open as openFileDialog } from '@tauri-apps/plugin-dialog';
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import {
     buildRecordingTranscript,
     buildWhisperxTranscript,
@@ -13,6 +13,7 @@
     trimTranscript,
     waveformDisplayPeaks,
     type RecordingFileInfo,
+    type RecordingSearchHit,
     type RecordingSpeaker,
     type RecordingSummary,
     type RecordingTranscriptItem,
@@ -73,6 +74,12 @@
   let isLoadingWaveform = $state(false);
   let actionsOpen = $state(false);
   let isDropTarget = $state(false);
+  let searchQuery = $state('');
+  let searchResults = $state<RecordingSearchHit[]>([]);
+  let isSearching = $state(false);
+  let searchError = $state<string | null>(null);
+  let searchFocusTimestampMs = $state<number | null>(null);
+  let searchTimer: ReturnType<typeof setTimeout> | null = null;
 
   // Participant chip currently in inline-edit mode (speaker id) and its
   // in-progress name.
@@ -107,6 +114,7 @@
   );
   const activeKey = $derived(activeItemKey(displayTranscript, currentTimeMs));
   const participantStats = $derived(speakerStats(displayTranscript));
+  const searchResultGroups = $derived(groupSearchResults(searchResults, recordings));
   const reprocessStageLabel = $derived(
     reprocessStage === 'transcribe'
       ? '1/3 文字起こし中…'
@@ -164,10 +172,74 @@
       recordingRequest.invalidate();
       fileRequest.invalidate();
       unsubscribeGlossary();
+      if (searchTimer) {
+        clearTimeout(searchTimer);
+      }
       void unlistenDrop.then((unlisten) => unlisten());
       void unlistenProgress.then((unlisten) => unlisten());
     };
   });
+
+  function groupSearchResults(results: RecordingSearchHit[], allRecordings: RecordingSummary[]) {
+    const byId = new Map(allRecordings.map((recording) => [recording.id, recording]));
+    const groups: { recording: RecordingSummary | null; hits: RecordingSearchHit[] }[] = [];
+    for (const hit of results) {
+      let group = groups.find((entry) => entry.recording?.id === hit.recordingId);
+      if (!group) {
+        group = { recording: byId.get(hit.recordingId) ?? null, hits: [] };
+        groups.push(group);
+      }
+      group.hits.push(hit);
+    }
+    return groups;
+  }
+
+  function scheduleSearch(value: string) {
+    searchQuery = value;
+    if (searchTimer) {
+      clearTimeout(searchTimer);
+    }
+    searchTimer = setTimeout(() => {
+      void runSearch(searchQuery);
+    }, 180);
+  }
+
+  async function runSearch(query: string) {
+    const trimmed = query.trim();
+    searchError = null;
+    if (trimmed === '') {
+      searchResults = [];
+      isSearching = false;
+      searchFocusTimestampMs = null;
+      return;
+    }
+
+    isSearching = true;
+    try {
+      searchResults = await invoke<RecordingSearchHit[]>('search_recordings', { query: trimmed });
+    } catch (searchLoadError) {
+      searchError = String(searchLoadError);
+      searchResults = [];
+    } finally {
+      isSearching = false;
+    }
+  }
+
+  async function openSearchHit(hit: RecordingSearchHit) {
+    const recording = recordings.find((entry) => entry.id === hit.recordingId);
+    if (!recording) {
+      return;
+    }
+
+    await selectRecording(recording);
+    searchFocusTimestampMs = hit.timestampMs;
+    currentTimeMs = hit.timestampMs;
+    await tick();
+    document
+      .querySelector(`[data-start-ms="${hit.timestampMs}"]`)
+      ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    seekTo(hit.timestampMs);
+  }
 
   async function refreshRecordings(selectId: string | null = null) {
     isLoadingRecordings = true;
@@ -332,6 +404,7 @@
   }
 
   function seekTo(startMs: number) {
+    currentTimeMs = startMs;
     if (!audioElement) {
       return;
     }
@@ -742,30 +815,62 @@
     <button type="button" class="upload-btn" disabled={isImporting} onclick={pickAndImport}>
       {isImporting ? '読み込み中…' : '＋ 音声ファイルを読み込む'}
     </button>
-    {#each groups as group (group.label)}
-      <div class="group">{group.label}</div>
-      {#each group.recordings as recording (recording.id)}
-        <button
-          type="button"
-          class="rec-item"
-          class:active={selectedRecording?.id === recording.id}
-          onclick={() => selectRecording(recording)}
-        >
-          <span class="t">{recordingTitle(recording)}</span>
-          <span class="m">
-            <span>{recordingStreamsLabel(recording)}</span>
-          </span>
-        </button>
+    <input
+      class="rec-search"
+      type="search"
+      placeholder="録音を全文検索"
+      aria-label="録音を全文検索"
+      value={searchQuery}
+      oninput={(event) => scheduleSearch(event.currentTarget.value)}
+    />
+
+    {#if searchQuery.trim() !== ''}
+      <div class="group">
+        {isSearching ? '検索中…' : `${searchResults.length}件のヒット`}
+      </div>
+      {#if searchError}
+        <p class="side-empty">{searchError}</p>
+      {:else if !isSearching && searchResults.length === 0}
+        <p class="side-empty">一致する録音はありません。</p>
+      {:else}
+        {#each searchResultGroups as group (group.recording?.id ?? group.hits[0].recordingId)}
+          <div class="search-recording-title">
+            {group.recording ? recordingTitle(group.recording) : group.hits[0].recordingId}
+          </div>
+          {#each group.hits as hit (`${hit.recordingId}-${hit.entryIndex}-${hit.timestampMs}`)}
+            <button type="button" class="search-hit" onclick={() => openSearchHit(hit)}>
+              <span class="hit-time">{formatTimestampMs(hit.timestampMs)}</span>
+              <span class="hit-snippet">{hit.snippet}</span>
+            </button>
+          {/each}
+        {/each}
+      {/if}
+    {:else}
+      {#each groups as group (group.label)}
+        <div class="group">{group.label}</div>
+        {#each group.recordings as recording (recording.id)}
+          <button
+            type="button"
+            class="rec-item"
+            class:active={selectedRecording?.id === recording.id}
+            onclick={() => selectRecording(recording)}
+          >
+            <span class="t">{recordingTitle(recording)}</span>
+            <span class="m">
+              <span>{recordingStreamsLabel(recording)}</span>
+            </span>
+          </button>
+        {/each}
       {/each}
-    {/each}
-    {#if recordings.length === 0}
-      <p class="side-empty">
-        {isLoadingRecordings
-          ? '読み込み中…'
-          : error
-            ? '一覧を読み込めませんでした。'
-            : 'まだ録音がありません。'}
-      </p>
+      {#if recordings.length === 0}
+        <p class="side-empty">
+          {isLoadingRecordings
+            ? '読み込み中…'
+            : error
+              ? '一覧を読み込めませんでした。'
+              : 'まだ録音がありません。'}
+        </p>
+      {/if}
     {/if}
   </aside>
 
@@ -1085,6 +1190,9 @@
                 type="button"
                 class="tr-row"
                 class:now={item.key === activeKey}
+                class:search-hit-row={searchFocusTimestampMs === item.startMs}
+                class:search-dim={searchFocusTimestampMs !== null && searchFocusTimestampMs !== item.startMs}
+                data-start-ms={item.startMs}
                 onclick={() => seekTo(item.startMs)}
               >
                 <span class="ts">{formatTimestampMs(item.startMs)}</span>
@@ -1186,6 +1294,18 @@
     cursor: default;
   }
 
+  .rec-search {
+    width: calc(100% - 8px);
+    margin: 0 4px 8px;
+    border: 1px solid var(--hairline);
+    border-radius: 9px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 8px 10px;
+    font: inherit;
+    font-size: 12.5px;
+  }
+
   .group {
     font-size: 11px;
     font-weight: 600;
@@ -1225,6 +1345,41 @@
 
   .rec-item.active .m {
     color: rgba(255, 255, 255, 0.75);
+  }
+
+  .search-recording-title {
+    padding: 8px 8px 4px;
+    color: var(--ink);
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .search-hit {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 42px 1fr;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 9px;
+    text-align: left;
+  }
+
+  .search-hit:hover {
+    background: var(--hover-wash);
+  }
+
+  .hit-time {
+    color: var(--blue);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    padding-top: 1px;
+  }
+
+  .hit-snippet {
+    color: var(--ink);
+    font-size: 12.5px;
+    line-height: 1.35;
+    word-break: break-word;
   }
 
   .side-empty {
@@ -1723,6 +1878,15 @@
 
   .tr-row.now {
     background: var(--blue-soft);
+  }
+
+  .tr-row.search-hit-row {
+    background: color-mix(in srgb, var(--blue-soft) 72%, var(--canvas));
+    box-shadow: inset 3px 0 0 var(--blue);
+  }
+
+  .tr-row.search-dim {
+    opacity: 0.48;
   }
 
   .tr-row .ts {
