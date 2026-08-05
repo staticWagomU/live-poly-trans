@@ -2,6 +2,11 @@
 /// get/set pairs, and in-process change subscription. Storage access is lazy
 /// and guarded so the module also loads where localStorage does not exist
 /// (vitest's node environment, svelte-check prerendering).
+import {
+  parseGlossaryRules,
+  serializeGlossaryRules,
+  type GlossaryRule
+} from './glossary';
 import { parseMimiScale } from './mimiDisplay';
 import {
   parseSpeechModelPreference,
@@ -19,7 +24,8 @@ export const SETTINGS_KEYS = {
   mimiInvert: 'lpt-mimi-invert',
   hfToken: 'lpt-hf-token',
   selfSpeakerName: 'lpt-self-speaker-name',
-  otherSpeakerName: 'lpt-other-speaker-name'
+  otherSpeakerName: 'lpt-other-speaker-name',
+  glossary: 'lpt-glossary'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -158,6 +164,21 @@ export function getOtherSpeakerName(): string {
 
 export function setOtherSpeakerName(value: string) {
   writeTrimmedOrRemove(SETTINGS_KEYS.otherSpeakerName, value);
+}
+
+/// Glossary rules stored as one JSON string. Corrupt storage reads as []
+/// (parseGlossaryRules is tolerant) and an empty list removes the key so the
+/// no-glossary state stays "not set".
+export function getGlossaryRules(): GlossaryRule[] {
+  return parseGlossaryRules(read(SETTINGS_KEYS.glossary));
+}
+
+export function setGlossaryRules(rules: GlossaryRule[]) {
+  if (rules.length > 0) {
+    write(SETTINGS_KEYS.glossary, serializeGlossaryRules(rules));
+  } else {
+    remove(SETTINGS_KEYS.glossary);
+  }
 }
 
 /// Custom names for the two live speakers, shaped like a recording's

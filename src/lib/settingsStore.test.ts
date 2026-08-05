@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getAutoStart,
+  getGlossaryRules,
   getHfToken,
   getHfTokenOrNull,
   getIncludeAudio,
@@ -13,6 +14,7 @@ import {
   getTranscriptFontScale,
   SETTINGS_KEYS,
   setAutoStart,
+  setGlossaryRules,
   setHfToken,
   setIncludeAudio,
   setMimiInvert,
@@ -192,6 +194,41 @@ describe('settings store', () => {
     expect(autoStartEvents).toEqual([false]);
   });
 
+  it('defaults glossary rules to an empty list when unset', () => {
+    expect(getGlossaryRules()).toEqual([]);
+  });
+
+  it('round-trips glossary rules as JSON', () => {
+    const rules = [
+      { from: 'Cloud', to: 'Claude', matchType: 'text' as const, enabled: true },
+      { from: '(\\d+)円', to: '¥$1', matchType: 'regex' as const, enabled: false }
+    ];
+    setGlossaryRules(rules);
+    expect(getGlossaryRules()).toEqual(rules);
+  });
+
+  it('removes the glossary entry when set to an empty list', () => {
+    setGlossaryRules([{ from: 'a', to: 'b', matchType: 'text', enabled: true }]);
+    setGlossaryRules([]);
+    expect(localStorage.getItem(SETTINGS_KEYS.glossary)).toBeNull();
+  });
+
+  it('returns an empty list for corrupt glossary storage', () => {
+    localStorage.setItem(SETTINGS_KEYS.glossary, '{broken');
+    expect(getGlossaryRules()).toEqual([]);
+  });
+
+  it('notifies subscribers when the glossary changes', () => {
+    let notified = 0;
+    subscribeSettings(SETTINGS_KEYS.glossary, () => {
+      notified += 1;
+    });
+
+    setGlossaryRules([{ from: 'a', to: 'b', matchType: 'text', enabled: true }]);
+    setGlossaryRules([]);
+    expect(notified).toBe(2);
+  });
+
   it('notifies subscribers when a blank hf token removes the entry', () => {
     let notified = 0;
     subscribeSettings(SETTINGS_KEYS.hfToken, () => {
@@ -217,7 +254,11 @@ describe('settings store without localStorage', () => {
     expect(getSelfSpeakerName()).toBe('');
     expect(getOtherSpeakerName()).toBe('');
     expect(getLiveSpeakerOverrides()).toBeNull();
+    expect(getGlossaryRules()).toEqual([]);
     expect(() => setAutoStart(false)).not.toThrow();
+    expect(() =>
+      setGlossaryRules([{ from: 'a', to: 'b', matchType: 'text', enabled: true }])
+    ).not.toThrow();
     expect(() => setHfToken('token')).not.toThrow();
     expect(() => setSelfSpeakerName('田中')).not.toThrow();
   });
