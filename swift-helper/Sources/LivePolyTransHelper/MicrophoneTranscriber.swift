@@ -46,7 +46,8 @@ public func runMicrophoneTranscription(
     stream: stream,
     analyzer: analyzer,
     transcribers: transcribers,
-    recordFile: recordFile
+    recordFile: recordFile,
+    emitter: emitter
   )
 
   let translators = Dictionary(uniqueKeysWithValues: languages.map { language in
@@ -256,20 +257,23 @@ private func makeInputSource(
   stream: AudioStream,
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
-  recordFile: String?
+  recordFile: String?,
+  emitter: HelperEventEmitter
 ) async throws -> AudioInputSource<AnalyzerInput> {
   switch stream {
   case .mic:
     return try await makeMicrophoneInputSource(
       analyzer: analyzer,
       transcribers: transcribers,
-      recordFile: recordFile
+      recordFile: recordFile,
+      emitter: emitter
     )
   case .speaker:
     return try await makeSpeakerInputSource(
       analyzer: analyzer,
       transcribers: transcribers,
-      recordFile: recordFile
+      recordFile: recordFile,
+      emitter: emitter
     )
   }
 }
@@ -278,8 +282,10 @@ private func makeInputSource(
 private func makeMicrophoneInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
-  recordFile: String?
+  recordFile: String?,
+  emitter: HelperEventEmitter
 ) async throws -> AudioInputSource<AnalyzerInput> {
+  let levelLimiter = AudioLevelEventLimiter(minimumInterval: audioLevelEventMinimumInterval)
   try await makeMicrophoneCaptureSource(
     recordFile: recordFile,
     targetFormat: { naturalFormat in
@@ -290,6 +296,15 @@ private func makeMicrophoneInputSource(
       try await analyzer.prepareToAnalyze(in: analyzerFormat)
       helperDebugLog("mic-analyzer-prepared")
       return analyzerFormat
+    },
+    onAudioLevel: { level in
+      let timestamp = Date()
+      guard levelLimiter.shouldEmit(at: timestamp) else {
+        return
+      }
+      Task {
+        await emitter.emitAudioLevel(audioLevelEvent(stream: .mic, level: level, timestamp: timestamp))
+      }
     },
     transform: { AnalyzerInput(buffer: $0.buffer) }
   )
@@ -304,6 +319,7 @@ private func makeMicrophoneInputSource(
 func makeMicrophoneCaptureSource<Element: Sendable>(
   recordFile: String?,
   targetFormat resolveTargetFormat: (AVAudioFormat) async throws -> AVAudioFormat,
+  onAudioLevel: (@Sendable (AudioSignalLevel) -> Void)? = nil,
   transform: @escaping @Sendable (CapturedAudioBuffer) -> Element
 ) async throws -> AudioInputSource<Element> {
   guard await requestMicrophonePermission() else {
@@ -331,6 +347,7 @@ func makeMicrophoneCaptureSource<Element: Sendable>(
     input.installTap(onBus: 0, bufferSize: 4096, format: inputFormat) { buffer, _ in
       do {
         audioCounter.record(buffer)
+        onAudioLevel?(audioSignalLevel(buffer))
         recordingSink.write(buffer)
         let convertedBuffer = try convertBuffer(buffer, to: targetFormat, using: converter)
         continuation.yield(transform(CapturedAudioBuffer(buffer: convertedBuffer)))
@@ -357,7 +374,8 @@ func makeMicrophoneCaptureSource<Element: Sendable>(
 private func makeSpeakerInputSource(
   analyzer: SpeechAnalyzer,
   transcribers: [SpeechTranscriber],
-  recordFile: String?
+  recordFile: String?,
+  emitter: HelperEventEmitter
 ) async throws -> AudioInputSource<AnalyzerInput> {
   let speakerInput = try await SpeakerTapInput()
   let analyzerFormat = try await analyzerAudioFormat(
@@ -372,9 +390,19 @@ private func makeSpeakerInputSource(
     sourceFormat: speakerInput.audioFormat,
     initialRecorder: try AudioRecorder(path: recordFile, sourceFormat: speakerInput.audioFormat)
   )
+  let levelLimiter = AudioLevelEventLimiter(minimumInterval: audioLevelEventMinimumInterval)
   let sequence = try await speakerInput.makeInputSequence(
     analyzerFormat: analyzerFormat,
-    recordingSink: recordingSink
+    recordingSink: recordingSink,
+    onAudioLevel: { level in
+      let timestamp = Date()
+      guard levelLimiter.shouldEmit(at: timestamp) else {
+        return
+      }
+      Task {
+        await emitter.emitAudioLevel(audioLevelEvent(stream: .speaker, level: level, timestamp: timestamp))
+      }
+    }
   )
 
   return AudioInputSource(sequence: sequence, recordingSink: recordingSink) {

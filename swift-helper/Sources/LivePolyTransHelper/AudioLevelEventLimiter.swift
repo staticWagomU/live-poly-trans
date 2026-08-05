@@ -1,5 +1,7 @@
 import Foundation
 
+public let audioLevelEventMinimumInterval: TimeInterval = 0.1
+
 public final class AudioLevelEventLimiter: @unchecked Sendable {
   private let minimumInterval: TimeInterval
   private let lock = NSLock()

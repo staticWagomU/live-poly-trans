@@ -104,6 +104,10 @@ public actor HelperEventEmitter {
     try? transcriptWriter?.writeLine(jsonLine(for: event))
   }
 
+  public func emitAudioLevel(_ event: AudioLevelEvent) {
+    emitLine(try? jsonLine(for: event))
+  }
+
   public func emitStatus(_ event: StatusEvent) {
     emitLine(try? jsonLine(for: event))
   }
