@@ -1066,6 +1066,15 @@ struct CommandLineOptionsTests {
     if !questionsPrompt.contains("Japanese (ja-JP)") {
       throw TestFailure(message: "Expected questions prompt to carry the response language")
     }
+
+    let actionsPrompt = actionItemsPrompt(transcript: transcript, responseLanguage: "ja-JP")
+    if !actionsPrompt.contains(#""actions""#) || !actionsPrompt.contains("sourceIndex") || !actionsPrompt.contains("timestampMs") {
+      throw TestFailure(message: "Expected actions prompt to require structured action JSON")
+    }
+
+    if !actionsPrompt.contains("Japanese (ja-JP)") {
+      throw TestFailure(message: "Expected actions prompt to carry the response language")
+    }
   }
 
   static func buildsRollingSummaryPrompt() throws {

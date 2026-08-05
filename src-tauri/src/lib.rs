@@ -1881,6 +1881,27 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn ai_extract_actions(
+        state: State<'_, HelperSession>,
+        messages: Vec<SavedTranscriptMessage>,
+        language: Option<String>,
+    ) -> Result<String, String> {
+        let ai_server = state.ai_server.clone();
+        let request = AiCommandRequest {
+            command: "actions",
+            question: None,
+            language,
+            previous_summary: None,
+            history: Vec::new(),
+            transcript: build_ai_context_from_saved_messages(&messages),
+        };
+
+        tauri::async_runtime::spawn_blocking(move || run_ai_request(&ai_server, request))
+            .await
+            .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
     pub async fn ai_ask(
         state: State<'_, HelperSession>,
         question: String,
@@ -2661,6 +2682,7 @@ pub fn run() {
             commands::save_transcript,
             commands::ai_generate_summary,
             commands::ai_suggest_questions,
+            commands::ai_extract_actions,
             commands::ai_ask,
             commands::create_recording,
             commands::finalize_recording,

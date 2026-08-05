@@ -102,6 +102,8 @@ public func aiServerResponse(for request: AiServerRequest) async -> AiServerResp
     )
   case "suggest":
     prompt = suggestedQuestionsPrompt(transcript: transcript, responseLanguage: request.language)
+  case "actions":
+    prompt = actionItemsPrompt(transcript: transcript, responseLanguage: request.language)
   default:
     return AiServerResponse(id: request.id, ok: false, error: "unknown command: \(request.command)")
   }
@@ -274,6 +276,23 @@ public func suggestedQuestionsPrompt(transcript: String, responseLanguage: Strin
   """
 }
 
+public func actionItemsPrompt(transcript: String, responseLanguage: String?) -> String {
+  let language = responseLanguageInstruction(responseLanguage)
+
+  return """
+  Read the newly finalized meeting transcript and extract only explicit action items.
+  Write task text and assignee names in \(language) unless the transcript uses a proper noun.
+  Return JSON only, with this shape:
+  {"actions":[{"text":"task","assignee":"person or team, or null","timestampMs":0,"sourceIndex":0}]}
+  Use timestampMs and sourceIndex from the transcript line that best supports the action.
+  Do not include vague ideas, decisions without an owner, or actions already completed.
+  If there are no new action items, return {"actions":[]}.
+
+  Transcript:
+  \(transcript)
+  """
+}
+
 public func meetingSummarySections(responseLanguage: String?) -> String {
   if responseLanguagePrimaryCode(responseLanguage) == "ja" {
     return """
@@ -355,6 +374,8 @@ public func emptyTranscriptResponse(command: String, responseLanguage: String?) 
     return isJapanese
       ? "質問候補を作るための文字起こしがまだありません。"
       : "There is no transcript to suggest questions from yet."
+  case "actions":
+    return #"{"actions":[]}"#
   default:
     return isJapanese
       ? "まだ確定済みの文字起こしがありません。"
