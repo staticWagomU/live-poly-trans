@@ -20,9 +20,18 @@
     canIncreaseTranscriptFontScale,
     decreaseTranscriptFontScale,
     DEFAULT_TRANSCRIPT_FONT_SCALE,
-    increaseTranscriptFontScale,
-    parseTranscriptFontScale
+    increaseTranscriptFontScale
   } from '$lib/transcriptFontSize';
+  import {
+    getAutoStart,
+    getIncludeAudio,
+    getSpeechModel,
+    getTranscriptFontScale,
+    setAutoStart as storeAutoStart,
+    setIncludeAudio as storeIncludeAudio,
+    setSpeechModel as storeSpeechModel,
+    setTranscriptFontScale as storeTranscriptFontScale
+  } from '$lib/settingsStore';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
   import {
     applyTranslationEvent,
@@ -53,12 +62,7 @@
     requiredPermissions,
     type PermissionStatus
   } from '$lib/permissions';
-  import {
-    parseSpeechModelPreference,
-    speechModelPreferenceValue,
-    streamEnginePayload,
-    type SpeechModelSelection
-  } from '$lib/speechModels';
+  import { streamEnginePayload, type SpeechModelSelection } from '$lib/speechModels';
   import {
     emptyStreamSessions,
     isCurrentSessionEvent,
@@ -93,10 +97,6 @@
     code: number | null;
   };
 
-  const autoStartPreferenceKey = 'lpt-auto-start';
-  const includeAudioPreferenceKey = 'lpt-include-audio';
-  const fontScalePreferenceKey = 'lpt-transcript-font-scale';
-  const speechModelPreferenceKey = 'lpt-speech-model';
   const summaryRefreshDelayMs = 6000;
 
   let activeTab: 'live' | 'recordings' | 'settings' = 'live';
@@ -174,10 +174,10 @@
     : [];
 
   onMount(() => {
-    transcriptFontScale = parseTranscriptFontScale(localStorage.getItem(fontScalePreferenceKey));
-    speechModel = parseSpeechModelPreference(localStorage.getItem(speechModelPreferenceKey));
-    autoStartEnabled = localStorage.getItem(autoStartPreferenceKey) !== '0';
-    includeAudioEnabled = localStorage.getItem(includeAudioPreferenceKey) !== '0';
+    transcriptFontScale = getTranscriptFontScale();
+    speechModel = getSpeechModel();
+    autoStartEnabled = getAutoStart();
+    includeAudioEnabled = getIncludeAudio();
     const autoStart = autoStartEnabled;
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
@@ -398,22 +398,22 @@
 
   function setTranscriptFontScale(scale: number) {
     transcriptFontScale = scale;
-    localStorage.setItem(fontScalePreferenceKey, String(scale));
+    storeTranscriptFontScale(scale);
   }
 
   function setAutoStartEnabled(enabled: boolean) {
     autoStartEnabled = enabled;
-    localStorage.setItem(autoStartPreferenceKey, enabled ? '1' : '0');
+    storeAutoStart(enabled);
   }
 
   function setIncludeAudioEnabled(enabled: boolean) {
     includeAudioEnabled = enabled;
-    localStorage.setItem(includeAudioPreferenceKey, enabled ? '1' : '0');
+    storeIncludeAudio(enabled);
   }
 
   function setSpeechModel(selection: SpeechModelSelection) {
     speechModel = selection;
-    localStorage.setItem(speechModelPreferenceKey, speechModelPreferenceValue(selection));
+    storeSpeechModel(selection);
     void restartTranscriptionIfRunning();
   }
 

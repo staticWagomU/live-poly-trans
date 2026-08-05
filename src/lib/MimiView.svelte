@@ -5,9 +5,9 @@
     DEFAULT_MIMI_SCALE,
     increaseMimiScale,
     MAX_MIMI_SCALE,
-    MIN_MIMI_SCALE,
-    parseMimiScale
+    MIN_MIMI_SCALE
   } from '$lib/mimiDisplay';
+  import { getMimiInvert, getMimiScale, setMimiInvert, setMimiScale } from '$lib/settingsStore';
 
   /// Latest utterance texts, oldest first; the last one is the live line.
   export let lines: string[];
@@ -15,15 +15,12 @@
   export let onPttChange: (held: boolean) => void;
   export let onExit: () => void;
 
-  const scalePreferenceKey = 'lpt-mimi-scale';
-  const invertPreferenceKey = 'lpt-mimi-invert';
-
   let scale = DEFAULT_MIMI_SCALE;
   let invert = false;
 
   onMount(() => {
-    scale = parseMimiScale(localStorage.getItem(scalePreferenceKey));
-    invert = localStorage.getItem(invertPreferenceKey) === '1';
+    scale = getMimiScale();
+    invert = getMimiInvert();
 
     return () => {
       onPttChange(false);
@@ -32,12 +29,12 @@
 
   function setScale(next: number) {
     scale = next;
-    localStorage.setItem(scalePreferenceKey, String(next));
+    setMimiScale(next);
   }
 
   function toggleInvert() {
     invert = !invert;
-    localStorage.setItem(invertPreferenceKey, invert ? '1' : '0');
+    setMimiInvert(invert);
   }
 
   // Space works like the on-screen button: recognition only while held.

@@ -18,6 +18,7 @@
     type RecordingWaveform
   } from '$lib/recordings';
   import { createLatestRequestGuard } from '$lib/latestRequest';
+  import { getHfTokenOrNull } from '$lib/settingsStore';
 
   let recordings = $state<RecordingSummary[]>([]);
   let selectedRecording = $state<RecordingSummary | null>(null);
@@ -505,7 +506,7 @@
         engine: 'whisperx',
         // pyannote (diarization) needs a Hugging Face token; without one the
         // backend falls back to transcription + alignment only.
-        hfToken: localStorage.getItem('lpt-hf-token')
+        hfToken: getHfTokenOrNull()
       });
       notice = `WhisperX の再処理が完了しました(${segments} セグメント)。`;
       await reloadTranscript(recording.id);

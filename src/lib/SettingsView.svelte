@@ -26,6 +26,7 @@
     type SpeechModelSelection,
     type SpeechModelsPayload
   } from '$lib/speechModels';
+  import { getHfToken, setHfToken } from '$lib/settingsStore';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -61,8 +62,6 @@
 
   type WhisperxRunner = { program: string; prefixArgs?: string[] };
 
-  const hfTokenPreferenceKey = 'lpt-hf-token';
-
   // Seed only: which pane opens is the caller's business once (the privacy
   // banner deep-links here), and the view remounts each time Settings opens.
   let pane = $state<SettingsPane>(untrack(() => initialPane));
@@ -94,7 +93,7 @@
   const reservedIds = $derived(new Set((payload?.reserved ?? []).map((language) => language.id)));
 
   onMount(() => {
-    hfToken = localStorage.getItem(hfTokenPreferenceKey) ?? '';
+    hfToken = getHfToken();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -181,11 +180,7 @@
 
   function saveHfToken(value: string) {
     hfToken = value;
-    if (value.trim()) {
-      localStorage.setItem(hfTokenPreferenceKey, value.trim());
-    } else {
-      localStorage.removeItem(hfTokenPreferenceKey);
-    }
+    setHfToken(value);
   }
 
   async function refreshModels() {
