@@ -66,6 +66,15 @@ describe('toSrt', () => {
     expect(srt).toContain('00:00:01,000 --> 00:00:04,000');
   });
 
+  it('collapses embedded newline runs in text so a cue never contains a blank line', () => {
+    const srt = toSrt([makeEntry({ startMs: 0, endMs: 1_000, text: 'first\n\nsecond' })], {
+      speakerPrefix: false,
+      translation: 'none'
+    });
+
+    expect(srt).toBe('1\n00:00:00,000 --> 00:00:01,000\nfirst second\n');
+  });
+
   it('synthesizes sequential cues for entries with no timing at all', () => {
     const srt = toSrt(
       [makeEntry({ timestamp: 'not-a-date' }), makeEntry({ timestamp: 'not-a-date' })],
