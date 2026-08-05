@@ -40,6 +40,7 @@ const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 // this only delays a Record press that races the very first stream start.
 const CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const TRAY_WAVEFORM_ICON_SIZE: u32 = 18;
+pub const TRAY_ICON_ID: &str = "live-poly-trans";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayWindowState {
@@ -2286,6 +2287,7 @@ pub mod commands {
                 "live-poly-trans tauri: recording-session-start id={} dir={}",
                 created.id, created.dir
             );
+            set_tray_recording_indicator(&app, true);
             Ok(created)
         })
         .await
@@ -2312,7 +2314,11 @@ pub mod commands {
             }
 
             eprintln!("live-poly-trans tauri: recording-session-stop id={id}");
-            finalize_recording_blocking(&app, &id)
+            let result = finalize_recording_blocking(&app, &id);
+            if result.is_ok() {
+                set_tray_recording_indicator(&app, false);
+            }
+            result
         })
         .await
         .map_err(|error| error.to_string())?
@@ -3099,7 +3105,7 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
         ],
     )?;
 
-    let mut tray = TrayIconBuilder::with_id("live-poly-trans")
+    let mut tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
         .menu(&menu)
         .tooltip("LivePolyTrans")
         .show_menu_on_left_click(true)
@@ -3116,6 +3122,24 @@ pub fn tray_waveform_icon(recording: bool) -> Image<'static> {
         TRAY_WAVEFORM_ICON_SIZE,
         TRAY_WAVEFORM_ICON_SIZE,
     )
+}
+
+pub fn tray_icon_is_template(recording: bool) -> bool {
+    !recording
+}
+
+fn set_tray_recording_indicator(app: &AppHandle, recording: bool) {
+    if let Some(tray) = app.tray_by_id(TRAY_ICON_ID) {
+        let _ = tray.set_icon_with_as_template(
+            Some(tray_waveform_icon(recording)),
+            tray_icon_is_template(recording),
+        );
+        let _ = tray.set_tooltip(Some(if recording {
+            "LivePolyTrans recording"
+        } else {
+            "LivePolyTrans"
+        }));
+    }
 }
 
 pub fn tray_waveform_icon_rgba(recording: bool) -> Vec<u8> {
@@ -4416,6 +4440,12 @@ mod tests {
         let rgba = tray_waveform_icon_rgba(true);
 
         assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 15, 3), [255, 59, 48, 255]);
+    }
+
+    #[test]
+    fn tray_recording_icon_is_not_template_so_the_red_dot_is_visible() {
+        assert!(tray_icon_is_template(false));
+        assert!(!tray_icon_is_template(true));
     }
 
     #[test]
