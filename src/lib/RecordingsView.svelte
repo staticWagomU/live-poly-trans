@@ -115,6 +115,15 @@
   const activeKey = $derived(activeItemKey(displayTranscript, currentTimeMs));
   const participantStats = $derived(speakerStats(displayTranscript));
   const searchResultGroups = $derived(groupSearchResults(searchResults, recordings));
+  const selectedRecordingId = $derived(selectedRecording?.id ?? null);
+  const selectedSearchHits = $derived(
+    selectedRecordingId ? searchResults.filter((hit) => hit.recordingId === selectedRecordingId) : []
+  );
+  const selectedSearchIndex = $derived(
+    searchFocusTimestampMs === null
+      ? -1
+      : selectedSearchHits.findIndex((hit) => hit.timestampMs === searchFocusTimestampMs)
+  );
   const reprocessStageLabel = $derived(
     reprocessStage === 'transcribe'
       ? '1/3 文字起こし中…'
@@ -239,6 +248,17 @@
       .querySelector(`[data-start-ms="${hit.timestampMs}"]`)
       ?.scrollIntoView({ block: 'center', behavior: 'smooth' });
     seekTo(hit.timestampMs);
+  }
+
+  async function moveSearchHit(delta: number) {
+    if (selectedSearchHits.length === 0) {
+      return;
+    }
+
+    const baseIndex = selectedSearchIndex >= 0 ? selectedSearchIndex : 0;
+    const nextIndex =
+      (baseIndex + delta + selectedSearchHits.length) % selectedSearchHits.length;
+    await openSearchHit(selectedSearchHits[nextIndex]);
   }
 
   async function refreshRecordings(selectId: string | null = null) {
@@ -1118,6 +1138,19 @@
         <div class="tr-head">
           <h3>文字起こし</h3>
           <div class="tr-tools">
+            {#if selectedSearchHits.length > 0}
+              <div class="hit-nav" aria-label="検索ヒット移動">
+                <span>
+                  {selectedSearchIndex >= 0 ? selectedSearchIndex + 1 : 1}/{selectedSearchHits.length}
+                </span>
+                <button type="button" aria-label="前の検索ヒット" onclick={() => moveSearchHit(-1)}>
+                  ‹
+                </button>
+                <button type="button" aria-label="次の検索ヒット" onclick={() => moveSearchHit(1)}>
+                  ›
+                </button>
+              </div>
+            {/if}
             {#if whisperxItems.length > 0 && transcript.length > 0}
               <div class="seg-mini" role="tablist" aria-label="文字起こしの種類">
                 <button
@@ -1800,6 +1833,32 @@
     display: flex;
     align-items: center;
     gap: 8px;
+  }
+
+  .hit-nav {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid var(--hairline);
+    border-radius: 999px;
+    background: var(--canvas);
+    padding: 3px 5px 3px 10px;
+    color: var(--muted);
+    font-size: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .hit-nav button {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    color: var(--ink);
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .hit-nav button:hover {
+    background: var(--hover-wash);
   }
 
   .seg-mini {
