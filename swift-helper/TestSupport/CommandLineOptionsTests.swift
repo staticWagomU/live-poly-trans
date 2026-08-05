@@ -36,6 +36,7 @@ struct CommandLineOptionsTests {
     try encodesJsonLine()
     try formatsTranscriptEvent()
     try formatsTranslationEvent()
+    try formatsAudioLevelEvent()
     try extractsTranscriptSpansFromSpeechAttributes()
     try detectsTranscriptLanguage()
     try buildsMeetingAiPrompts()
@@ -1011,6 +1012,21 @@ struct CommandLineOptionsTests {
     try expectEqual(event.segmentId, "1200-800")
     try expectEqual(event.targetLanguage, "ja-JP")
     try expectEqual(event.trans, "こんにちは")
+    try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+  }
+
+  static func formatsAudioLevelEvent() throws {
+    let event = audioLevelEvent(
+      stream: .speaker,
+      level: AudioSignalLevel(sampleCount: 960, rms: 0.25, peak: 0.75),
+      timestamp: Date(timeIntervalSince1970: 0)
+    )
+
+    try expectEqual(event.type, "audio-level")
+    try expectEqual(event.stream, "speaker")
+    try expectEqual(event.sampleCount, 960)
+    try expectEqual(event.rms, 0.25)
+    try expectEqual(event.peak, 0.75)
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
   }
 

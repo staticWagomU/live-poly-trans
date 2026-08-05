@@ -32,6 +32,30 @@ public func translationEvent(
   )
 }
 
+public struct AudioLevelEvent: Codable, Equatable, Sendable {
+  public let type: String
+  public let stream: String
+  public let sampleCount: Int
+  public let rms: Double
+  public let peak: Double
+  public let timestamp: String
+}
+
+public func audioLevelEvent(
+  stream: AudioStream,
+  level: AudioSignalLevel,
+  timestamp: Date = Date()
+) -> AudioLevelEvent {
+  AudioLevelEvent(
+    type: "audio-level",
+    stream: stream.rawValue,
+    sampleCount: level.sampleCount,
+    rms: level.rms,
+    peak: level.peak,
+    timestamp: iso8601Timestamp(timestamp)
+  )
+}
+
 /// Operational status the UI can surface (e.g. language pack download).
 public struct StatusEvent: Codable, Equatable, Sendable {
   public let type: String
