@@ -1,3 +1,5 @@
+import { formatTimestampMs } from './recordings';
+
 export type ActionItem = {
   id: string;
   text: string;
@@ -90,4 +92,15 @@ export function rebaseActionSourceIndexes(items: ActionItem[], offset: number): 
     ...item,
     sourceIndex: item.sourceIndex === null ? null : item.sourceIndex + offset
   }));
+}
+
+export function actionItemsForMarkdown(items: ActionItem[]): string[] {
+  return items.map((item) => {
+    const metadata = [
+      item.assignee,
+      item.timestampMs === null ? null : formatTimestampMs(item.timestampMs)
+    ].filter((value): value is string => value !== null && value !== '');
+    const suffix = metadata.length === 0 ? '' : ` (${metadata.join(', ')})`;
+    return `[${item.done ? 'x' : ' '}] ${item.text}${suffix}`;
+  });
 }

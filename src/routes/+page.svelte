@@ -66,6 +66,7 @@
     type TranscriptEvent
   } from '$lib/transcripts';
   import {
+    actionItemsForMarkdown,
     mergeActionItems,
     parseActionItemsJson,
     rebaseActionSourceIndexes,
@@ -735,7 +736,11 @@
       baseName: session.id,
       markdownMeta: {
         dateLabel: startedAt.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
-        participants: uniqueSpeakerLabels(entries)
+        participants: uniqueSpeakerLabels(entries),
+        summary: aiSummary.trim() === '' ? undefined : aiSummary,
+        actionItems: actionItemsForMarkdown(
+          actionItems.filter((item) => item.sourceIndex !== null && item.sourceIndex >= session.startMessageIndex)
+        )
       }
     });
 
@@ -1125,7 +1130,9 @@
         baseName: `LivePolyTrans-transcript-${timestampLabel(now)}`,
         markdownMeta: {
           dateLabel: now.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
-          participants: uniqueSpeakerLabels(entries)
+          participants: uniqueSpeakerLabels(entries),
+          summary: aiSummary.trim() === '' ? undefined : aiSummary,
+          actionItems: actionItemsForMarkdown(actionItems)
         }
       });
       const destination = await saveTextExportToFile(file);

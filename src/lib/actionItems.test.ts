@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  actionItemsForMarkdown,
   mergeActionItems,
   parseActionItemsJson,
   rebaseActionSourceIndexes,
@@ -83,6 +84,20 @@ describe('rebaseActionSourceIndexes', () => {
   it('leaves missing source indexes untouched', () => {
     expect(rebaseActionSourceIndexes([item({ sourceIndex: null })], 8)).toEqual([
       item({ sourceIndex: null })
+    ]);
+  });
+});
+
+describe('actionItemsForMarkdown', () => {
+  it('formats action items as markdown checklist lines with metadata', () => {
+    expect(actionItemsForMarkdown([item({ done: true })])).toEqual([
+      '[x] 告知文を書く (自分, 1:03)'
+    ]);
+  });
+
+  it('omits missing assignee and timestamp metadata', () => {
+    expect(actionItemsForMarkdown([item({ assignee: null, timestampMs: null })])).toEqual([
+      '[ ] 告知文を書く'
     ]);
   });
 });
