@@ -287,7 +287,7 @@ private func makeMicrophoneInputSource(
   emitter: HelperEventEmitter
 ) async throws -> AudioInputSource<AnalyzerInput> {
   let levelLimiter = AudioLevelEventLimiter(minimumInterval: audioLevelEventMinimumInterval)
-  try await makeMicrophoneCaptureSource(
+  return try await makeMicrophoneCaptureSource(
     recordFile: recordFile,
     targetFormat: { naturalFormat in
       let analyzerFormat = try await analyzerAudioFormat(

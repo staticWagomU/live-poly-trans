@@ -1,7 +1,7 @@
 import AVFAudio
 import Foundation
 
-public struct AudioSignalLevel: Equatable {
+public struct AudioSignalLevel: Equatable, Sendable {
   public let sampleCount: Int
   public let rms: Double
   public let peak: Double
