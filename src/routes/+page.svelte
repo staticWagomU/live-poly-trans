@@ -33,6 +33,8 @@
     setTranscriptFontScale as storeTranscriptFontScale
   } from '$lib/settingsStore';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
+  import { chatMessagesToTranscriptEntries } from '$lib/export/types';
+  import { toPlainText } from '$lib/export/plainText';
   import {
     applyTranslationEvent,
     interleaveThreadItems,
@@ -914,12 +916,7 @@
   }
 
   async function copyTranscript() {
-    const text = messages
-      .map((message) => {
-        const translation = message.translation ? `\n  => ${message.translation}` : '';
-        return `[${message.timestamp}] ${message.speakerLabel} / ${message.language}: ${message.text}${translation}`;
-      })
-      .join('\n');
+    const text = toPlainText(chatMessagesToTranscriptEntries(messages));
 
     try {
       await navigator.clipboard.writeText(text);
