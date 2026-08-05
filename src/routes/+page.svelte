@@ -33,7 +33,8 @@
     setIncludeAudio as storeIncludeAudio,
     setSpeechModel as storeSpeechModel,
     setTranscriptFontScale as storeTranscriptFontScale,
-    subscribeSettings
+    subscribeSettings,
+    type LiveSpeakerOverrides
   } from '$lib/settingsStore';
   import { resolveSpeakerLabels } from '$lib/speakers';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
@@ -164,7 +165,7 @@
   let pttReconciling = false;
   let permissionNotice: string | null = null;
   let settingsPane: 'general' | 'privacy' = 'general';
-  let liveSpeakerOverrides: Record<string, { name: string }> | null = null;
+  let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');

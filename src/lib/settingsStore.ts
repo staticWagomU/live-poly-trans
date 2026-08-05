@@ -160,12 +160,16 @@ export function setOtherSpeakerName(value: string) {
   writeTrimmedOrRemove(SETTINGS_KEYS.otherSpeakerName, value);
 }
 
+/// Custom names for the two live speakers, shaped like a recording's
+/// `speakers` map so resolveSpeakerName/resolveSpeakerLabels apply verbatim.
+export type LiveSpeakerOverrides = Record<string, { name: string }>;
+
 /// Speakers-map view of the live name settings, keyed by the helper's fixed
 /// speakerIds ('self' for the mic, 'system-audio' for the other side) so
 /// resolveSpeakerName can be reused verbatim. Blank names are omitted; null
 /// when nothing is customized so callers can skip resolution entirely.
-export function getLiveSpeakerOverrides(): Record<string, { name: string }> | null {
-  const overrides: Record<string, { name: string }> = {};
+export function getLiveSpeakerOverrides(): LiveSpeakerOverrides | null {
+  const overrides: LiveSpeakerOverrides = {};
   const selfName = getSelfSpeakerName();
   if (selfName !== '') {
     overrides.self = { name: selfName };

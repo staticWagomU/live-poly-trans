@@ -4,6 +4,7 @@
   import { resolveSpeakerName } from '$lib/speakers';
   import { displayTranscriptMessage } from '$lib/transcriptDisplay';
   import { isRecordingMarker, windowThreadItems, type ThreadItem } from '$lib/transcripts';
+  import type { LiveSpeakerOverrides } from '$lib/settingsStore';
   import type { SpeechModelSelection } from '$lib/speechModels';
 
   export let threadItems: ThreadItem[];
@@ -21,7 +22,7 @@
   export let confirmingClear: boolean;
   // Custom names from settings for the two live speakers; resolution stays
   // at display time so the underlying messages keep their original labels.
-  export let speakerOverrides: Record<string, { name: string }> | null = null;
+  export let speakerOverrides: LiveSpeakerOverrides | null = null;
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;

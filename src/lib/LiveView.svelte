@@ -2,6 +2,7 @@
   import AiPanel from '$lib/AiPanel.svelte';
   import CaptionThread from '$lib/CaptionThread.svelte';
   import type { ChatTurn } from '$lib/aiContext';
+  import type { LiveSpeakerOverrides } from '$lib/settingsStore';
   import type { SpeechModelSelection } from '$lib/speechModels';
   import type { ThreadItem } from '$lib/transcripts';
 
@@ -18,7 +19,7 @@
   export let captureModeLabel: string;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
-  export let speakerOverrides: Record<string, { name: string }> | null = null;
+  export let speakerOverrides: LiveSpeakerOverrides | null = null;
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
