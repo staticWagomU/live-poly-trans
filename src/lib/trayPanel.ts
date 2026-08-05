@@ -28,7 +28,7 @@ export type TrayPanelView = {
   lanes: TrayLaneView[];
 };
 
-type TrayPanelState = {
+export type TrayPanelState = {
   isRecording: boolean;
   isTranscribing: boolean;
   recordingElapsedSeconds: number;
