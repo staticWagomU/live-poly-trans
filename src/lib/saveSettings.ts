@@ -29,3 +29,12 @@ export function renderFileName(template: string, ctx: FileNameContext): string {
 
   return sanitizeFileName(rendered);
 }
+
+export function markdownExportPath(
+  directory: string,
+  template: string,
+  ctx: FileNameContext
+): string {
+  const base = directory.endsWith('/') ? directory.slice(0, -1) : directory;
+  return `${base}/${renderFileName(template, ctx)}.md`;
+}
