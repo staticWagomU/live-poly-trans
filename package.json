@@ -19,7 +19,8 @@
     "build:whisper-backend": "scripts/build-whisper-backend.sh",
     "build:whisper-engine": "bun scripts/build-whisper-engine.mjs",
     "measure:whisper-engine": "bun scripts/measure-whisper-engine.mjs",
-    "build:dist": "scripts/build-distribution.sh"
+    "build:dist": "scripts/build-distribution.sh",
+    "verify:macos-runtime": "bun scripts/verify-macos-runtime.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.6.0",
