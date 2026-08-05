@@ -124,6 +124,7 @@
   import type { CaptionFontFamily, CaptionLineHeight } from '$lib/captionAppearance';
   import { themeDataAttribute, type ThemePreference } from '$lib/themePreference';
   import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
+  import type { TrayPanelState } from '$lib/trayPanel';
   import {
     maxRestartAttempts,
     remainingRestartAttempts,
@@ -192,6 +193,7 @@
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastOverlayPayload = '';
+  let lastTrayPanelPayload = '';
   let overlayLineCount = 2;
   let overlayShowTranslation = true;
   let overlayFadeSeconds = 0;
@@ -200,6 +202,7 @@
   let recordingShortcut = 'CommandOrControl+Alt+R';
   let overlayShortcut = 'CommandOrControl+Alt+L';
   let keepInMenuBar = false;
+  let overlayVisible = false;
   let themePreference: ThemePreference = 'auto';
   let captionFontFamily: CaptionFontFamily = 'system';
   let captionLineHeight: CaptionLineHeight = 'normal';
@@ -218,7 +221,8 @@
   let pttHeld = false;
   let pttReconciling = false;
   let permissionNotice: string | null = null;
-  let settingsPane: 'general' | 'privacy' | 'model' | 'langs' | 'glossary' | 'save' = 'general';
+  let settingsPane: 'general' | 'appearance' | 'privacy' | 'model' | 'langs' | 'glossary' | 'save' =
+    'general';
   let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
   let glossaryRules: GlossaryRule[] = [];
 
@@ -243,6 +247,7 @@
         .map((message) => message.text)
     : [];
   $: publishOverlayCaptions();
+  $: publishTrayPanelState();
 
   onMount(() => {
     transcriptFontScale = getTranscriptFontScale();
@@ -347,6 +352,11 @@
         })
       ),
       cleanupRegistry.add(
+        listen('tray-panel-request-state', () => {
+          void publishTrayPanelState(true);
+        })
+      ),
+      cleanupRegistry.add(
         listen<string>('shortcut-error', (event) => {
           appError = event.payload;
         })
@@ -445,9 +455,29 @@
       case 'adjust-overlay':
         await beginOverlayAdjustment();
         break;
+      case 'cycle-capture-mode':
+        await cycleCaptureMode();
+        break;
+      case 'show-main':
+        activeTab = 'live';
+        await getCurrentWindow().show();
+        await getCurrentWindow().setFocus();
+        break;
+      case 'open-settings':
+        settingsPane = 'general';
+        activeTab = 'settings';
+        await getCurrentWindow().show();
+        await getCurrentWindow().setFocus();
+        break;
       default:
         console.warn(`Unknown tray command: ${command}`);
     }
+  }
+
+  async function cycleCaptureMode() {
+    const modes: CaptureMode[] = ['both', 'mic', 'speaker'];
+    const currentIndex = modes.indexOf(selectedCaptureMode);
+    await selectCaptureMode(modes[(currentIndex + 1) % modes.length] ?? 'both');
   }
 
   async function configureGlobalShortcuts() {
@@ -1341,11 +1371,37 @@
   async function toggleOverlay() {
     try {
       const visible = await invoke<boolean>('toggle_overlay');
+      overlayVisible = visible;
       if (visible) {
         setTimeout(() => void publishOverlayCaptions(true), 100);
       }
     } catch (error) {
       appError = String(error);
+    }
+  }
+
+  async function publishTrayPanelState(force = false) {
+    const state: TrayPanelState = {
+      isRecording: recordingSession !== null,
+      isTranscribing,
+      recordingElapsedSeconds: recordingElapsed,
+      captureMode: selectedCaptureMode,
+      activeStreams: [...activeStreams],
+      mainLanguage,
+      subLanguage,
+      overlayVisible,
+      audioLevelHistory
+    };
+    const payload = JSON.stringify(state);
+    if (!force && payload === lastTrayPanelPayload) {
+      return;
+    }
+
+    lastTrayPanelPayload = payload;
+    try {
+      await emit('tray-panel-state', state);
+    } catch {
+      // The tray panel may not exist until the user clicks the menu-bar icon.
     }
   }
 

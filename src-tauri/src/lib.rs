@@ -15,8 +15,9 @@ use tauri::{
     image::Image,
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::TrayIconBuilder,
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
-    WebviewWindow, WebviewWindowBuilder,
+    tray::{MouseButton, MouseButtonState, TrayIconEvent},
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Rect, Size, State,
+    WebviewUrl, WebviewWindow, WebviewWindowBuilder,
 };
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
@@ -42,6 +43,10 @@ const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 const CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
 pub const TRAY_WAVEFORM_ICON_SIZE: u32 = 18;
 pub const TRAY_ICON_ID: &str = "live-poly-trans";
+pub const TRAY_PANEL_LABEL: &str = "tray";
+pub const TRAY_PANEL_WIDTH: f64 = 280.0;
+pub const TRAY_PANEL_HEIGHT: f64 = 304.0;
+pub const TRAY_PANEL_MARGIN: f64 = 4.0;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayWindowState {
@@ -2179,6 +2184,11 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn hide_tray_panel(app: AppHandle) -> Result<(), String> {
+        hide_tray_panel_window(&app)
+    }
+
+    #[tauri::command]
     pub async fn configure_global_shortcuts(
         app: AppHandle,
         enabled: bool,
@@ -3001,6 +3011,7 @@ pub fn run() {
             commands::start_overlay_drag,
             commands::finish_overlay_adjustment,
             commands::overlay_adjustment_enabled,
+            commands::hide_tray_panel,
             commands::configure_global_shortcuts,
             commands::create_recording,
             commands::finalize_recording,
@@ -3109,11 +3120,69 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     let mut tray = TrayIconBuilder::with_id(TRAY_ICON_ID)
         .menu(&menu)
         .tooltip("LivePolyTrans")
-        .show_menu_on_left_click(true)
-        .icon_as_template(true);
+        .show_menu_on_left_click(false)
+        .icon_as_template(true)
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                rect,
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                if let Err(error) = toggle_tray_panel_at(tray.app_handle(), rect) {
+                    eprintln!("live-poly-trans tauri: tray-panel-error {error}");
+                }
+            }
+        });
     tray = tray.icon(tray_waveform_icon(false));
 
     tray.build(app)?;
+    Ok(())
+}
+
+pub fn tray_panel_position(rect: Rect) -> PhysicalPosition<i32> {
+    let position = rect.position.to_physical::<f64>(1.0);
+    let size = rect.size.to_physical::<f64>(1.0);
+    let x = position.x + size.width - TRAY_PANEL_WIDTH;
+    let y = position.y + size.height + TRAY_PANEL_MARGIN;
+    PhysicalPosition::new(x.round() as i32, y.round() as i32)
+}
+
+fn toggle_tray_panel_at(app: &AppHandle, rect: Rect) -> Result<(), String> {
+    let position = tray_panel_position(rect);
+    let window = if let Some(window) = app.get_webview_window(TRAY_PANEL_LABEL) {
+        if window.is_visible().unwrap_or(false) {
+            window.hide().map_err(|error| error.to_string())?;
+            return Ok(());
+        }
+        window
+    } else {
+        WebviewWindowBuilder::new(app, TRAY_PANEL_LABEL, WebviewUrl::App("tray".into()))
+            .title("LivePolyTrans Tray")
+            .inner_size(TRAY_PANEL_WIDTH, TRAY_PANEL_HEIGHT)
+            .decorations(false)
+            .resizable(false)
+            .skip_taskbar(true)
+            .always_on_top(true)
+            .visible(false)
+            .build()
+            .map_err(|error| error.to_string())?
+    };
+
+    window
+        .set_position(Position::Physical(position))
+        .map_err(|error| error.to_string())?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())?;
+    let _ = app.emit("tray-panel-request-state", ());
+    Ok(())
+}
+
+fn hide_tray_panel_window(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(TRAY_PANEL_LABEL) {
+        window.hide().map_err(|error| error.to_string())?;
+    }
     Ok(())
 }
 
@@ -4425,6 +4494,22 @@ mod tests {
             Some(TRAY_COMMAND_ADJUST_OVERLAY)
         );
         assert_eq!(tray_command_for_menu_id("tray-quit"), None);
+    }
+
+    #[test]
+    fn tray_panel_position_aligns_to_tray_rect_right_edge() {
+        let position = tray_panel_position(Rect {
+            position: Position::Physical(PhysicalPosition::new(500, 2)),
+            size: Size::Physical(PhysicalSize::new(24, 22)),
+        });
+
+        assert_eq!(
+            position,
+            PhysicalPosition::new(
+                (524.0 - TRAY_PANEL_WIDTH).round() as i32,
+                (24.0 + TRAY_PANEL_MARGIN).round() as i32
+            )
+        );
     }
 
     #[test]
