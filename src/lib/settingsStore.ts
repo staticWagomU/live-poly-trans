@@ -3,6 +3,12 @@
 /// and guarded so the module also loads where localStorage does not exist
 /// (vitest's node environment, svelte-check prerendering).
 import {
+  parseCaptionFontFamily,
+  parseCaptionLineHeight,
+  type CaptionFontFamily,
+  type CaptionLineHeight
+} from './captionAppearance';
+import {
   parseGlossaryRules,
   serializeGlossaryRules,
   type GlossaryRule
@@ -47,7 +53,9 @@ export const SETTINGS_KEYS = {
   recordingShortcut: 'lpt-recording-shortcut',
   overlayShortcut: 'lpt-overlay-shortcut',
   keepInMenuBar: 'lpt-keep-in-menu-bar',
-  themePreference: 'lpt-theme-preference'
+  themePreference: 'lpt-theme-preference',
+  captionFontFamily: 'lpt-caption-font-family',
+  captionLineHeight: 'lpt-caption-line-height'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -138,6 +146,22 @@ export function getThemePreference(): ThemePreference {
 
 export function setThemePreference(preference: ThemePreference) {
   write(SETTINGS_KEYS.themePreference, preference);
+}
+
+export function getCaptionFontFamily(): CaptionFontFamily {
+  return parseCaptionFontFamily(read(SETTINGS_KEYS.captionFontFamily));
+}
+
+export function setCaptionFontFamily(preference: CaptionFontFamily) {
+  write(SETTINGS_KEYS.captionFontFamily, preference);
+}
+
+export function getCaptionLineHeight(): CaptionLineHeight {
+  return parseCaptionLineHeight(read(SETTINGS_KEYS.captionLineHeight));
+}
+
+export function setCaptionLineHeight(preference: CaptionLineHeight) {
+  write(SETTINGS_KEYS.captionLineHeight, preference);
 }
 
 export function getSpeechModel(): SpeechModelSelection {

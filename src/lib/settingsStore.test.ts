@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getAutoStart,
+  getCaptionFontFamily,
+  getCaptionLineHeight,
   getGlossaryRules,
   getMarkdownAutoExport,
   getExportDirectory,
@@ -26,6 +28,8 @@ import {
   getTranscriptFontScale,
   SETTINGS_KEYS,
   setAutoStart,
+  setCaptionFontFamily,
+  setCaptionLineHeight,
   setGlossaryRules,
   setMarkdownAutoExport,
   setExportDirectory,
@@ -54,6 +58,10 @@ import { DEFAULT_OVERLAY_SETTINGS } from './overlaySettings';
 import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
 import { DEFAULT_THEME_PREFERENCE } from './themePreference';
 import { DEFAULT_TRANSCRIPT_FONT_SCALE } from './transcriptFontSize';
+import {
+  DEFAULT_CAPTION_FONT_FAMILY,
+  DEFAULT_CAPTION_LINE_HEIGHT
+} from './captionAppearance';
 
 function createMemoryStorage(): Storage {
   const data = new Map<string, string>();
@@ -128,6 +136,23 @@ describe('settings store', () => {
 
     localStorage.setItem(SETTINGS_KEYS.themePreference, 'solarized');
     expect(getThemePreference()).toBe(DEFAULT_THEME_PREFERENCE);
+  });
+
+  it('round-trips caption appearance preferences through their parsers', () => {
+    expect(getCaptionFontFamily()).toBe(DEFAULT_CAPTION_FONT_FAMILY);
+    expect(getCaptionLineHeight()).toBe(DEFAULT_CAPTION_LINE_HEIGHT);
+
+    setCaptionFontFamily('rounded');
+    setCaptionLineHeight('relaxed');
+    expect(localStorage.getItem(SETTINGS_KEYS.captionFontFamily)).toBe('rounded');
+    expect(localStorage.getItem(SETTINGS_KEYS.captionLineHeight)).toBe('relaxed');
+    expect(getCaptionFontFamily()).toBe('rounded');
+    expect(getCaptionLineHeight()).toBe('relaxed');
+
+    localStorage.setItem(SETTINGS_KEYS.captionFontFamily, 'mono');
+    localStorage.setItem(SETTINGS_KEYS.captionLineHeight, 'wide');
+    expect(getCaptionFontFamily()).toBe(DEFAULT_CAPTION_FONT_FAMILY);
+    expect(getCaptionLineHeight()).toBe(DEFAULT_CAPTION_LINE_HEIGHT);
   });
 
   it('round-trips the mimi scale through its parser', () => {
