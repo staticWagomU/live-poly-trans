@@ -2,6 +2,7 @@
   import '$lib/theme.css';
   import { invoke } from '@tauri-apps/api/core';
   import { emit, listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import { onMount, tick } from 'svelte';
   import {
     chooseDefaultLanguagePair,
@@ -29,6 +30,7 @@
     getFileNameTemplate,
     getGlobalShortcutsEnabled,
     getGlossaryRules,
+    getKeepInMenuBar,
     getIncludeAudio,
     getLiveSpeakerOverrides,
     getMarkdownAutoExport,
@@ -186,6 +188,7 @@
   let globalShortcutsEnabled = true;
   let recordingShortcut = 'CommandOrControl+Alt+R';
   let overlayShortcut = 'CommandOrControl+Alt+L';
+  let keepInMenuBar = false;
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -237,6 +240,7 @@
     globalShortcutsEnabled = getGlobalShortcutsEnabled();
     recordingShortcut = getRecordingShortcut();
     overlayShortcut = getOverlayShortcut();
+    keepInMenuBar = getKeepInMenuBar();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -280,6 +284,9 @@
       subscribeSettings(SETTINGS_KEYS.overlayShortcut, () => {
         overlayShortcut = getOverlayShortcut();
         void configureGlobalShortcuts();
+      }),
+      subscribeSettings(SETTINGS_KEYS.keepInMenuBar, () => {
+        keepInMenuBar = getKeepInMenuBar();
       })
     ];
     const autoStart = autoStartEnabled;
@@ -312,6 +319,15 @@
       cleanupRegistry.add(
         listen<string>('shortcut-error', (event) => {
           appError = event.payload;
+        })
+      ),
+      cleanupRegistry.add(
+        getCurrentWindow().onCloseRequested(async (event) => {
+          if (!keepInMenuBar) {
+            return;
+          }
+          event.preventDefault();
+          await getCurrentWindow().hide();
         })
       )
     ])

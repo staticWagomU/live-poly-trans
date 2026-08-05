@@ -9,6 +9,7 @@ import {
   getHfToken,
   getHfTokenOrNull,
   getIncludeAudio,
+  getKeepInMenuBar,
   getLiveSpeakerOverrides,
   getMimiInvert,
   getMimiScale,
@@ -31,6 +32,7 @@ import {
   setGlobalShortcutsEnabled,
   setHfToken,
   setIncludeAudio,
+  setKeepInMenuBar,
   setMimiInvert,
   setMimiScale,
   setOverlayFadeSeconds,
@@ -163,6 +165,15 @@ describe('settings store', () => {
     setOverlayShortcut('');
     expect(getRecordingShortcut()).toBe('CommandOrControl+Alt+R');
     expect(getOverlayShortcut()).toBe('CommandOrControl+Alt+L');
+  });
+
+  it('defaults keep-in-menu-bar to off and round-trips it', () => {
+    expect(getKeepInMenuBar()).toBe(false);
+    setKeepInMenuBar(true);
+    expect(getKeepInMenuBar()).toBe(true);
+    expect(localStorage.getItem(SETTINGS_KEYS.keepInMenuBar)).toBe('1');
+    setKeepInMenuBar(false);
+    expect(getKeepInMenuBar()).toBe(false);
   });
 
   it('round-trips the speech model selection', () => {

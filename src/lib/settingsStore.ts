@@ -41,7 +41,8 @@ export const SETTINGS_KEYS = {
   overlayFontScale: 'lpt-overlay-font-scale',
   globalShortcutsEnabled: 'lpt-global-shortcuts-enabled',
   recordingShortcut: 'lpt-recording-shortcut',
-  overlayShortcut: 'lpt-overlay-shortcut'
+  overlayShortcut: 'lpt-overlay-shortcut',
+  keepInMenuBar: 'lpt-keep-in-menu-bar'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -207,6 +208,14 @@ export function getOverlayShortcut(): string {
 
 export function setOverlayShortcut(shortcut: string) {
   writeTrimmedOrRemove(SETTINGS_KEYS.overlayShortcut, shortcut);
+}
+
+export function getKeepInMenuBar(): boolean {
+  return read(SETTINGS_KEYS.keepInMenuBar) === '1';
+}
+
+export function setKeepInMenuBar(enabled: boolean) {
+  write(SETTINGS_KEYS.keepInMenuBar, enabled ? '1' : '0');
 }
 
 export function getHfToken(): string {

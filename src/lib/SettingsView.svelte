@@ -43,6 +43,7 @@
     getOverlayFontScale,
     getOverlayLineCount,
     getOverlayShowTranslation,
+    getKeepInMenuBar,
     getOtherSpeakerName,
     getRecordingShortcut,
     getOverlayShortcut,
@@ -57,6 +58,7 @@
     setOverlayFontScale,
     setOverlayLineCount,
     setOverlayShowTranslation,
+    setKeepInMenuBar,
     setOtherSpeakerName,
     setRecordingShortcut,
     setOverlayShortcut,
@@ -126,6 +128,7 @@
   let globalShortcutsEnabled = $state(true);
   let recordingShortcut = $state('CommandOrControl+Alt+R');
   let overlayShortcut = $state('CommandOrControl+Alt+L');
+  let keepInMenuBar = $state(false);
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -168,6 +171,7 @@
     globalShortcutsEnabled = getGlobalShortcutsEnabled();
     recordingShortcut = getRecordingShortcut();
     overlayShortcut = getOverlayShortcut();
+    keepInMenuBar = getKeepInMenuBar();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -409,6 +413,11 @@
   function saveOverlayShortcut(shortcut: string) {
     setOverlayShortcut(shortcut);
     overlayShortcut = getOverlayShortcut();
+  }
+
+  function saveKeepInMenuBar(enabled: boolean) {
+    setKeepInMenuBar(enabled);
+    keepInMenuBar = getKeepInMenuBar();
   }
 
   async function refreshModels() {
@@ -714,6 +723,27 @@
               aria-label="オーバーレイ切替ショートカット"
               onchange={(event) => saveOverlayShortcut(event.currentTarget.value)}
             />
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>メニューバー常駐</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              ウィンドウを閉じても常駐
+              <div class="d">閉じる操作では終了せず、メニューバーからメイン画面を戻せます。</div>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              class:on={keepInMenuBar}
+              role="switch"
+              aria-checked={keepInMenuBar}
+              aria-label="ウィンドウを閉じてもメニューバーに常駐"
+              onclick={() => saveKeepInMenuBar(!keepInMenuBar)}
+            ></button>
           </div>
         </div>
       </div>
