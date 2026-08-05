@@ -166,7 +166,7 @@
   let pttHeld = false;
   let pttReconciling = false;
   let permissionNotice: string | null = null;
-  let settingsPane: 'general' | 'privacy' = 'general';
+  let settingsPane: 'general' | 'privacy' | 'model' | 'langs' | 'glossary' = 'general';
   let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
   let glossaryRules: GlossaryRule[] = [];
 

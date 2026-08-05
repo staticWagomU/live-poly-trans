@@ -1,7 +1,9 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
+  import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
   import { onMount, untrack } from 'svelte';
+  import { importGlossaryJson, serializeGlossaryRules, type GlossaryRule } from '$lib/glossary';
   import { filterLanguagePacks, partitionLanguagePacks } from '$lib/languagePacks';
   import type { LanguageInfo } from '$lib/languages';
   import {
@@ -28,9 +30,11 @@
   } from '$lib/speechModels';
   import {
     getHfToken,
+    getGlossaryRules,
     getOtherSpeakerName,
     getSelfSpeakerName,
     setHfToken,
+    setGlossaryRules,
     setOtherSpeakerName,
     setSelfSpeakerName
   } from '$lib/settingsStore';
@@ -41,7 +45,7 @@
     reserved?: LanguageInfo[];
   };
 
-  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs';
+  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs' | 'glossary';
 
   let {
     isRecording = false,
@@ -82,6 +86,12 @@
   let hfToken = $state('');
   let selfSpeakerName = $state('');
   let otherSpeakerName = $state('');
+  let glossaryRules = $state<GlossaryRule[]>([]);
+  let glossaryFrom = $state('');
+  let glossaryTo = $state('');
+  let glossaryNotice = $state<string | null>(null);
+  let glossaryError = $state<string | null>(null);
+  let glossaryFileInput = $state<HTMLInputElement | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
   let busyLanguage = $state<string | null>(null);
@@ -105,6 +115,7 @@
     hfToken = getHfToken();
     selfSpeakerName = getSelfSpeakerName();
     otherSpeakerName = getOtherSpeakerName();
+    glossaryRules = getGlossaryRules();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -206,6 +217,88 @@
     otherSpeakerName = getOtherSpeakerName();
   }
 
+  function persistGlossary(rules: GlossaryRule[], notice: string | null = null) {
+    glossaryRules = rules;
+    setGlossaryRules(rules);
+    glossaryNotice = notice;
+    glossaryError = null;
+  }
+
+  function addGlossaryRule() {
+    const from = glossaryFrom.trim();
+    const to = glossaryTo.trim();
+    if (!from || !to) {
+      glossaryError = '誤認識される表記と正しい表記を両方入力してください。';
+      glossaryNotice = null;
+      return;
+    }
+
+    persistGlossary([...glossaryRules, { from, to, matchType: 'text', enabled: true }], '追加しました。');
+    glossaryFrom = '';
+    glossaryTo = '';
+  }
+
+  function updateGlossaryRule(index: number, patch: Partial<Pick<GlossaryRule, 'from' | 'to'>>) {
+    const current = glossaryRules[index];
+    if (!current) {
+      return;
+    }
+    const next = glossaryRules.map((rule, ruleIndex) =>
+      ruleIndex === index ? { ...rule, ...patch } : rule
+    );
+    persistGlossary(next);
+  }
+
+  function deleteGlossaryRule(index: number) {
+    persistGlossary(
+      glossaryRules.filter((_, ruleIndex) => ruleIndex !== index),
+      '削除しました。'
+    );
+  }
+
+  async function importGlossaryFromFile(event: Event) {
+    const input = event.currentTarget as HTMLInputElement;
+    const file = input.files?.[0];
+    input.value = '';
+    if (!file) {
+      return;
+    }
+
+    try {
+      const result = importGlossaryJson(await file.text());
+      if (!result.ok) {
+        glossaryError = result.error;
+        glossaryNotice = null;
+        return;
+      }
+      persistGlossary(result.rules, `${result.rules.length}件を読み込みました。`);
+    } catch (readError) {
+      glossaryError = String(readError);
+      glossaryNotice = null;
+    }
+  }
+
+  async function exportGlossaryToFile() {
+    glossaryError = null;
+    try {
+      const path = await saveFileDialog({
+        defaultPath: 'live-poly-trans-glossary.json',
+        filters: [{ name: 'JSON', extensions: ['json'] }]
+      });
+      if (path === null) {
+        return;
+      }
+      await invoke('save_text_file', {
+        path,
+        contents: `${serializeGlossaryRules(glossaryRules)}\n`
+      });
+      glossaryNotice = '書き出しました。';
+    } catch (exportError) {
+      glossaryError = String(exportError);
+      glossaryNotice = null;
+    }
+  }
+
   async function refreshModels() {
     modelsError = null;
     try {
@@ -289,6 +382,9 @@
     </button>
     <button type="button" class:active={pane === 'model'} onclick={() => (pane = 'model')}>
       🧠 認識モデル
+    </button>
+    <button type="button" class:active={pane === 'glossary'} onclick={() => (pane = 'glossary')}>
+      📖 用語集
     </button>
     <button type="button" class:active={pane === 'langs'} onclick={() => (pane = 'langs')}>
       🌐 言語
@@ -605,6 +701,104 @@
         </div>
       </div>
     </div>
+  {:else if pane === 'glossary'}
+    <div class="set-pane">
+      <h2>用語集</h2>
+      <p class="lede">
+        よく誤認識される固有名詞を正しい表記に置き換えます。表示と書き出しに適用され、
+        元の認識結果は変更されません。
+      </p>
+
+      {#if glossaryError}
+        <p class="settings-error" role="alert">{glossaryError}</p>
+      {/if}
+      {#if glossaryNotice}
+        <p class="settings-warning">{glossaryNotice}</p>
+      {/if}
+
+      <div class="set-group">
+        <h3>対応表</h3>
+        <div class="set-card glossary-card">
+          <div class="glossary-head" aria-hidden="true">
+            <span>誤認識される表記</span>
+            <span></span>
+            <span>正しい表記</span>
+            <span></span>
+          </div>
+          {#if glossaryRules.length === 0}
+            <p class="glossary-empty">まだ登録されていません。</p>
+          {:else}
+            {#each glossaryRules as rule, index (`${index}-${rule.from}-${rule.to}`)}
+              <div class="glossary-row">
+                <input
+                  class="glossary-input"
+                  type="text"
+                  aria-label={`誤認識される表記 ${index + 1}`}
+                  value={rule.from}
+                  onchange={(event) =>
+                    updateGlossaryRule(index, { from: event.currentTarget.value.trim() })}
+                />
+                <span class="glossary-arrow">→</span>
+                <input
+                  class="glossary-input"
+                  type="text"
+                  aria-label={`正しい表記 ${index + 1}`}
+                  value={rule.to}
+                  onchange={(event) =>
+                    updateGlossaryRule(index, { to: event.currentTarget.value.trim() })}
+                />
+                <button
+                  type="button"
+                  class="glossary-delete"
+                  aria-label={`${rule.from} を削除`}
+                  onclick={() => deleteGlossaryRule(index)}
+                >
+                  ×
+                </button>
+              </div>
+            {/each}
+          {/if}
+          <div class="glossary-row glossary-add">
+            <input
+              class="glossary-input"
+              type="text"
+              placeholder="例: すべると"
+              aria-label="追加する誤認識表記"
+              bind:value={glossaryFrom}
+            />
+            <span class="glossary-arrow">→</span>
+            <input
+              class="glossary-input"
+              type="text"
+              placeholder="例: Svelte"
+              aria-label="追加する正しい表記"
+              bind:value={glossaryTo}
+              onkeydown={(event) => {
+                if (event.key === 'Enter') {
+                  addGlossaryRule();
+                }
+              }}
+            />
+            <button type="button" class="link-btn add-rule" onclick={addGlossaryRule}>追加</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="glossary-actions">
+        <input
+          bind:this={glossaryFileInput}
+          class="visually-hidden"
+          type="file"
+          accept="application/json,.json"
+          onchange={importGlossaryFromFile}
+        />
+        <button type="button" class="link-btn" onclick={() => glossaryFileInput?.click()}>
+          読み込む…
+        </button>
+        <button type="button" class="link-btn" onclick={exportGlossaryToFile}>書き出す…</button>
+        <span class="glossary-count">{glossaryRules.length}件 · ライブ字幕と書き出しに適用中</span>
+      </div>
+    </div>
   {:else}
     <div class="set-pane">
       <h2>言語</h2>
@@ -713,6 +907,15 @@
     outline: 2px solid var(--blue-focus);
     outline-offset: 2px;
     border-radius: 8px;
+  }
+
+  .visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
   }
 
   .settings {
@@ -963,6 +1166,97 @@
     font: inherit;
     font-size: 12.5px;
     margin-bottom: 18px;
+  }
+
+  .glossary-card {
+    max-width: 720px;
+  }
+
+  .glossary-head,
+  .glossary-row {
+    display: grid;
+    grid-template-columns: minmax(120px, 1fr) 24px minmax(120px, 1fr) 54px;
+    gap: 10px;
+    align-items: center;
+  }
+
+  .glossary-head {
+    padding: 10px 14px 7px;
+    color: var(--muted);
+    font-size: 11.5px;
+    font-weight: 600;
+  }
+
+  .glossary-row {
+    padding: 8px 14px;
+    border-top: 1px solid var(--divider);
+  }
+
+  .glossary-empty {
+    margin: 0;
+    padding: 18px 14px;
+    border-top: 1px solid var(--divider);
+    color: var(--muted);
+    font-size: 12.5px;
+  }
+
+  .glossary-input {
+    min-width: 0;
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--ink);
+    padding: 6px 8px;
+    font: inherit;
+    font-size: 13px;
+  }
+
+  .glossary-input:hover,
+  .glossary-input:focus {
+    border-color: var(--hairline);
+    background: var(--canvas);
+  }
+
+  .glossary-arrow {
+    color: var(--muted);
+    text-align: center;
+    font-size: 13px;
+  }
+
+  .glossary-delete {
+    justify-self: end;
+    width: 26px;
+    height: 26px;
+    border-radius: 7px;
+    color: var(--red);
+    opacity: 0;
+  }
+
+  .glossary-row:hover .glossary-delete,
+  .glossary-delete:focus-visible {
+    opacity: 1;
+  }
+
+  .glossary-add {
+    background: color-mix(in srgb, var(--blue-soft) 55%, transparent);
+  }
+
+  .add-rule {
+    justify-self: end;
+  }
+
+  .glossary-actions {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    max-width: 720px;
+  }
+
+  .glossary-count {
+    margin-left: auto;
+    color: var(--muted);
+    font-size: 12px;
   }
 
   .settings-error {
