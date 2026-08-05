@@ -30,6 +30,9 @@ export type RecordingWaveform = {
 export type RecordingTranscriptItem = {
   key: string;
   startMs: number;
+  /// Audio position where the segment ends; missing for legacy jsonl lines
+  /// that never carried a duration.
+  endMs?: number;
   stream: 'mic' | 'speaker' | 'unknown';
   speakerLabel: string;
   language: string;
@@ -47,6 +50,27 @@ export function parseSegmentStartMs(segmentId: unknown): number {
 
   const start = Number(segmentId.split('-')[0]);
   return Number.isFinite(start) ? start : 0;
+}
+
+/// Reads both ends of a `"<startMs>-<durationMs>"` segment id.
+/// Unlike parseSegmentStartMs this rejects malformed ids instead of
+/// defaulting to 0, so callers can leave timings undefined.
+export function parseSegmentTiming(segmentId: unknown): { startMs: number; endMs: number } | null {
+  if (typeof segmentId !== 'string') {
+    return null;
+  }
+
+  const [startPart, durationPart] = segmentId.split('-');
+  const startMs = Number(startPart);
+  const durationMs = Number(durationPart);
+  if (startPart === '' || durationPart === undefined || durationPart === '') {
+    return null;
+  }
+  if (!Number.isFinite(startMs) || !Number.isFinite(durationMs)) {
+    return null;
+  }
+
+  return { startMs, endMs: startMs + durationMs };
 }
 
 /// Merges per-stream transcript JSONL events (final transcripts + follow-up
@@ -85,9 +109,11 @@ export function buildRecordingTranscript(events: unknown[]): RecordingTranscript
 
     if (event.type === 'transcript' && event.isFinal === true && typeof event.text === 'string') {
       const existing = items.get(key);
+      const timing = parseSegmentTiming(event.segmentId);
       items.set(key, {
         key,
         startMs: parseSegmentStartMs(event.segmentId),
+        ...(timing !== null ? { endMs: timing.endMs } : {}),
         stream,
         speakerLabel:
           typeof event.speakerLabel === 'string'
@@ -136,12 +162,14 @@ export function buildWhisperxTranscript(events: unknown[]): RecordingTranscriptI
     }
 
     const startMs = typeof event.startMs === 'number' ? event.startMs : 0;
+    const endMs = typeof event.endMs === 'number' ? event.endMs : undefined;
     const speaker = typeof event.speaker === 'string' ? event.speaker : null;
     const speakerIndex = speaker !== null ? whisperxSpeakerIndex(speaker) : undefined;
 
     items.push({
       key: `wx-${startMs}-${items.length}`,
       startMs,
+      ...(endMs !== undefined ? { endMs } : {}),
       stream: 'unknown',
       speakerLabel: speakerIndex !== undefined ? `話者${speakerIndex + 1}` : '話者',
       language: typeof event.lang === 'string' ? event.lang : 'und',
@@ -208,7 +236,11 @@ export function trimTranscript(
 ): RecordingTranscriptItem[] {
   return items
     .filter((item) => item.startMs >= startMs && item.startMs <= endMs)
-    .map((item) => ({ ...item, startMs: item.startMs - startMs }));
+    .map((item) => ({
+      ...item,
+      startMs: item.startMs - startMs,
+      ...(item.endMs !== undefined ? { endMs: item.endMs - startMs } : {})
+    }));
 }
 
 /// Scales peaks against the loudest bucket of the same file. Mic input often

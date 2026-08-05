@@ -6,6 +6,7 @@ import {
   formatTimestampMs,
   groupRecordingsByDate,
   parseSegmentStartMs,
+  parseSegmentTiming,
   trimTranscript,
   waveformDisplayPeaks,
   whisperxSpeakerIndex,
@@ -17,6 +18,20 @@ describe('parseSegmentStartMs', () => {
     expect(parseSegmentStartMs('12500-1800')).toBe(12_500);
     expect(parseSegmentStartMs('broken')).toBe(0);
     expect(parseSegmentStartMs(undefined)).toBe(0);
+  });
+});
+
+describe('parseSegmentTiming', () => {
+  it('reads start and end from a "<startMs>-<durationMs>" segment id', () => {
+    expect(parseSegmentTiming('12500-1800')).toEqual({ startMs: 12_500, endMs: 14_300 });
+    expect(parseSegmentTiming('0-1000')).toEqual({ startMs: 0, endMs: 1_000 });
+  });
+
+  it('returns null for malformed ids', () => {
+    expect(parseSegmentTiming('broken')).toBeNull();
+    expect(parseSegmentTiming('1200')).toBeNull();
+    expect(parseSegmentTiming('1200-abc')).toBeNull();
+    expect(parseSegmentTiming(undefined)).toBeNull();
   });
 });
 
@@ -56,6 +71,22 @@ describe('buildRecordingTranscript', () => {
     expect(transcript.map((item) => item.startMs)).toEqual([1_000, 5_000]);
     expect(transcript[1].translation).toBe('リリースは金曜日です');
     expect(transcript[0].speakerLabel).toBe('Speaker A');
+  });
+
+  it('derives endMs from the segment id duration', () => {
+    const transcript = buildRecordingTranscript([
+      {
+        type: 'transcript',
+        stream: 'mic',
+        segmentId: '1000-1500',
+        isFinal: true,
+        lang: 'ja-JP',
+        text: 'こんにちは',
+        trans: null
+      }
+    ]);
+
+    expect(transcript[0].endMs).toBe(2_500);
   });
 
   it('keeps entries from before and after a helper restart apart', () => {
@@ -213,6 +244,15 @@ describe('trimTranscript', () => {
       'at-end'
     ]);
   });
+
+  it('shifts endMs together with startMs', () => {
+    const items = [{ ...item('kept', 6_000), endMs: 7_500 }];
+
+    expect(trimTranscript(items, 5_000, 10_000)[0]).toMatchObject({
+      startMs: 1_000,
+      endMs: 2_500
+    });
+  });
 });
 
 describe('whisperx transcript', () => {
@@ -240,6 +280,16 @@ describe('whisperx transcript', () => {
 
     expect(items[0].speakerLabel).toBe('話者');
     expect(items[0].speakerIndex).toBeUndefined();
+  });
+
+  it('carries the segment endMs through for exports', () => {
+    const items = buildWhisperxTranscript([
+      { type: 'whisperx', startMs: 2_000, endMs: 4_000, text: '発話', lang: 'ja' },
+      { type: 'whisperx', startMs: 5_000, text: '終端なし', lang: 'ja' }
+    ]);
+
+    expect(items[0].endMs).toBe(4_000);
+    expect(items[1].endMs).toBeUndefined();
   });
 
   it('assigns stable speaker indexes by first appearance', () => {
