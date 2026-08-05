@@ -1,5 +1,13 @@
 <script lang="ts">
+  import { onMount } from 'svelte';
   import { streamsForCaptureMode, type AudioStream, type CaptureMode } from '$lib/audioMode';
+  import {
+    audioLevelMeter,
+    latestAudioLevel,
+    streamSilenceState,
+    type AudioLevelHistory,
+    type SilenceState
+  } from '$lib/audioLevels';
   import { TEXT_EXPORT_FORMATS, type TextExportFormat } from '$lib/export/saveTextExport';
   import { formatRecordingTimer } from '$lib/captureState';
   import { languageControlLabel, type LanguageInfo } from '$lib/languages';
@@ -19,6 +27,7 @@
   export let subLanguage: string;
   export let installedLanguages: LanguageInfo[];
   export let activeStreams: Set<AudioStream>;
+  export let audioLevelHistory: AudioLevelHistory;
   export let isRecordingSession: boolean;
   export let recordingElapsed: number;
   export let isRecordingBusy: boolean;
@@ -48,6 +57,7 @@
   ];
 
   let openMenu: 'lang' | 'more' | null = null;
+  let meterNow = Date.now();
 
   function toggleMenu(menu: 'lang' | 'more', event: MouseEvent) {
     event.stopPropagation();
@@ -62,6 +72,31 @@
     const language = installedLanguages.find((candidate) => candidate.id === id);
     return language ? languageControlLabel(language) : id;
   }
+
+  function streamLabel(stream: AudioStream): string {
+    return stream === 'mic' ? 'Mic' : 'System';
+  }
+
+  function meterValue(stream: AudioStream): number {
+    const latest = latestAudioLevel(audioLevelHistory, stream);
+    return latest ? audioLevelMeter(latest).value : 0;
+  }
+
+  function silenceState(stream: AudioStream): SilenceState {
+    if (!activeStreams.has(stream)) {
+      return 'unknown';
+    }
+
+    return streamSilenceState(audioLevelHistory, stream, { nowMs: meterNow });
+  }
+
+  onMount(() => {
+    const timer = setInterval(() => {
+      meterNow = Date.now();
+    }, 500);
+
+    return () => clearInterval(timer);
+  });
 
   $: languagePillLabel =
     subLanguage === ''
@@ -133,6 +168,30 @@
                 ? `${stream} capture is running`
                 : `${stream} capture is down`}
             ></span>
+          {/each}
+        </div>
+      {/if}
+
+      {#if isTranscribing}
+        <div class="level-lanes" aria-label="入力レベル">
+          {#each streamsForCaptureMode(selectedCaptureMode) as stream (stream)}
+            {@const state = silenceState(stream)}
+            <div
+              class="level-lane"
+              class:inactive={!activeStreams.has(stream)}
+              class:silent={state === 'silent'}
+              title={state === 'silent'
+                ? `${streamLabel(stream)} input is silent`
+                : `${streamLabel(stream)} input level`}
+            >
+              <span class="level-label">{streamLabel(stream)}</span>
+              <span class="level-track" aria-hidden="true">
+                <span style={`transform: scaleX(${meterValue(stream)})`}></span>
+              </span>
+              {#if state === 'silent'}
+                <span class="level-warning">無音</span>
+              {/if}
+            </div>
           {/each}
         </div>
       {/if}
@@ -435,6 +494,63 @@
   .stream-dot.dead {
     background: var(--red);
     animation: stream-dead-pulse 1s ease-in-out infinite;
+  }
+
+  .level-lanes {
+    display: grid;
+    gap: 4px;
+    width: 132px;
+    flex: 0 0 auto;
+  }
+
+  .level-lane {
+    display: grid;
+    grid-template-columns: 36px minmax(42px, 1fr) 28px;
+    align-items: center;
+    gap: 6px;
+    min-height: 16px;
+    color: var(--ink-2);
+  }
+
+  .level-lane.inactive {
+    opacity: 0.45;
+  }
+
+  .level-label,
+  .level-warning {
+    overflow: hidden;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .level-warning {
+    color: var(--red);
+    text-align: right;
+  }
+
+  .level-track {
+    display: block;
+    height: 5px;
+    overflow: hidden;
+    border-radius: 999px;
+    background: rgba(120, 120, 128, 0.18);
+  }
+
+  .level-track span {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, var(--green), var(--blue));
+    transform-origin: left center;
+    transition: transform 0.08s linear;
+  }
+
+  .level-lane.silent .level-track span {
+    background: var(--red);
   }
 
   @keyframes stream-dead-pulse {

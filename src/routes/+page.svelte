@@ -17,6 +17,11 @@
     type CaptureMode
   } from '$lib/audioMode';
   import {
+    appendAudioLevel,
+    emptyAudioLevelHistory,
+    type AudioLevelHistory
+  } from '$lib/audioLevels';
+  import {
     canDecreaseTranscriptFontScale,
     canIncreaseTranscriptFontScale,
     decreaseTranscriptFontScale,
@@ -149,6 +154,7 @@
   let interimMessages: ChatMessage[] = [];
   let captureMode: CaptureMode = 'both';
   let activeStreams = new Set<AudioStream>();
+  let audioLevelHistory: AudioLevelHistory = emptyAudioLevelHistory();
   let streamSessionIds: StreamSessions = emptyStreamSessions();
   let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
   let streamStartedAt: Record<AudioStream, number | null> = { mic: null, speaker: null };
@@ -515,6 +521,8 @@
       messages = applyTranslationEvent(messages, payload);
     } else if (payload.type === 'status') {
       handleStatusEvent(payload);
+    } else if (payload.type === 'audio-level') {
+      audioLevelHistory = appendAudioLevel(audioLevelHistory, payload);
     }
   }
 
@@ -559,6 +567,10 @@
 
   function clearStreamSessions(streams: AudioStream[]) {
     streamSessionIds = withoutStreamSessions(streamSessionIds, streams);
+    audioLevelHistory = streams.reduce(
+      (history, stream) => ({ ...history, [stream]: [] }),
+      audioLevelHistory
+    );
   }
 
   function setTranscriptFontScale(scale: number) {
@@ -1359,6 +1371,7 @@
       clearTimeout(confirmClearTimer);
     }
     confirmingClear = false;
+    audioLevelHistory = emptyAudioLevelHistory();
     messages = [];
     interimMessages = [];
     markers = [];
@@ -1393,6 +1406,7 @@
       {subLanguage}
       {installedLanguages}
       {activeStreams}
+      {audioLevelHistory}
       isRecordingSession={recordingSession !== null}
       {recordingElapsed}
       {isRecordingBusy}

@@ -5,6 +5,7 @@ import {
   emptyAudioLevelHistory,
   streamSilenceState
 } from './audioLevels';
+import type { AudioLevelHistory } from './audioLevels';
 
 describe('appendAudioLevel', () => {
   it('keeps a bounded per-stream level history', () => {
@@ -44,14 +45,14 @@ describe('appendAudioLevel', () => {
 
 describe('streamSilenceState', () => {
   it('detects sustained low input after enough recent samples', () => {
-    const history = {
+    const history: AudioLevelHistory = {
       mic: [
         { stream: 'mic', sampleCount: 960, rms: 0.001, peak: 0.003, timestamp: 'a', receivedAtMs: 0 },
         { stream: 'mic', sampleCount: 960, rms: 0.002, peak: 0.004, timestamp: 'b', receivedAtMs: 1_000 },
         { stream: 'mic', sampleCount: 960, rms: 0.001, peak: 0.003, timestamp: 'c', receivedAtMs: 2_000 }
       ],
       speaker: []
-    } as const;
+    };
 
     expect(
       streamSilenceState(history, 'mic', {
@@ -63,13 +64,13 @@ describe('streamSilenceState', () => {
   });
 
   it('returns active when any recent peak crosses the threshold', () => {
-    const history = {
+    const history: AudioLevelHistory = {
       mic: [
         { stream: 'mic', sampleCount: 960, rms: 0.001, peak: 0.003, timestamp: 'a', receivedAtMs: 0 },
         { stream: 'mic', sampleCount: 960, rms: 0.03, peak: 0.08, timestamp: 'b', receivedAtMs: 1_000 }
       ],
       speaker: []
-    } as const;
+    };
 
     expect(
       streamSilenceState(history, 'mic', {
@@ -83,11 +84,11 @@ describe('streamSilenceState', () => {
 
 describe('audioLevelMeter', () => {
   it('normalizes peak into a stable visual range', () => {
-    expect(audioLevelMeter({ stream: 'speaker', sampleCount: 960, rms: 0.1, peak: 0.25 })).toEqual({
+    expect(audioLevelMeter({ stream: 'speaker', peak: 0.25 })).toEqual({
       stream: 'speaker',
       value: 0.25
     });
-    expect(audioLevelMeter({ stream: 'speaker', sampleCount: 960, rms: 0.1, peak: 2 })).toEqual({
+    expect(audioLevelMeter({ stream: 'speaker', peak: 2 })).toEqual({
       stream: 'speaker',
       value: 1
     });
