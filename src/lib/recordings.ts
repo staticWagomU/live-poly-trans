@@ -13,6 +13,14 @@ export type RecordingTrimRange = {
   endMs: number;
 };
 
+/// Custom speaker identity stored in meta.json, keyed by the stable speaker
+/// id (`speaker-N` / stream name). Transcript jsonl is never rewritten;
+/// names resolve at display/export time.
+export type RecordingSpeaker = {
+  name: string;
+  color?: string | null;
+};
+
 export type RecordingSummary = {
   id: string;
   startedAt: string;
@@ -21,6 +29,8 @@ export type RecordingSummary = {
   source?: string | null;
   /// Trim ranges keyed by trimmed output file name.
   trims?: Record<string, RecordingTrimRange> | null;
+  /// Custom speaker names/colors keyed by speaker id.
+  speakers?: Record<string, RecordingSpeaker> | null;
   files: RecordingFileInfo[];
 };
 

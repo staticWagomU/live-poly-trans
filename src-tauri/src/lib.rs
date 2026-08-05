@@ -819,6 +819,17 @@ pub struct TrimRange {
     pub end_ms: i64,
 }
 
+/// Custom speaker identity, keyed by the frontend's stable speaker id
+/// (`speaker-N` for diarized speakers, the stream name otherwise). Stored
+/// only in meta.json — transcript jsonl is never rewritten; names resolve
+/// at display/export time.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SpeakerMeta {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingMeta {
     pub id: String,
@@ -833,6 +844,9 @@ pub struct RecordingMeta {
     /// to match a trimmed file's timeline.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trims: Option<HashMap<String, TrimRange>>,
+    /// Custom speaker names/colors by speaker id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub speakers: Option<HashMap<String, SpeakerMeta>>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -853,6 +867,7 @@ pub struct RecordingSummary {
     pub ended_at: Option<String>,
     pub source: Option<String>,
     pub trims: Option<HashMap<String, TrimRange>>,
+    pub speakers: Option<HashMap<String, SpeakerMeta>>,
     pub files: Vec<RecordingFileInfo>,
 }
 
@@ -941,6 +956,22 @@ fn read_recording_meta(dir: &Path) -> Option<RecordingMeta> {
 fn write_recording_meta(dir: &Path, meta: &RecordingMeta) -> Result<(), String> {
     let json = serde_json::to_string_pretty(meta).map_err(|error| error.to_string())?;
     fs::write(dir.join("meta.json"), json).map_err(|error| error.to_string())
+}
+
+/// Replaces the recording's speaker map in meta.json wholesale; an empty
+/// map removes the key so untouched recordings keep a clean meta file.
+pub fn update_recording_speakers_in_dir(
+    dir: &Path,
+    speakers: HashMap<String, SpeakerMeta>,
+) -> Result<(), String> {
+    let mut meta = read_recording_meta(dir)
+        .ok_or_else(|| format!("recording meta not found in {}", dir.display()))?;
+    meta.speakers = if speakers.is_empty() {
+        None
+    } else {
+        Some(speakers)
+    };
+    write_recording_meta(dir, &meta)
 }
 
 // MARK: whisperx post-processing
@@ -1731,6 +1762,7 @@ pub mod commands {
                 ended_at: None,
                 source: None,
                 trims: None,
+                speakers: None,
             },
         )?;
 
@@ -2148,6 +2180,7 @@ pub mod commands {
                     ended_at: Some(now),
                     source: Some("external".to_string()),
                     trims: None,
+                    speakers: None,
                 },
             )?;
 
@@ -2232,6 +2265,22 @@ pub mod commands {
         .map_err(|error| error.to_string())?
     }
 
+    /// Saves the recording's speaker names/colors into meta.json. The
+    /// transcript jsonl stays untouched — names resolve at display time.
+    #[tauri::command]
+    pub async fn update_recording_speakers(
+        app: AppHandle,
+        id: String,
+        speakers: HashMap<String, SpeakerMeta>,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let dir = recording_dir_for(&app, &id)?;
+            update_recording_speakers_in_dir(&dir, speakers)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
     #[tauri::command]
     pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
         tauri::async_runtime::spawn_blocking(move || list_recordings_blocking(&app))
@@ -2282,6 +2331,7 @@ pub mod commands {
                 ended_at: meta.ended_at,
                 source: meta.source,
                 trims: meta.trims,
+                speakers: meta.speakers,
                 files,
             });
         }
@@ -2466,6 +2516,7 @@ pub fn run() {
             commands::reveal_recordings_directory,
             commands::import_audio_file,
             commands::trim_recording,
+            commands::update_recording_speakers,
             commands::whisperx_status,
             commands::ensure_uv,
             commands::permission_status,
@@ -3047,6 +3098,7 @@ mod tests {
                 ended_at: None,
                 source: None,
                 trims: None,
+                speakers: None,
             },
         )
         .unwrap();
@@ -3058,6 +3110,7 @@ mod tests {
                 ended_at: Some("2026-07-31T09:30:00+09:00".to_string()),
                 source: None,
                 trims: None,
+                speakers: None,
             },
         )
         .unwrap();
@@ -3076,6 +3129,145 @@ mod tests {
             closed_meta.ended_at.as_deref(),
             Some("2026-07-31T09:30:00+09:00")
         );
+    }
+
+    #[test]
+    fn recording_meta_round_trips_speakers() {
+        let root = std::env::temp_dir().join(format!("lpt-meta-speakers-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "speaker-0".to_string(),
+            SpeakerMeta {
+                name: "田中さん".to_string(),
+                color: Some("#123456".to_string()),
+            },
+        );
+        speakers.insert(
+            "mic".to_string(),
+            SpeakerMeta {
+                name: "自分".to_string(),
+                color: None,
+            },
+        );
+
+        write_recording_meta(
+            &root,
+            &RecordingMeta {
+                id: "rec-1".to_string(),
+                started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                ended_at: None,
+                source: None,
+                trims: None,
+                speakers: Some(speakers),
+            },
+        )
+        .unwrap();
+
+        let meta = read_recording_meta(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        let speakers = meta.speakers.unwrap();
+        assert_eq!(speakers["speaker-0"].name, "田中さん");
+        assert_eq!(speakers["speaker-0"].color.as_deref(), Some("#123456"));
+        assert_eq!(speakers["mic"].name, "自分");
+        assert_eq!(speakers["mic"].color, None);
+    }
+
+    #[test]
+    fn recording_meta_without_speakers_still_deserializes() {
+        let legacy = r#"{"id":"rec-1","startedAt":"2026-08-05T10:00:00+09:00"}"#;
+        let meta: RecordingMeta = serde_json::from_str(legacy).unwrap();
+        assert!(meta.speakers.is_none());
+
+        // A meta without speakers must not gain a `speakers` key on rewrite.
+        let json = serde_json::to_string(&meta).unwrap();
+        assert!(!json.contains("speakers"));
+    }
+
+    #[test]
+    fn update_recording_speakers_in_dir_saves_the_map_into_meta() {
+        let root = std::env::temp_dir().join(format!("lpt-update-speakers-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        write_recording_meta(
+            &root,
+            &RecordingMeta {
+                id: "rec-1".to_string(),
+                started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                ended_at: Some("2026-08-05T10:30:00+09:00".to_string()),
+                source: None,
+                trims: None,
+                speakers: None,
+            },
+        )
+        .unwrap();
+
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "speaker-1".to_string(),
+            SpeakerMeta {
+                name: "佐藤さん".to_string(),
+                color: None,
+            },
+        );
+
+        let result = update_recording_speakers_in_dir(&root, speakers);
+        let meta = read_recording_meta(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(result, Ok(()));
+        // The rest of the meta survives the rewrite.
+        assert_eq!(meta.ended_at.as_deref(), Some("2026-08-05T10:30:00+09:00"));
+        assert_eq!(meta.speakers.unwrap()["speaker-1"].name, "佐藤さん");
+    }
+
+    #[test]
+    fn update_recording_speakers_in_dir_clears_meta_with_an_empty_map() {
+        let root =
+            std::env::temp_dir().join(format!("lpt-update-speakers-clear-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+
+        let mut speakers = HashMap::new();
+        speakers.insert(
+            "speaker-0".to_string(),
+            SpeakerMeta {
+                name: "田中さん".to_string(),
+                color: None,
+            },
+        );
+        write_recording_meta(
+            &root,
+            &RecordingMeta {
+                id: "rec-1".to_string(),
+                started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                ended_at: None,
+                source: None,
+                trims: None,
+                speakers: Some(speakers),
+            },
+        )
+        .unwrap();
+
+        let result = update_recording_speakers_in_dir(&root, HashMap::new());
+        let meta = read_recording_meta(&root).unwrap();
+        let raw = fs::read_to_string(root.join("meta.json")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(result, Ok(()));
+        assert!(meta.speakers.is_none());
+        assert!(!raw.contains("speakers"));
+    }
+
+    #[test]
+    fn update_recording_speakers_in_dir_fails_without_meta() {
+        let root = std::env::temp_dir().join(format!(
+            "lpt-update-speakers-missing-{}",
+            std::process::id()
+        ));
+
+        let result = update_recording_speakers_in_dir(&root, HashMap::new());
+        assert!(result.is_err());
     }
 
     #[test]
