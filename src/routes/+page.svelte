@@ -282,6 +282,11 @@
         listen<HelperExitedPayload>('helper-exited', (event) => {
           void handleHelperExit(event.payload);
         })
+      ),
+      cleanupRegistry.add(
+        listen<string>('tray-command', (event) => {
+          void handleTrayCommand(event.payload);
+        })
       )
     ])
       .then(async () => {
@@ -350,6 +355,25 @@
   function openPrivacySettings() {
     settingsPane = 'privacy';
     activeTab = 'settings';
+  }
+
+  async function handleTrayCommand(command: string) {
+    switch (command) {
+      case 'toggle-recording':
+        await toggleRecordingSession();
+        break;
+      case 'toggle-pause':
+        await toggleTranscription();
+        break;
+      case 'toggle-overlay':
+        await toggleOverlay();
+        break;
+      case 'adjust-overlay':
+        await beginOverlayAdjustment();
+        break;
+      default:
+        console.warn(`Unknown tray command: ${command}`);
+    }
   }
 
   /// Re-evaluated whenever Settings reports a change, so granting the last

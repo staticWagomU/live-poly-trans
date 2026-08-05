@@ -12,6 +12,8 @@ use std::{
     time::{Duration, Instant},
 };
 use tauri::{
+    menu::{Menu, MenuItem, PredefinedMenuItem},
+    tray::TrayIconBuilder,
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
@@ -90,6 +92,21 @@ fn apply_overlay_window_state(
 
 #[derive(Default)]
 pub struct OverlayAdjustmentState(Mutex<bool>);
+
+pub const TRAY_COMMAND_TOGGLE_RECORDING: &str = "toggle-recording";
+pub const TRAY_COMMAND_TOGGLE_PAUSE: &str = "toggle-pause";
+pub const TRAY_COMMAND_TOGGLE_OVERLAY: &str = "toggle-overlay";
+pub const TRAY_COMMAND_ADJUST_OVERLAY: &str = "adjust-overlay";
+
+pub fn tray_command_for_menu_id(id: &str) -> Option<&'static str> {
+    match id {
+        "tray-toggle-recording" => Some(TRAY_COMMAND_TOGGLE_RECORDING),
+        "tray-toggle-pause" => Some(TRAY_COMMAND_TOGGLE_PAUSE),
+        "tray-toggle-overlay" => Some(TRAY_COMMAND_TOGGLE_OVERLAY),
+        "tray-adjust-overlay" => Some(TRAY_COMMAND_ADJUST_OVERLAY),
+        _ => None,
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageInfo {
@@ -2972,8 +2989,23 @@ pub fn run() {
             commands::save_text_file,
             commands::validate_export_directory
         ])
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            "tray-show-main" => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.show();
+                    let _ = window.set_focus();
+                }
+            }
+            "tray-quit" => app.exit(0),
+            id => {
+                if let Some(command) = tray_command_for_menu_id(id) {
+                    let _ = app.emit("tray-command", command);
+                }
+            }
+        })
         .setup(|app| {
             let _ = app.get_webview_window("main");
+            setup_tray(app.handle())?;
             Ok(())
         })
         .manage(OverlayAdjustmentState::default())
@@ -2984,6 +3016,64 @@ pub fn run() {
                 shutdown_capture_on_exit(app);
             }
         });
+}
+
+fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    let menu = Menu::with_items(
+        app,
+        &[
+            &MenuItem::with_id(
+                app,
+                "tray-toggle-recording",
+                "録音 開始/停止",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tray-toggle-pause",
+                "一時停止/再開",
+                true,
+                None::<&str>,
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "tray-toggle-overlay",
+                "字幕オーバーレイ",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(
+                app,
+                "tray-adjust-overlay",
+                "オーバーレイの位置調整",
+                true,
+                None::<&str>,
+            )?,
+            &PredefinedMenuItem::separator(app)?,
+            &MenuItem::with_id(
+                app,
+                "tray-show-main",
+                "メイン画面を表示",
+                true,
+                None::<&str>,
+            )?,
+            &MenuItem::with_id(app, "tray-quit", "終了", true, None::<&str>)?,
+        ],
+    )?;
+
+    let mut tray = TrayIconBuilder::with_id("live-poly-trans")
+        .menu(&menu)
+        .tooltip("LivePolyTrans")
+        .show_menu_on_left_click(true)
+        .icon_as_template(true);
+    if let Some(icon) = app.default_window_icon().cloned() {
+        tray = tray.icon(icon);
+    }
+
+    tray.build(app)?;
+    Ok(())
 }
 
 /// Quitting mid-recording must still drain the helpers (so the m4a files get
@@ -4148,5 +4238,26 @@ mod tests {
         fs::remove_dir_all(&root).unwrap();
 
         assert_eq!(restored, None);
+    }
+
+    #[test]
+    fn tray_menu_ids_map_to_frontend_commands() {
+        assert_eq!(
+            tray_command_for_menu_id("tray-toggle-recording"),
+            Some(TRAY_COMMAND_TOGGLE_RECORDING)
+        );
+        assert_eq!(
+            tray_command_for_menu_id("tray-toggle-pause"),
+            Some(TRAY_COMMAND_TOGGLE_PAUSE)
+        );
+        assert_eq!(
+            tray_command_for_menu_id("tray-toggle-overlay"),
+            Some(TRAY_COMMAND_TOGGLE_OVERLAY)
+        );
+        assert_eq!(
+            tray_command_for_menu_id("tray-adjust-overlay"),
+            Some(TRAY_COMMAND_ADJUST_OVERLAY)
+        );
+        assert_eq!(tray_command_for_menu_id("tray-quit"), None);
     }
 }
