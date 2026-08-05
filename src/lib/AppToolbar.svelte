@@ -33,6 +33,7 @@
   export let onSave: () => void;
   export let onSaveAs: (format: TextExportFormat) => void;
   export let onToggleOverlay: () => void;
+  export let onAdjustOverlay: () => void;
 
   // txt is omitted here because ファイルへ保存… (⌘S) already writes the
   // legacy plain-text format.
@@ -293,6 +294,16 @@
               }}
             >
               字幕オーバーレイを切り替え
+            </button>
+            <button
+              type="button"
+              class="mi no-check"
+              on:click={() => {
+                onAdjustOverlay();
+                closeMenus();
+              }}
+            >
+              オーバーレイの位置調整
             </button>
             <div class="sep"></div>
             <div class="mlabel">文字サイズ: {Math.round(transcriptFontScale * 100)}%</div>

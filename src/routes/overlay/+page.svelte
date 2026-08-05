@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import '$lib/theme.css';
@@ -11,10 +12,20 @@
     fontScale: 1
   };
   let faded = false;
+  let adjusting = false;
+  let adjustmentError: string | null = null;
   let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
-    let dispose: (() => void) | null = null;
+    let disposeCaptions: (() => void) | null = null;
+    let disposeAdjustment: (() => void) | null = null;
+    void invoke<boolean>('overlay_adjustment_enabled')
+      .then((enabled) => {
+        adjusting = enabled;
+      })
+      .catch(() => {
+        adjusting = false;
+      });
     void listen<{
       lines: OverlayCaptionLine[];
       settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'>;
@@ -31,16 +42,35 @@
         }, settings.fadeSeconds * 1000);
       }
     }).then((unlisten) => {
-      dispose = unlisten;
+      disposeCaptions = unlisten;
+    });
+    void listen<boolean>('overlay-adjustment', (event) => {
+      adjusting = event.payload;
+      adjustmentError = null;
+    }).then((unlisten) => {
+      disposeAdjustment = unlisten;
     });
 
     return () => {
       if (fadeTimer) {
         clearTimeout(fadeTimer);
       }
-      dispose?.();
+      disposeCaptions?.();
+      disposeAdjustment?.();
     };
   });
+
+  function startDrag() {
+    void invoke('start_overlay_drag').catch((error) => {
+      adjustmentError = String(error);
+    });
+  }
+
+  function finishAdjustment() {
+    void invoke('finish_overlay_adjustment').catch((error) => {
+      adjustmentError = String(error);
+    });
+  }
 </script>
 
 <svelte:head>
@@ -48,6 +78,15 @@
 </svelte:head>
 
 <main class="overlay" aria-label="字幕オーバーレイ" style="--overlay-scale: {settings.fontScale}">
+  {#if adjusting}
+    <div class="adjust">
+      <button type="button" class="drag" onmousedown={startDrag}>位置をドラッグ</button>
+      <button type="button" class="done" onclick={finishAdjustment}>完了</button>
+      {#if adjustmentError}
+        <span class="err">{adjustmentError}</span>
+      {/if}
+    </div>
+  {/if}
   <div class="lines" class:faded>
     {#if lines.length === 0}
       <div class="line muted">音声を待っています</div>
@@ -77,9 +116,55 @@
   .overlay {
     min-height: 100vh;
     display: grid;
-    place-items: end center;
+    grid-template-rows: auto minmax(0, 1fr);
+    align-items: end;
+    justify-items: center;
     padding: 18px 24px;
     background: transparent;
+  }
+
+  .adjust {
+    align-self: start;
+    justify-self: center;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px;
+    border-radius: 10px;
+    background: rgba(17, 24, 39, 0.78);
+    color: #fff;
+    font:
+      12px/1.2 -apple-system,
+      BlinkMacSystemFont,
+      'SF Pro Text',
+      sans-serif;
+    pointer-events: auto;
+  }
+
+  .adjust button {
+    border: 0;
+    border-radius: 7px;
+    padding: 6px 10px;
+    color: inherit;
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .drag {
+    background: rgba(255, 255, 255, 0.18);
+    cursor: grab;
+  }
+
+  .done {
+    background: #0a84ff;
+  }
+
+  .err {
+    max-width: 320px;
+    color: #ffb4ab;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .lines {

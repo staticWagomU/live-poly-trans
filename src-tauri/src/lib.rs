@@ -11,7 +11,10 @@ use std::{
     sync::{mpsc, Arc, Mutex},
     time::{Duration, Instant},
 };
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
+    WebviewWindow, WebviewWindowBuilder,
+};
 
 pub mod capture_helper_protocol;
 pub mod whisper_engine_audio;
@@ -32,6 +35,61 @@ const WHISPER_STOP_GRACE: Duration = Duration::from_secs(15);
 // control channel. Helpers announce right after capture setup, so in practice
 // this only delays a Record press that races the very first stream start.
 const CONTROL_READY_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OverlayWindowState {
+    pub x: i32,
+    pub y: i32,
+    pub width: u32,
+    pub height: u32,
+}
+
+fn read_overlay_window_state(path: &Path) -> Option<OverlayWindowState> {
+    let raw = fs::read_to_string(path).ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+fn write_overlay_window_state(path: &Path, state: &OverlayWindowState) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let json = serde_json::to_string_pretty(state).map_err(|error| error.to_string())?;
+    fs::write(path, json).map_err(|error| error.to_string())
+}
+
+fn overlay_window_state_path(app: &AppHandle) -> Result<PathBuf, String> {
+    Ok(app
+        .path()
+        .app_data_dir()
+        .map_err(|error| error.to_string())?
+        .join("overlay-window.json"))
+}
+
+fn capture_overlay_window_state(window: &WebviewWindow) -> Result<OverlayWindowState, String> {
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let size = window.inner_size().map_err(|error| error.to_string())?;
+    Ok(OverlayWindowState {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+fn apply_overlay_window_state(
+    window: &WebviewWindow,
+    state: &OverlayWindowState,
+) -> Result<(), String> {
+    window
+        .set_position(Position::Physical(PhysicalPosition::new(state.x, state.y)))
+        .map_err(|error| error.to_string())?;
+    window
+        .set_size(Size::Physical(PhysicalSize::new(state.width, state.height)))
+        .map_err(|error| error.to_string())
+}
+
+#[derive(Default)]
+pub struct OverlayAdjustmentState(Mutex<bool>);
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LanguageInfo {
@@ -1977,11 +2035,22 @@ pub mod commands {
         if let Some(window) = app.get_webview_window("overlay") {
             let visible = window.is_visible().map_err(|error| error.to_string())?;
             if visible {
+                if let Ok(path) = overlay_window_state_path(&app) {
+                    if let Ok(state) = capture_overlay_window_state(&window) {
+                        let _ = write_overlay_window_state(&path, &state);
+                    }
+                }
                 window.hide().map_err(|error| error.to_string())?;
                 return Ok(false);
             }
 
             window.show().map_err(|error| error.to_string())?;
+            if let Some(state) = overlay_window_state_path(&app)
+                .ok()
+                .and_then(|path| read_overlay_window_state(&path))
+            {
+                let _ = apply_overlay_window_state(&window, &state);
+            }
             window
                 .set_ignore_cursor_events(true)
                 .map_err(|error| error.to_string())?;
@@ -2000,10 +2069,75 @@ pub mod commands {
             .resizable(true)
             .build()
             .map_err(|error| error.to_string())?;
+        if let Some(state) = overlay_window_state_path(&app)
+            .ok()
+            .and_then(|path| read_overlay_window_state(&path))
+        {
+            let _ = apply_overlay_window_state(&window, &state);
+        }
         window
             .set_ignore_cursor_events(true)
             .map_err(|error| error.to_string())?;
         Ok(true)
+    }
+
+    #[tauri::command]
+    pub async fn begin_overlay_adjustment(
+        app: AppHandle,
+        state: State<'_, OverlayAdjustmentState>,
+    ) -> Result<(), String> {
+        if app.get_webview_window("overlay").is_none() {
+            toggle_overlay(app.clone()).await?;
+        }
+
+        let window = app
+            .get_webview_window("overlay")
+            .ok_or_else(|| "overlay window is not available".to_string())?;
+        *state.0.lock().map_err(|error| error.to_string())? = true;
+        window.show().map_err(|error| error.to_string())?;
+        window
+            .set_ignore_cursor_events(false)
+            .map_err(|error| error.to_string())?;
+        window
+            .emit("overlay-adjustment", true)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn start_overlay_drag(app: AppHandle) -> Result<(), String> {
+        let window = app
+            .get_webview_window("overlay")
+            .ok_or_else(|| "overlay window is not available".to_string())?;
+        window.start_dragging().map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn finish_overlay_adjustment(
+        app: AppHandle,
+        adjustment_state: State<'_, OverlayAdjustmentState>,
+    ) -> Result<(), String> {
+        let window = app
+            .get_webview_window("overlay")
+            .ok_or_else(|| "overlay window is not available".to_string())?;
+        let window_state = capture_overlay_window_state(&window)?;
+        write_overlay_window_state(&overlay_window_state_path(&app)?, &window_state)?;
+        *adjustment_state
+            .0
+            .lock()
+            .map_err(|error| error.to_string())? = false;
+        window
+            .set_ignore_cursor_events(true)
+            .map_err(|error| error.to_string())?;
+        window
+            .emit("overlay-adjustment", false)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
+    pub async fn overlay_adjustment_enabled(
+        state: State<'_, OverlayAdjustmentState>,
+    ) -> Result<bool, String> {
+        Ok(*state.0.lock().map_err(|error| error.to_string())?)
     }
 
     #[tauri::command]
@@ -2809,6 +2943,10 @@ pub fn run() {
             commands::ai_extract_actions,
             commands::ai_ask,
             commands::toggle_overlay,
+            commands::begin_overlay_adjustment,
+            commands::start_overlay_drag,
+            commands::finish_overlay_adjustment,
+            commands::overlay_adjustment_enabled,
             commands::create_recording,
             commands::finalize_recording,
             commands::start_recording_session,
@@ -2838,6 +2976,7 @@ pub fn run() {
             let _ = app.get_webview_window("main");
             Ok(())
         })
+        .manage(OverlayAdjustmentState::default())
         .build(tauri::generate_context!())
         .expect("error while running LivePolyTrans")
         .run(|app, event| {
@@ -3977,5 +4116,37 @@ mod tests {
         assert_eq!(timestamp.len(), "20260704-120000".len());
         assert!(!timestamp.contains(':'));
         assert!(!timestamp.contains('/'));
+    }
+
+    #[test]
+    fn overlay_window_state_round_trips_to_json() {
+        let root = std::env::temp_dir().join(format!("lpt-overlay-state-{}", std::process::id()));
+        let path = root.join("overlay-window.json");
+        let state = OverlayWindowState {
+            x: 120,
+            y: 80,
+            width: 980,
+            height: 180,
+        };
+
+        write_overlay_window_state(&path, &state).unwrap();
+        let restored = read_overlay_window_state(&path);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(restored, Some(state));
+    }
+
+    #[test]
+    fn overlay_window_state_ignores_corrupt_json() {
+        let root =
+            std::env::temp_dir().join(format!("lpt-overlay-state-corrupt-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("overlay-window.json");
+        fs::write(&path, "{broken").unwrap();
+
+        let restored = read_overlay_window_state(&path);
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(restored, None);
     }
 }

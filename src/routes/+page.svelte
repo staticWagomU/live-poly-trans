@@ -1224,6 +1224,14 @@
     }
   }
 
+  async function beginOverlayAdjustment() {
+    try {
+      await invoke('begin_overlay_adjustment');
+    } catch (error) {
+      appError = String(error);
+    }
+  }
+
   async function publishOverlayCaptions(force = false) {
     const lines = buildOverlayCaptionLines([...messages, ...interimMessages], {
       mainLanguage,
@@ -1320,6 +1328,7 @@
       onSave={saveTranscript}
       onSaveAs={saveTranscriptAs}
       onToggleOverlay={toggleOverlay}
+      onAdjustOverlay={beginOverlayAdjustment}
       onFontScaleChange={setTranscriptFontScale}
       onEnterMimi={() => void enterMimi()}
     />
