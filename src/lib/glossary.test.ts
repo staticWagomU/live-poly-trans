@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   applyGlossary,
   applyGlossaryToEntries,
+  importGlossaryJson,
   parseGlossaryRules,
   serializeGlossaryRules,
   type GlossaryRule
@@ -120,5 +121,31 @@ describe('parseGlossaryRules', () => {
       { from: 'a', to: 'b', matchType: 'text', enabled: true },
       { from: 'c', to: 'd', matchType: 'regex', enabled: false }
     ]);
+  });
+});
+
+describe('importGlossaryJson', () => {
+  it('imports a JSON rule list with compatibility defaults', () => {
+    const result = importGlossaryJson(
+      JSON.stringify([
+        { from: 'クロード コード', to: 'Claude Code' },
+        { from: '(\\d+)円', to: '¥$1', matchType: 'regex', enabled: false }
+      ])
+    );
+
+    expect(result).toEqual({
+      ok: true,
+      rules: [
+        { from: 'クロード コード', to: 'Claude Code', matchType: 'text', enabled: true },
+        { from: '(\\d+)円', to: '¥$1', matchType: 'regex', enabled: false }
+      ]
+    });
+  });
+
+  it('rejects malformed glossary JSON instead of silently clearing rules', () => {
+    expect(importGlossaryJson('{"from":"a","to":"b"}')).toEqual({
+      ok: false,
+      error: '用語集JSONは配列である必要があります。'
+    });
   });
 });

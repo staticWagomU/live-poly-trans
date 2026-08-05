@@ -11,6 +11,10 @@ export type GlossaryRule = {
   enabled: boolean;
 };
 
+export type GlossaryImportResult =
+  | { ok: true; rules: GlossaryRule[] }
+  | { ok: false; error: string };
+
 function isActive(rule: GlossaryRule): boolean {
   return rule.enabled && rule.from !== '';
 }
@@ -99,4 +103,19 @@ export function parseGlossaryRules(raw: string | null): GlossaryRule[] {
 
 export function serializeGlossaryRules(rules: GlossaryRule[]): string {
   return JSON.stringify(rules);
+}
+
+export function importGlossaryJson(raw: string): GlossaryImportResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: '用語集JSONを読み込めませんでした。' };
+  }
+
+  if (!Array.isArray(parsed)) {
+    return { ok: false, error: '用語集JSONは配列である必要があります。' };
+  }
+
+  return { ok: true, rules: parseGlossaryRules(raw) };
 }
