@@ -287,6 +287,11 @@
         listen<string>('tray-command', (event) => {
           void handleTrayCommand(event.payload);
         })
+      ),
+      cleanupRegistry.add(
+        listen<string>('shortcut-error', (event) => {
+          appError = event.payload;
+        })
       )
     ])
       .then(async () => {

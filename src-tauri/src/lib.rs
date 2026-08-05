@@ -17,6 +17,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
+use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
 
 pub mod capture_helper_protocol;
 pub mod whisper_engine_audio;
@@ -106,6 +107,22 @@ pub fn tray_command_for_menu_id(id: &str) -> Option<&'static str> {
         "tray-adjust-overlay" => Some(TRAY_COMMAND_ADJUST_OVERLAY),
         _ => None,
     }
+}
+
+pub fn shortcut_command(shortcut: &Shortcut) -> Option<&'static str> {
+    let command_modifiers = Modifiers::ALT | Modifiers::SUPER;
+    let control_modifiers = Modifiers::ALT | Modifiers::CONTROL;
+    if shortcut.matches(command_modifiers, Code::KeyR)
+        || shortcut.matches(control_modifiers, Code::KeyR)
+    {
+        return Some(TRAY_COMMAND_TOGGLE_RECORDING);
+    }
+    if shortcut.matches(command_modifiers, Code::KeyL)
+        || shortcut.matches(control_modifiers, Code::KeyL)
+    {
+        return Some(TRAY_COMMAND_TOGGLE_OVERLAY);
+    }
+    None
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3006,6 +3023,11 @@ pub fn run() {
         .setup(|app| {
             let _ = app.get_webview_window("main");
             setup_tray(app.handle())?;
+            if let Err(error) = setup_global_shortcuts(app.handle()) {
+                let message = format!("Could not register global shortcuts: {error}");
+                eprintln!("{message}");
+                let _ = app.emit("shortcut-error", message);
+            }
             Ok(())
         })
         .manage(OverlayAdjustmentState::default())
@@ -3073,6 +3095,23 @@ fn setup_tray(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
     }
 
     tray.build(app)?;
+    Ok(())
+}
+
+fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Error>> {
+    app.plugin(
+        tauri_plugin_global_shortcut::Builder::new()
+            .with_shortcuts(["CommandOrControl+Alt+R", "CommandOrControl+Alt+L"])?
+            .with_handler(|app, shortcut, event| {
+                if event.state != ShortcutState::Pressed {
+                    return;
+                }
+                if let Some(command) = shortcut_command(shortcut) {
+                    let _ = app.emit("tray-command", command);
+                }
+            })
+            .build(),
+    )?;
     Ok(())
 }
 
@@ -4259,5 +4298,27 @@ mod tests {
             Some(TRAY_COMMAND_ADJUST_OVERLAY)
         );
         assert_eq!(tray_command_for_menu_id("tray-quit"), None);
+    }
+
+    #[test]
+    fn global_shortcuts_map_to_frontend_commands() {
+        let record = Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyR);
+        let overlay = Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyL);
+        let control_record = Shortcut::new(Some(Modifiers::ALT | Modifiers::CONTROL), Code::KeyR);
+        let unrelated = Shortcut::new(Some(Modifiers::ALT | Modifiers::SUPER), Code::KeyP);
+
+        assert_eq!(
+            shortcut_command(&record),
+            Some(TRAY_COMMAND_TOGGLE_RECORDING)
+        );
+        assert_eq!(
+            shortcut_command(&overlay),
+            Some(TRAY_COMMAND_TOGGLE_OVERLAY)
+        );
+        assert_eq!(
+            shortcut_command(&control_record),
+            Some(TRAY_COMMAND_TOGGLE_RECORDING)
+        );
+        assert_eq!(shortcut_command(&unrelated), None);
     }
 }
