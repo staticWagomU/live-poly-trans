@@ -56,6 +56,29 @@ export function resolveSpeakerColor(
   return entry.speakerIndex !== undefined ? speakerColor(entry.speakerIndex) : undefined;
 }
 
+/// Applies one rename to the recording's `speakers` map without mutating
+/// it. A blank name — or one matching the default label — removes the
+/// entry so the speaker reverts to its default; otherwise the trimmed
+/// name is stored, preserving any custom color. Returns null when the map
+/// ends up empty so callers can clear the meta key instead of storing {}.
+export function applySpeakerRename(
+  speakers: Record<string, RecordingSpeaker> | null | undefined,
+  id: string,
+  rawName: string,
+  defaultLabel: string
+): Record<string, RecordingSpeaker> | null {
+  const name = rawName.trim();
+  const next: Record<string, RecordingSpeaker> = { ...(speakers ?? {}) };
+
+  if (name === '' || name === defaultLabel) {
+    delete next[id];
+  } else {
+    next[id] = { ...next[id], name };
+  }
+
+  return Object.keys(next).length > 0 ? next : null;
+}
+
 export type SpeakerStat = {
   id: string;
   label: string;

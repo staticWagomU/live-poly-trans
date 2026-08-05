@@ -13,12 +13,20 @@
     trimTranscript,
     waveformDisplayPeaks,
     type RecordingFileInfo,
+    type RecordingSpeaker,
     type RecordingSummary,
     type RecordingTranscriptItem,
     type RecordingWaveform
   } from '$lib/recordings';
   import { createLatestRequestGuard } from '$lib/latestRequest';
-  import { speakerColor } from '$lib/speakers';
+  import {
+    applySpeakerRename,
+    resolveSpeakerColor,
+    resolveSpeakerName,
+    speakerStats,
+    transcriptItemSpeakerId,
+    type SpeakerStat
+  } from '$lib/speakers';
   import { getHfTokenOrNull } from '$lib/settingsStore';
   import {
     buildTextExport,
@@ -58,6 +66,11 @@
   let actionsOpen = $state(false);
   let isDropTarget = $state(false);
 
+  // Participant chip currently in inline-edit mode (speaker id) and its
+  // in-progress name.
+  let editingSpeakerId = $state<string | null>(null);
+  let editingSpeakerName = $state('');
+
   // Trim selection in source-file milliseconds; null = trim mode off.
   let trimRange = $state<{ startMs: number; endMs: number } | null>(null);
   let trimDragging: 'start' | 'end' | null = null;
@@ -81,6 +94,7 @@
     activeTrim ? trimTranscript(baseTranscript, activeTrim.startMs, activeTrim.endMs) : baseTranscript
   );
   const activeKey = $derived(activeItemKey(displayTranscript, currentTimeMs));
+  const participantStats = $derived(speakerStats(displayTranscript));
   const reprocessStageLabel = $derived(
     reprocessStage === 'transcribe'
       ? '1/3 文字起こし中…'
@@ -171,6 +185,7 @@
     actionsOpen = false;
     reprocessOpen = false;
     trimRange = null;
+    editingSpeakerId = null;
     transcript = [];
     whisperxItems = [];
     isLoadingTranscript = true;
@@ -465,12 +480,16 @@
     error = null;
     try {
       const startedAt = new Date(recording.startedAt);
-      const entries = displayTranscript.map((item) =>
-        recordingItemToTranscriptEntry(
+      // Custom speaker names live in meta.json, not the transcript, so
+      // exports resolve labels here (participants included, via
+      // uniqueSpeakerLabels over the resolved entries).
+      const entries = displayTranscript.map((item) => {
+        const entry = recordingItemToTranscriptEntry(
           item,
           Number.isNaN(startedAt.getTime()) ? {} : { baseTimestamp: recording.startedAt }
-        )
-      );
+        );
+        return { ...entry, speakerLabel: resolveSpeakerName(entry, recording.speakers) };
+      });
       const file = buildTextExport(format, entries, {
         baseName: `LivePolyTrans-${recording.id}-transcript`,
         markdownMeta: {
@@ -570,6 +589,87 @@
     } finally {
       isReprocessing = false;
       reprocessStage = null;
+    }
+  }
+
+  // ---- speaker rename (participant chips) ----
+
+  function speakerDisplayName(stat: SpeakerStat): string {
+    return resolveSpeakerName(
+      { speakerId: stat.id, speakerLabel: stat.label },
+      selectedRecording?.speakers
+    );
+  }
+
+  /// Chip / row dot color: custom color or diarization palette via
+  /// resolveSpeakerColor, otherwise the stream-dot convention (mic = blue,
+  /// anything else = muted).
+  function chipDotColor(stat: SpeakerStat): string {
+    return (
+      resolveSpeakerColor(
+        { speakerId: stat.id, speakerIndex: stat.speakerIndex },
+        selectedRecording?.speakers
+      ) ?? (stat.id === 'mic' ? 'var(--blue)' : 'var(--muted)')
+    );
+  }
+
+  function rowSpeakerName(item: RecordingTranscriptItem): string {
+    return resolveSpeakerName(
+      { speakerId: transcriptItemSpeakerId(item), speakerLabel: item.speakerLabel },
+      selectedRecording?.speakers
+    );
+  }
+
+  function rowDotStyle(item: RecordingTranscriptItem): string {
+    const color = resolveSpeakerColor(
+      { speakerId: transcriptItemSpeakerId(item), speakerIndex: item.speakerIndex },
+      selectedRecording?.speakers
+    );
+    return color !== undefined ? `background: ${color}` : '';
+  }
+
+  /// Svelte action: focus the inline-edit input and select its text so
+  /// typing replaces the current name immediately.
+  function focusAndSelect(node: HTMLInputElement) {
+    node.focus();
+    node.select();
+  }
+
+  function startSpeakerEdit(stat: SpeakerStat) {
+    editingSpeakerName = speakerDisplayName(stat);
+    editingSpeakerId = stat.id;
+  }
+
+  function setRecordingSpeakers(id: string, speakers: Record<string, RecordingSpeaker> | null) {
+    recordings = recordings.map((entry) => (entry.id === id ? { ...entry, speakers } : entry));
+    if (selectedRecording?.id === id) {
+      selectedRecording = { ...selectedRecording, speakers };
+    }
+  }
+
+  async function commitSpeakerEdit(stat: SpeakerStat) {
+    const recording = selectedRecording;
+    // The guard also swallows the blur fired by Enter/Escape closing the input.
+    if (!recording || editingSpeakerId !== stat.id) {
+      return;
+    }
+
+    editingSpeakerId = null;
+    const previous = recording.speakers ?? null;
+    const next = applySpeakerRename(previous, stat.id, editingSpeakerName, stat.label);
+    const entry = { speakerId: stat.id, speakerLabel: stat.label };
+    if (resolveSpeakerName(entry, previous) === resolveSpeakerName(entry, next)) {
+      return;
+    }
+
+    // Optimistic: chips and all transcript rows re-resolve immediately;
+    // rolled back if the meta.json write fails.
+    setRecordingSpeakers(recording.id, next);
+    try {
+      await invoke('update_recording_speakers', { id: recording.id, speakers: next ?? {} });
+    } catch (renameError) {
+      setRecordingSpeakers(recording.id, previous);
+      error = String(renameError);
     }
   }
 
@@ -730,6 +830,48 @@
           {/if}
         </div>
       </div>
+
+      {#if participantStats.length > 0}
+        <div class="party" aria-label="参加者">
+          <span class="lbl">参加者</span>
+          {#each participantStats as stat (stat.id)}
+            {#if editingSpeakerId === stat.id}
+              <span class="chip editing">
+                <span class="dot" style={`background: ${chipDotColor(stat)}`} aria-hidden="true"
+                ></span>
+                <input
+                  type="text"
+                  aria-label={`${stat.label} の名前`}
+                  bind:value={editingSpeakerName}
+                  use:focusAndSelect
+                  onkeydown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault();
+                      void commitSpeakerEdit(stat);
+                    } else if (event.key === 'Escape') {
+                      editingSpeakerId = null;
+                    }
+                  }}
+                  onblur={() => void commitSpeakerEdit(stat)}
+                />
+                <span class="ct">{stat.count}</span>
+              </span>
+            {:else}
+              <button
+                type="button"
+                class="chip"
+                title="クリックで名前を変更"
+                onclick={() => startSpeakerEdit(stat)}
+              >
+                <span class="dot" style={`background: ${chipDotColor(stat)}`} aria-hidden="true"
+                ></span>
+                {speakerDisplayName(stat)}
+                <span class="ct">{stat.count}</span>
+              </button>
+            {/if}
+          {/each}
+        </div>
+      {/if}
 
       {#if error}
         <p class="notice error">{error}</p>
@@ -924,13 +1066,8 @@
                 <span class="ts">{formatTimestampMs(item.startMs)}</span>
                 <span class="body">
                   <span class="spk">
-                    <i
-                      class:mic={item.stream === 'mic'}
-                      style={item.speakerIndex !== undefined
-                        ? `background: ${speakerColor(item.speakerIndex)}`
-                        : ''}
-                    ></i>
-                    {item.speakerLabel}
+                    <i class:mic={item.stream === 'mic'} style={rowDotStyle(item)}></i>
+                    {rowSpeakerName(item)}
                   </span>
                   <span class="text">{item.text}</span>
                   {#if item.translation}
@@ -1194,6 +1331,78 @@
 
   .menu .mi:hover:not(:disabled) .mk {
     color: rgba(255, 255, 255, 0.75);
+  }
+
+  /* participants strip (mockup 案B: .party / .chip) */
+  .party {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    /* .meta already leaves 20px; pull the strip up so it hugs the header
+       like the mockup, keeping 16px before the next block. */
+    margin: -8px 0 16px;
+  }
+
+  .party .lbl {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--muted);
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+  }
+
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    padding: 5px 8px 5px 11px;
+    border-radius: 999px;
+    border: 1px solid var(--hairline);
+    background: var(--canvas);
+    font-size: 12.5px;
+    font-weight: 500;
+    color: var(--ink);
+    transition: all 0.2s ease;
+  }
+
+  button.chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.1);
+  }
+
+  button.chip:focus-visible {
+    border-radius: 999px;
+  }
+
+  .chip .dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex: 0 0 auto;
+  }
+
+  .chip .ct {
+    font-size: 10.5px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .chip input {
+    border: 0;
+    outline: none;
+    background: transparent;
+    width: 68px;
+    padding: 0;
+    font: inherit;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .chip.editing {
+    border-color: var(--blue-focus);
+    box-shadow: 0 0 0 3.5px var(--blue-soft);
   }
 
   .notice {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   SPEAKER_PALETTE,
+  applySpeakerRename,
   defaultStreamSpeakerLabel,
   diarizedSpeakerLabel,
   resolveSpeakerColor,
@@ -144,5 +145,63 @@ describe('speakerStats', () => {
 
   it('returns an empty list for an empty transcript', () => {
     expect(speakerStats([])).toEqual([]);
+  });
+});
+
+describe('applySpeakerRename', () => {
+  it('adds a trimmed custom name to an empty map', () => {
+    expect(applySpeakerRename(null, 'speaker-0', '  田中 ', '話者1')).toEqual({
+      'speaker-0': { name: '田中' }
+    });
+    expect(applySpeakerRename(undefined, 'mic', '自分', 'Speaker A')).toEqual({
+      mic: { name: '自分' }
+    });
+  });
+
+  it('overwrites the name while preserving the entry color', () => {
+    const speakers = { 'speaker-0': { name: '田中', color: '#123456' } };
+    expect(applySpeakerRename(speakers, 'speaker-0', '佐藤', '話者1')).toEqual({
+      'speaker-0': { name: '佐藤', color: '#123456' }
+    });
+  });
+
+  it('keeps unrelated entries untouched', () => {
+    const speakers = { 'speaker-1': { name: 'Sarah' } };
+    expect(applySpeakerRename(speakers, 'speaker-0', '田中', '話者1')).toEqual({
+      'speaker-0': { name: '田中' },
+      'speaker-1': { name: 'Sarah' }
+    });
+  });
+
+  it('removes the entry when the trimmed name is empty', () => {
+    const speakers = {
+      'speaker-0': { name: '田中' },
+      'speaker-1': { name: 'Sarah' }
+    };
+    expect(applySpeakerRename(speakers, 'speaker-0', '   ', '話者1')).toEqual({
+      'speaker-1': { name: 'Sarah' }
+    });
+  });
+
+  it('removes the entry when the name equals the default label', () => {
+    const speakers = {
+      'speaker-0': { name: '田中' },
+      'speaker-1': { name: 'Sarah' }
+    };
+    expect(applySpeakerRename(speakers, 'speaker-0', ' 話者1 ', '話者1')).toEqual({
+      'speaker-1': { name: 'Sarah' }
+    });
+  });
+
+  it('returns null when the map becomes empty', () => {
+    expect(applySpeakerRename({ 'speaker-0': { name: '田中' } }, 'speaker-0', '', '話者1')).toBeNull();
+    expect(applySpeakerRename(null, 'speaker-0', '話者1', '話者1')).toBeNull();
+  });
+
+  it('does not mutate the input map', () => {
+    const speakers = { 'speaker-0': { name: '田中' } };
+    applySpeakerRename(speakers, 'speaker-0', '佐藤', '話者1');
+    applySpeakerRename(speakers, 'speaker-0', '', '話者1');
+    expect(speakers).toEqual({ 'speaker-0': { name: '田中' } });
   });
 });
