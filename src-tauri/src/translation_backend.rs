@@ -23,6 +23,14 @@ pub struct TranslationRequest {
     pub target_language: String,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranscriptTranslationSeed {
+    pub stream: String,
+    pub segment_id: String,
+    pub session_id: String,
+    pub request: TranslationRequest,
+}
+
 impl TranslationRequest {
     pub fn new(
         text: impl Into<String>,
@@ -64,6 +72,70 @@ impl fmt::Display for TranslationError {
 }
 
 impl std::error::Error for TranslationError {}
+
+pub fn opposite_translation_language(
+    language: &str,
+    source_language: &str,
+    target_language: Option<&str>,
+) -> Option<String> {
+    let target_language = target_language.filter(|target| !target.is_empty())?;
+    if language == source_language {
+        return Some(target_language.to_string());
+    }
+
+    if language == target_language {
+        return Some(source_language.to_string());
+    }
+
+    Some(target_language.to_string())
+}
+
+pub fn transcript_translation_seed(
+    event: &Value,
+    source_language: &str,
+    target_language: Option<&str>,
+) -> Option<TranscriptTranslationSeed> {
+    if event.get("type").and_then(Value::as_str) != Some("transcript")
+        || !event
+            .get("isFinal")
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+    {
+        return None;
+    }
+
+    let language = event.get("lang")?.as_str()?;
+    let target_language = opposite_translation_language(language, source_language, target_language)?;
+    let request = TranslationRequest::new(
+        event.get("text")?.as_str()?,
+        language,
+        target_language,
+    )?;
+
+    Some(TranscriptTranslationSeed {
+        stream: event.get("stream")?.as_str()?.to_string(),
+        segment_id: event.get("segmentId")?.as_str()?.to_string(),
+        session_id: event.get("sessionId")?.as_str()?.to_string(),
+        request,
+    })
+}
+
+pub fn translation_event_json(
+    seed: &TranscriptTranslationSeed,
+    translated_text: &str,
+    timestamp: &str,
+) -> Value {
+    json!({
+        "type": "translation",
+        "stream": seed.stream,
+        "segmentId": seed.segment_id,
+        "language": seed.request.source_language,
+        "targetLanguage": seed.request.target_language,
+        "trans": translated_text,
+        "timestamp": timestamp,
+        "sessionId": seed.session_id,
+    })
+}
 
 pub const DEEPL_API_ENDPOINT: &str = "https://api.deepl.com/v2/translate";
 pub const DEEPL_FREE_API_ENDPOINT: &str = "https://api-free.deepl.com/v2/translate";
@@ -446,6 +518,52 @@ mod tests {
                 source_language: "en-US".to_string(),
                 target_language: "ja-JP".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn translation_seed_from_final_transcript_uses_opposite_language() {
+        let event = json!({
+            "type": "transcript",
+            "stream": "mic",
+            "lang": "en-US",
+            "text": "Release is Friday.",
+            "isFinal": true,
+            "segmentId": "1200-900",
+            "sessionId": "mic-session"
+        });
+
+        let seed = transcript_translation_seed(&event, "en-US", Some("ja-JP")).unwrap();
+
+        assert_eq!(seed.stream, "mic");
+        assert_eq!(seed.segment_id, "1200-900");
+        assert_eq!(seed.session_id, "mic-session");
+        assert_eq!(seed.request.source_language, "en-US");
+        assert_eq!(seed.request.target_language, "ja-JP");
+        assert_eq!(seed.request.text, "Release is Friday.");
+    }
+
+    #[test]
+    fn translation_event_json_matches_helper_shape() {
+        let seed = TranscriptTranslationSeed {
+            stream: "speaker".to_string(),
+            segment_id: "2200-700".to_string(),
+            session_id: "speaker-session".to_string(),
+            request: TranslationRequest::new("こんにちは", "ja-JP", "en-US").unwrap(),
+        };
+
+        assert_eq!(
+            translation_event_json(&seed, "Hello", "2026-08-05T09:00:00Z"),
+            json!({
+                "type": "translation",
+                "stream": "speaker",
+                "segmentId": "2200-700",
+                "language": "ja-JP",
+                "targetLanguage": "en-US",
+                "trans": "Hello",
+                "timestamp": "2026-08-05T09:00:00Z",
+                "sessionId": "speaker-session"
+            })
         );
     }
 
