@@ -1,6 +1,12 @@
 <script lang="ts">
   import { tick } from 'svelte';
   import { formatRecordingTimer } from '$lib/captureState';
+  import {
+    captionFontFamilyValue,
+    captionLineHeightValue,
+    type CaptionFontFamily,
+    type CaptionLineHeight
+  } from '$lib/captionAppearance';
   import { applyGlossary, type GlossaryRule } from '$lib/glossary';
   import { isScrolledToBottom } from '$lib/scroll';
   import { resolveSpeakerName } from '$lib/speakers';
@@ -19,6 +25,8 @@
   export let mainLanguage: string;
   export let subLanguage: string;
   export let transcriptFontScale: number;
+  export let captionFontFamily: CaptionFontFamily;
+  export let captionLineHeight: CaptionLineHeight;
   export let statusMessage: string | null;
   export let actionNotice: string | null;
   export let isTranscribing: boolean;
@@ -134,7 +142,12 @@
   }
 </script>
 
-<div class="captions-wrap" style="--fs: {transcriptFontScale}">
+<div
+  class="captions-wrap"
+  style="--fs: {transcriptFontScale}; --caption-font: {captionFontFamilyValue(
+    captionFontFamily
+  )}; --caption-line: {captionLineHeightValue(captionLineHeight)}"
+>
   <div
     class="captions"
     bind:this={messagesContainer}
@@ -324,18 +337,20 @@
 
   .cap .txt {
     margin: 0;
+    font-family: var(--caption-font);
     font-size: calc(19px * var(--fs));
-    line-height: 1.45;
+    line-height: var(--caption-line);
     font-weight: 500;
-    letter-spacing: -0.01em;
+    letter-spacing: 0;
     color: var(--ink);
     word-break: break-word;
   }
 
   .cap .sub {
     margin: 4px 0 0;
+    font-family: var(--caption-font);
     font-size: calc(14.5px * var(--fs));
-    line-height: 1.45;
+    line-height: var(--caption-line);
     color: var(--muted);
     font-weight: 400;
     word-break: break-word;

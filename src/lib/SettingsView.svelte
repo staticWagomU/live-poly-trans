@@ -34,6 +34,8 @@
   } from '$lib/saveSettings';
   import {
     getHfToken,
+    getCaptionFontFamily,
+    getCaptionLineHeight,
     getGlossaryRules,
     getMarkdownAutoExport,
     getExportDirectory,
@@ -48,6 +50,9 @@
     getRecordingShortcut,
     getOverlayShortcut,
     getSelfSpeakerName,
+    getTranscriptFontScale,
+    setCaptionFontFamily,
+    setCaptionLineHeight,
     setHfToken,
     getThemePreference,
     setGlossaryRules,
@@ -64,9 +69,20 @@
     setRecordingShortcut,
     setOverlayShortcut,
     setSelfSpeakerName,
-    setThemePreference
+    setThemePreference,
+    setTranscriptFontScale
   } from '$lib/settingsStore';
+  import {
+    DEFAULT_CAPTION_FONT_FAMILY,
+    DEFAULT_CAPTION_LINE_HEIGHT,
+    type CaptionFontFamily,
+    type CaptionLineHeight
+  } from '$lib/captionAppearance';
   import type { ThemePreference } from '$lib/themePreference';
+  import {
+    DEFAULT_TRANSCRIPT_FONT_SCALE,
+    TRANSCRIPT_FONT_SCALE_STEPS
+  } from '$lib/transcriptFontSize';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -140,6 +156,9 @@
   let overlayShortcut = $state('CommandOrControl+Alt+L');
   let keepInMenuBar = $state(false);
   let themePreference = $state<ThemePreference>('auto');
+  let captionFontFamily = $state<CaptionFontFamily>(DEFAULT_CAPTION_FONT_FAMILY);
+  let captionLineHeight = $state<CaptionLineHeight>(DEFAULT_CAPTION_LINE_HEIGHT);
+  let transcriptFontScale = $state(DEFAULT_TRANSCRIPT_FONT_SCALE);
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -184,6 +203,9 @@
     overlayShortcut = getOverlayShortcut();
     keepInMenuBar = getKeepInMenuBar();
     themePreference = getThemePreference();
+    captionFontFamily = getCaptionFontFamily();
+    captionLineHeight = getCaptionLineHeight();
+    transcriptFontScale = getTranscriptFontScale();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -435,6 +457,21 @@
   function saveThemePreference(preference: ThemePreference) {
     setThemePreference(preference);
     themePreference = getThemePreference();
+  }
+
+  function saveCaptionFontFamily(preference: CaptionFontFamily) {
+    setCaptionFontFamily(preference);
+    captionFontFamily = getCaptionFontFamily();
+  }
+
+  function saveCaptionLineHeight(preference: CaptionLineHeight) {
+    setCaptionLineHeight(preference);
+    captionLineHeight = getCaptionLineHeight();
+  }
+
+  function saveTranscriptFontScale(scale: number) {
+    setTranscriptFontScale(scale);
+    transcriptFontScale = getTranscriptFontScale();
   }
 
   async function refreshModels() {
@@ -825,6 +862,62 @@
             </span>
             <span class="theme-swatch dark" aria-hidden="true"></span>
           </label>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>字幕</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              フォント
+              <div class="d">Live・オーバーレイ・対面モードに適用します。</div>
+            </div>
+            <select
+              class="compact-select"
+              aria-label="字幕フォント"
+              value={captionFontFamily}
+              onchange={(event) =>
+                saveCaptionFontFamily(event.currentTarget.value as CaptionFontFamily)}
+            >
+              <option value="system">システム</option>
+              <option value="rounded">丸ゴシック</option>
+              <option value="serif">明朝</option>
+            </select>
+          </div>
+          <div class="set-row">
+            <div>
+              行間
+              <div class="d">長い字幕の読みやすさを調整します。</div>
+            </div>
+            <select
+              class="compact-select"
+              aria-label="字幕の行間"
+              value={captionLineHeight}
+              onchange={(event) =>
+                saveCaptionLineHeight(event.currentTarget.value as CaptionLineHeight)}
+            >
+              <option value="compact">狭め</option>
+              <option value="normal">標準</option>
+              <option value="relaxed">広め</option>
+            </select>
+          </div>
+          <div class="set-row">
+            <div>
+              Live 文字サイズ
+              <div class="d">ショートカット ⌘+ / ⌘- と同じ設定です。</div>
+            </div>
+            <select
+              class="compact-select"
+              aria-label="Live 字幕の文字サイズ"
+              value={transcriptFontScale}
+              onchange={(event) => saveTranscriptFontScale(Number(event.currentTarget.value))}
+            >
+              {#each TRANSCRIPT_FONT_SCALE_STEPS as scale}
+                <option value={scale}>{Math.round(scale * 100)}%</option>
+              {/each}
+            </select>
+          </div>
         </div>
       </div>
     </div>

@@ -31,6 +31,8 @@
   import { applyGlossaryToEntries, type GlossaryRule } from '$lib/glossary';
   import {
     getAutoStart,
+    getCaptionFontFamily,
+    getCaptionLineHeight,
     getExportDirectory,
     getFileNameTemplate,
     getGlobalShortcutsEnabled,
@@ -119,6 +121,7 @@
   } from '$lib/captureState';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
   import { completeCaptureStop } from '$lib/captureLifecycle';
+  import type { CaptionFontFamily, CaptionLineHeight } from '$lib/captionAppearance';
   import { themeDataAttribute, type ThemePreference } from '$lib/themePreference';
   import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
   import {
@@ -198,6 +201,8 @@
   let overlayShortcut = 'CommandOrControl+Alt+L';
   let keepInMenuBar = false;
   let themePreference: ThemePreference = 'auto';
+  let captionFontFamily: CaptionFontFamily = 'system';
+  let captionLineHeight: CaptionLineHeight = 'normal';
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -252,6 +257,8 @@
     keepInMenuBar = getKeepInMenuBar();
     themePreference = getThemePreference();
     applyThemePreference(themePreference);
+    captionFontFamily = getCaptionFontFamily();
+    captionLineHeight = getCaptionLineHeight();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -302,6 +309,14 @@
       subscribeSettings(SETTINGS_KEYS.themePreference, () => {
         themePreference = getThemePreference();
         applyThemePreference(themePreference);
+      }),
+      subscribeSettings(SETTINGS_KEYS.captionFontFamily, () => {
+        captionFontFamily = getCaptionFontFamily();
+        void publishOverlayCaptions();
+      }),
+      subscribeSettings(SETTINGS_KEYS.captionLineHeight, () => {
+        captionLineHeight = getCaptionLineHeight();
+        void publishOverlayCaptions();
       })
     ];
     const autoStart = autoStartEnabled;
@@ -1351,7 +1366,9 @@
     });
     const settings = {
       fadeSeconds: overlayFadeSeconds,
-      fontScale: overlayFontScale
+      fontScale: overlayFontScale,
+      captionFontFamily,
+      captionLineHeight
     };
     const payload = JSON.stringify({ lines, settings });
     if (!force && payload === lastOverlayPayload) {
@@ -1449,6 +1466,8 @@
       <MimiView
         lines={mimiLines}
         {pttHeld}
+        {captionFontFamily}
+        {captionLineHeight}
         onPttChange={setPtt}
         onExit={() => void exitMimi()}
       />
@@ -1480,6 +1499,8 @@
           {mainLanguage}
           {subLanguage}
           {transcriptFontScale}
+          {captionFontFamily}
+          {captionLineHeight}
           {statusMessage}
           {actionNotice}
           {isTranscribing}

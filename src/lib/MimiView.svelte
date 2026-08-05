@@ -1,6 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import {
+    captionFontFamilyValue,
+    captionLineHeightValue,
+    type CaptionFontFamily,
+    type CaptionLineHeight
+  } from '$lib/captionAppearance';
+  import {
     decreaseMimiScale,
     DEFAULT_MIMI_SCALE,
     increaseMimiScale,
@@ -12,6 +18,8 @@
   /// Latest utterance texts, oldest first; the last one is the live line.
   export let lines: string[];
   export let pttHeld: boolean;
+  export let captionFontFamily: CaptionFontFamily;
+  export let captionLineHeight: CaptionLineHeight;
   export let onPttChange: (held: boolean) => void;
   export let onExit: () => void;
 
@@ -92,7 +100,12 @@
     <button type="button" class="mimi-ctl exit" on:click={onExit}>終了</button>
   </header>
 
-  <div class="mimi-body" style="--mfs: {scale}">
+  <div
+    class="mimi-body"
+    style="--mfs: {scale}; --caption-font: {captionFontFamilyValue(
+      captionFontFamily
+    )}; --caption-line: {captionLineHeightValue(captionLineHeight)}"
+  >
     {#if visibleLines.length === 0}
       <p class="mimi-hint">下のボタンを押しながらマイクに向かって話すと、ここに大きな文字で表示されます</p>
     {:else}
@@ -265,8 +278,9 @@
 
   .mimi-line p {
     margin: 0;
+    font-family: var(--caption-font);
     font-size: calc(26px * var(--mfs));
-    line-height: 1.4;
+    line-height: var(--caption-line);
     font-weight: 600;
     letter-spacing: 0;
     opacity: 0.5;

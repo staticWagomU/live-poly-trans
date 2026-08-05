@@ -3,6 +3,7 @@
   import CaptionThread from '$lib/CaptionThread.svelte';
   import type { ActionItem } from '$lib/actionItems';
   import type { ChatTurn } from '$lib/aiContext';
+  import type { CaptionFontFamily, CaptionLineHeight } from '$lib/captionAppearance';
   import type { GlossaryRule } from '$lib/glossary';
   import type { LiveSpeakerOverrides } from '$lib/settingsStore';
   import type { SpeechModelSelection } from '$lib/speechModels';
@@ -13,6 +14,8 @@
   export let mainLanguage: string;
   export let subLanguage: string;
   export let transcriptFontScale: number;
+  export let captionFontFamily: CaptionFontFamily;
+  export let captionLineHeight: CaptionLineHeight;
   export let statusMessage: string | null;
   export let actionNotice: string | null;
   export let isTranscribing: boolean;
@@ -74,6 +77,8 @@
     {mainLanguage}
     {subLanguage}
     {transcriptFontScale}
+    {captionFontFamily}
+    {captionLineHeight}
     {statusMessage}
     {actionNotice}
     {isTranscribing}

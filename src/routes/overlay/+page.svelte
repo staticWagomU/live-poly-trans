@@ -3,13 +3,24 @@
   import { listen } from '@tauri-apps/api/event';
   import { onMount } from 'svelte';
   import '$lib/theme.css';
+  import {
+    captionFontFamilyValue,
+    captionLineHeightValue,
+    type CaptionFontFamily,
+    type CaptionLineHeight
+  } from '$lib/captionAppearance';
   import type { OverlayCaptionLine } from '$lib/overlayCaptions';
   import type { OverlaySettings } from '$lib/overlaySettings';
 
   let lines: OverlayCaptionLine[] = [];
-  let settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'> = {
+  let settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'> & {
+    captionFontFamily: CaptionFontFamily;
+    captionLineHeight: CaptionLineHeight;
+  } = {
     fadeSeconds: 0,
-    fontScale: 1
+    fontScale: 1,
+    captionFontFamily: 'system',
+    captionLineHeight: 'normal'
   };
   let faded = false;
   let adjusting = false;
@@ -28,7 +39,10 @@
       });
     void listen<{
       lines: OverlayCaptionLine[];
-      settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'>;
+      settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'> & {
+        captionFontFamily: CaptionFontFamily;
+        captionLineHeight: CaptionLineHeight;
+      };
     }>('overlay-captions', (event) => {
       lines = event.payload.lines;
       settings = event.payload.settings;
@@ -77,7 +91,13 @@
   <title>LivePolyTrans Overlay</title>
 </svelte:head>
 
-<main class="overlay" aria-label="字幕オーバーレイ" style="--overlay-scale: {settings.fontScale}">
+<main
+  class="overlay"
+  aria-label="字幕オーバーレイ"
+  style="--overlay-scale: {settings.fontScale}; --caption-font: {captionFontFamilyValue(
+    settings.captionFontFamily
+  )}; --caption-line: {captionLineHeightValue(settings.captionLineHeight)}"
+>
   {#if adjusting}
     <div class="adjust">
       <button type="button" class="drag" onmousedown={startDrag}>位置をドラッグ</button>
@@ -181,9 +201,10 @@
 
   .line {
     color: #fff;
+    font-family: var(--caption-font);
     font-size: calc(34px * var(--overlay-scale));
     font-weight: 800;
-    line-height: 1.2;
+    line-height: var(--caption-line);
     text-align: center;
     text-shadow:
       0 2px 3px #000,
