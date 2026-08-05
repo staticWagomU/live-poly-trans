@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from '@tauri-apps/api/core';
   import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-  import { save as saveFileDialog } from '@tauri-apps/plugin-dialog';
+  import { open as openFileDialog, save as saveFileDialog } from '@tauri-apps/plugin-dialog';
   import { onMount, untrack } from 'svelte';
   import { importGlossaryJson, serializeGlossaryRules, type GlossaryRule } from '$lib/glossary';
   import { filterLanguagePacks, partitionLanguagePacks } from '$lib/languagePacks';
@@ -29,12 +29,22 @@
     type SpeechModelsPayload
   } from '$lib/speechModels';
   import {
+    DEFAULT_FILE_NAME_TEMPLATE,
+    renderFileName
+  } from '$lib/saveSettings';
+  import {
     getHfToken,
     getGlossaryRules,
+    getMarkdownAutoExport,
+    getExportDirectory,
+    getFileNameTemplate,
     getOtherSpeakerName,
     getSelfSpeakerName,
     setHfToken,
     setGlossaryRules,
+    setMarkdownAutoExport,
+    setExportDirectory,
+    setFileNameTemplate,
     setOtherSpeakerName,
     setSelfSpeakerName
   } from '$lib/settingsStore';
@@ -45,7 +55,7 @@
     reserved?: LanguageInfo[];
   };
 
-  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs' | 'glossary';
+  type SettingsPane = 'general' | 'privacy' | 'model' | 'langs' | 'glossary' | 'save';
 
   let {
     isRecording = false,
@@ -92,6 +102,10 @@
   let glossaryNotice = $state<string | null>(null);
   let glossaryError = $state<string | null>(null);
   let glossaryFileInput = $state<HTMLInputElement | null>(null);
+  let exportDirectory = $state('');
+  let fileNameTemplate = $state(DEFAULT_FILE_NAME_TEMPLATE);
+  let markdownAutoExport = $state(false);
+  let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
   let busyLanguage = $state<string | null>(null);
@@ -110,12 +124,22 @@
   const visibleInstalled = $derived(filterLanguagePacks(groups.installed, query));
   const visibleAvailable = $derived(filterLanguagePacks(groups.available, query));
   const reservedIds = $derived(new Set((payload?.reserved ?? []).map((language) => language.id)));
+  const previewFileName = $derived(
+    `${renderFileName(fileNameTemplate, {
+      date: new Date(2026, 7, 5, 14, 0),
+      title: '定例ミーティング',
+      lang: 'ja-en'
+    })}.md`
+  );
 
   onMount(() => {
     hfToken = getHfToken();
     selfSpeakerName = getSelfSpeakerName();
     otherSpeakerName = getOtherSpeakerName();
     glossaryRules = getGlossaryRules();
+    exportDirectory = getExportDirectory();
+    fileNameTemplate = getFileNameTemplate();
+    markdownAutoExport = getMarkdownAutoExport();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -299,6 +323,30 @@
     }
   }
 
+  async function chooseExportDirectory() {
+    saveSettingsError = null;
+    try {
+      const selected = await openFileDialog({ directory: true, multiple: false });
+      if (typeof selected !== 'string') {
+        return;
+      }
+      setExportDirectory(selected);
+      exportDirectory = getExportDirectory();
+    } catch (directoryError) {
+      saveSettingsError = String(directoryError);
+    }
+  }
+
+  function saveFileNameTemplate(value: string) {
+    setFileNameTemplate(value);
+    fileNameTemplate = getFileNameTemplate();
+  }
+
+  function saveMarkdownAutoExport(enabled: boolean) {
+    setMarkdownAutoExport(enabled);
+    markdownAutoExport = getMarkdownAutoExport();
+  }
+
   async function refreshModels() {
     modelsError = null;
     try {
@@ -385,6 +433,9 @@
     </button>
     <button type="button" class:active={pane === 'glossary'} onclick={() => (pane = 'glossary')}>
       📖 用語集
+    </button>
+    <button type="button" class:active={pane === 'save'} onclick={() => (pane = 'save')}>
+      💾 保存
     </button>
     <button type="button" class:active={pane === 'langs'} onclick={() => (pane = 'langs')}>
       🌐 言語
@@ -799,6 +850,76 @@
         <span class="glossary-count">{glossaryRules.length}件 · ライブ字幕と書き出しに適用中</span>
       </div>
     </div>
+  {:else if pane === 'save'}
+    <div class="set-pane">
+      <h2>保存</h2>
+      <p class="lede">
+        書き出し先とファイル名の形式を設定します。録音データ本体の保存場所は変わりません。
+      </p>
+
+      {#if saveSettingsError}
+        <p class="settings-error" role="alert">{saveSettingsError}</p>
+      {/if}
+
+      <div class="set-group">
+        <h3>書き出し</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              書き出し先フォルダ
+              <div class="d">{exportDirectory || '未設定'}</div>
+            </div>
+            <button type="button" class="link-btn" onclick={chooseExportDirectory}>変更…</button>
+          </div>
+          <div class="set-row">
+            <div>
+              ファイル名テンプレート
+              <div class="d">結果: <code>{previewFileName}</code></div>
+            </div>
+            <input
+              class="template-input"
+              type="text"
+              aria-label="ファイル名テンプレート"
+              value={fileNameTemplate}
+              onchange={(event) => saveFileNameTemplate(event.currentTarget.value)}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>自動化</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              録音停止時に Markdown 議事録を自動書き出し
+              <div class="d">書き出し先フォルダが設定されている場合だけ実行します。</div>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              class:on={markdownAutoExport}
+              role="switch"
+              aria-checked={markdownAutoExport}
+              aria-label="録音停止時に Markdown 議事録を自動書き出し"
+              onclick={() => saveMarkdownAutoExport(!markdownAutoExport)}
+            ></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>プレースホルダ</h3>
+        <div class="set-card">
+          <div class="set-row placeholders-row">
+            <div>
+              <code>{'{date}'}</code> 2026-08-05 · <code>{'{time}'}</code> 1400 ·
+              <code>{'{title}'}</code> 録音名 · <code>{'{lang}'}</code> ja-en
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   {:else}
     <div class="set-pane">
       <h2>言語</h2>
@@ -1145,7 +1266,8 @@
   }
 
   .token-input,
-  .name-input {
+  .name-input,
+  .template-input {
     width: min(220px, 40%);
     border: 1px solid var(--hairline);
     border-radius: 8px;
@@ -1154,6 +1276,11 @@
     padding: 6px 9px;
     font: inherit;
     font-size: 12.5px;
+  }
+
+  .template-input {
+    width: min(240px, 42%);
+    font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
   }
 
   .filter {
@@ -1257,6 +1384,11 @@
     margin-left: auto;
     color: var(--muted);
     font-size: 12px;
+  }
+
+  .placeholders-row {
+    justify-content: flex-start;
+    color: var(--muted);
   }
 
   .settings-error {
