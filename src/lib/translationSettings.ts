@@ -45,3 +45,37 @@ export function normalizeOllamaModel(raw: string | null): string {
   const trimmed = raw?.trim() ?? '';
   return trimmed || DEFAULT_OLLAMA_MODEL;
 }
+
+export type TranslationEngineStatus = {
+  detail: string;
+  badge: string;
+  ok: boolean;
+};
+
+export function translationEngineStatus(
+  engine: TranslationEngine,
+  ollamaEndpoint: string,
+  ollamaModel: string
+): TranslationEngineStatus {
+  if (engine === 'deepl') {
+    return {
+      detail: 'DeepL API · APIキー未設定',
+      badge: '未設定',
+      ok: false
+    };
+  }
+
+  if (engine === 'ollama') {
+    return {
+      detail: `Ollama · ${normalizeOllamaEndpoint(ollamaEndpoint)} · ${normalizeOllamaModel(ollamaModel)}`,
+      badge: '未確認',
+      ok: false
+    };
+  }
+
+  return {
+    detail: 'Apple 翻訳 · macOS 内蔵',
+    badge: '利用可能',
+    ok: true
+  };
+}

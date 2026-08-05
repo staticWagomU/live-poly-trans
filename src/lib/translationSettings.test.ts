@@ -7,7 +7,8 @@ import {
   normalizeOllamaModel,
   parseTranslationEngine,
   translationEngineDescription,
-  translationEngineLabel
+  translationEngineLabel,
+  translationEngineStatus
 } from './translationSettings';
 
 describe('translation settings', () => {
@@ -36,5 +37,23 @@ describe('translation settings', () => {
     expect(normalizeOllamaEndpoint('')).toBe(DEFAULT_OLLAMA_ENDPOINT);
     expect(normalizeOllamaModel('  llama3.1:8b  ')).toBe('llama3.1:8b');
     expect(normalizeOllamaModel(null)).toBe(DEFAULT_OLLAMA_MODEL);
+  });
+
+  it('builds status copy for the settings pane', () => {
+    expect(translationEngineStatus('apple', DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL)).toEqual({
+      detail: 'Apple 翻訳 · macOS 内蔵',
+      badge: '利用可能',
+      ok: true
+    });
+    expect(translationEngineStatus('deepl', DEFAULT_OLLAMA_ENDPOINT, DEFAULT_OLLAMA_MODEL)).toEqual({
+      detail: 'DeepL API · APIキー未設定',
+      badge: '未設定',
+      ok: false
+    });
+    expect(translationEngineStatus('ollama', 'http://localhost:11434', 'llama3.1:8b')).toEqual({
+      detail: 'Ollama · http://localhost:11434 · llama3.1:8b',
+      badge: '未確認',
+      ok: false
+    });
   });
 });
