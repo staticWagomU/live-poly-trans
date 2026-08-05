@@ -39,6 +39,10 @@ Enable `Save audio` and record; then open the `Recordings` tab:
 - Below the waveform, the timestamped transcript follows playback; clicking a line jumps to that position.
 - `Mic` / `Speaker` / `Merged` download buttons copy the chosen variant into your Downloads folder. `Merged` mixes both lanes into one file on demand.
 
+## Notes Workflow
+
+Open `Settings` > `Save` to choose an export folder and filename template. If you point it at an Obsidian vault folder and enable automatic Markdown export, each stopped recording also writes a meeting note there, while the original recording data stays in the app data directory.
+
 ## Saved Files
 
 Live final phrases are automatically written every 15 minutes into segment files:
