@@ -169,7 +169,7 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
     id: `${event.sessionId}-${event.stream}-${event.lang}-${stableSegmentId}`,
     role: event.stream === 'mic' ? 'self' : 'speaker',
     speakerId: event.speakerId ?? fallbackSpeakerId(event.stream),
-    speakerLabel: event.speakerLabel ?? fallbackSpeakerLabel(event.stream),
+    speakerLabel: event.speakerLabel ?? defaultStreamSpeakerLabel(event.stream),
     language: event.lang,
     text: event.text,
     translation: event.trans,
@@ -200,10 +200,6 @@ export function transcriptEventToMessage(event: TranscriptEvent): ChatMessage {
 
 export function fallbackSpeakerId(stream: TranscriptEvent['stream']) {
   return stream === 'mic' ? 'self' : 'system-audio';
-}
-
-export function fallbackSpeakerLabel(stream: TranscriptEvent['stream']) {
-  return defaultStreamSpeakerLabel(stream);
 }
 
 export function applyTranslationEvent(
