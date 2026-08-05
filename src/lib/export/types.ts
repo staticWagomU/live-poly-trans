@@ -1,4 +1,5 @@
 import type { ChatMessage } from '../transcripts';
+import { transcriptItemSpeakerId } from '../speakers';
 import {
   formatTimestampMs,
   parseSegmentTiming,
@@ -58,7 +59,7 @@ export function recordingItemToTranscriptEntry(
     timestamp: Number.isFinite(baseMs)
       ? new Date(baseMs + item.startMs).toISOString()
       : formatTimestampMs(item.startMs),
-    speakerId: item.speakerIndex !== undefined ? `speaker-${item.speakerIndex}` : item.stream,
+    speakerId: transcriptItemSpeakerId(item),
     speakerLabel: item.speakerLabel,
     language: item.language,
     text: item.text,

@@ -1,3 +1,5 @@
+import { defaultStreamSpeakerLabel, diarizedSpeakerLabel } from './speakers';
+
 export type RecordingFileInfo = {
   name: string;
   stream: string;
@@ -118,9 +120,7 @@ export function buildRecordingTranscript(events: unknown[]): RecordingTranscript
         speakerLabel:
           typeof event.speakerLabel === 'string'
             ? event.speakerLabel
-            : stream === 'mic'
-              ? 'Speaker A'
-              : 'Speaker B',
+            : defaultStreamSpeakerLabel(stream),
         language: typeof event.lang === 'string' ? event.lang : 'und',
         text: event.text,
         translation:
@@ -171,7 +171,7 @@ export function buildWhisperxTranscript(events: unknown[]): RecordingTranscriptI
       startMs,
       ...(endMs !== undefined ? { endMs } : {}),
       stream: 'unknown',
-      speakerLabel: speakerIndex !== undefined ? `話者${speakerIndex + 1}` : '話者',
+      speakerLabel: speakerIndex !== undefined ? diarizedSpeakerLabel(speakerIndex) : '話者',
       language: typeof event.lang === 'string' ? event.lang : 'und',
       text: event.text,
       translation: null,

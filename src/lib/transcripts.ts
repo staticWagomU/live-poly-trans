@@ -1,3 +1,5 @@
+import { defaultStreamSpeakerLabel } from './speakers';
+
 export type TranscriptEvent = {
   type: 'transcript';
   stream: 'mic' | 'speaker';
@@ -201,7 +203,7 @@ export function fallbackSpeakerId(stream: TranscriptEvent['stream']) {
 }
 
 export function fallbackSpeakerLabel(stream: TranscriptEvent['stream']) {
-  return stream === 'mic' ? 'Speaker A' : 'Speaker B';
+  return defaultStreamSpeakerLabel(stream);
 }
 
 export function applyTranslationEvent(

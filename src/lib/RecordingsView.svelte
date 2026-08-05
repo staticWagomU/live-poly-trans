@@ -18,6 +18,7 @@
     type RecordingWaveform
   } from '$lib/recordings';
   import { createLatestRequestGuard } from '$lib/latestRequest';
+  import { speakerColor } from '$lib/speakers';
   import { getHfTokenOrNull } from '$lib/settingsStore';
   import {
     buildTextExport,
@@ -570,13 +571,6 @@
       isReprocessing = false;
       reprocessStage = null;
     }
-  }
-
-  // Distinct dot colors for diarized speakers (話者1, 話者2, ...).
-  const speakerPalette = ['#0066cc', '#ff9500', '#34c759', '#af52de', '#ff2d55', '#5ac8fa'];
-
-  function speakerColor(index: number): string {
-    return speakerPalette[index % speakerPalette.length];
   }
 
   function activeItemKey(items: RecordingTranscriptItem[], timeMs: number): string | null {
