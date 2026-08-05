@@ -807,6 +807,33 @@ pub fn build_ai_context_from_saved_messages(messages: &[SavedTranscriptMessage])
         .join("\n")
 }
 
+pub fn action_timestamp_ms(message: &SavedTranscriptMessage) -> i64 {
+    message
+        .spans
+        .as_ref()
+        .and_then(|spans| spans.first())
+        .and_then(|span| span.start_ms)
+        .unwrap_or(0)
+}
+
+pub fn build_ai_action_context_from_saved_messages(messages: &[SavedTranscriptMessage]) -> String {
+    messages
+        .iter()
+        .enumerate()
+        .map(|(index, message)| {
+            let speaker = message.speaker_label.as_deref().unwrap_or(&message.role);
+            format!(
+                "[sourceIndex={index} timestampMs={}] {} / {}: {}",
+                action_timestamp_ms(message),
+                speaker,
+                message.language,
+                message.text
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 // MARK: recordings
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1893,7 +1920,7 @@ pub mod commands {
             language,
             previous_summary: None,
             history: Vec::new(),
-            transcript: build_ai_context_from_saved_messages(&messages),
+            transcript: build_ai_action_context_from_saved_messages(&messages),
         };
 
         tauri::async_runtime::spawn_blocking(move || run_ai_request(&ai_server, request))
@@ -3734,6 +3761,32 @@ mod tests {
         assert_eq!(json["language"], "ja-JP");
         assert!(json.get("question").is_none());
         assert!(json.get("history").is_none());
+    }
+
+    #[test]
+    fn builds_ai_action_context_with_source_index_and_timestamp_ms() {
+        let messages = vec![SavedTranscriptMessage {
+            role: "speaker".to_string(),
+            speaker_id: Some("self".to_string()),
+            speaker_label: Some("Speaker A".to_string()),
+            language: "ja-JP".to_string(),
+            text: "金曜までに告知文を書きます".to_string(),
+            translation: None,
+            timestamp: "2026-08-05T10:00:00Z".to_string(),
+            confidence: None,
+            spans: Some(vec![SavedTranscriptSpan {
+                text: "金曜までに告知文を書きます".to_string(),
+                confidence: None,
+                start_ms: Some(42_000),
+                end_ms: Some(45_000),
+            }]),
+        }];
+
+        let context = build_ai_action_context_from_saved_messages(&messages);
+
+        assert!(context.contains("sourceIndex=0"));
+        assert!(context.contains("timestampMs=42000"));
+        assert!(context.contains("金曜までに告知文を書きます"));
     }
 
     #[test]
