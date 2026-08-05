@@ -8,6 +8,11 @@ import {
   type GlossaryRule
 } from './glossary';
 import { parseMimiScale } from './mimiDisplay';
+import {
+  parseOverlayFadeSeconds,
+  parseOverlayFontScale,
+  parseOverlayLineCount
+} from './overlaySettings';
 import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
 import {
   parseSpeechModelPreference,
@@ -29,7 +34,11 @@ export const SETTINGS_KEYS = {
   glossary: 'lpt-glossary',
   exportDirectory: 'lpt-export-directory',
   fileNameTemplate: 'lpt-file-name-template',
-  markdownAutoExport: 'lpt-markdown-auto-export'
+  markdownAutoExport: 'lpt-markdown-auto-export',
+  overlayLineCount: 'lpt-overlay-line-count',
+  overlayShowTranslation: 'lpt-overlay-show-translation',
+  overlayFadeSeconds: 'lpt-overlay-fade-seconds',
+  overlayFontScale: 'lpt-overlay-font-scale'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -136,6 +145,38 @@ export function getMimiInvert(): boolean {
 
 export function setMimiInvert(inverted: boolean) {
   write(SETTINGS_KEYS.mimiInvert, inverted ? '1' : '0');
+}
+
+export function getOverlayLineCount(): number {
+  return parseOverlayLineCount(read(SETTINGS_KEYS.overlayLineCount));
+}
+
+export function setOverlayLineCount(count: number) {
+  write(SETTINGS_KEYS.overlayLineCount, String(count));
+}
+
+export function getOverlayShowTranslation(): boolean {
+  return read(SETTINGS_KEYS.overlayShowTranslation) !== '0';
+}
+
+export function setOverlayShowTranslation(enabled: boolean) {
+  write(SETTINGS_KEYS.overlayShowTranslation, enabled ? '1' : '0');
+}
+
+export function getOverlayFadeSeconds(): number {
+  return parseOverlayFadeSeconds(read(SETTINGS_KEYS.overlayFadeSeconds));
+}
+
+export function setOverlayFadeSeconds(seconds: number) {
+  write(SETTINGS_KEYS.overlayFadeSeconds, String(seconds));
+}
+
+export function getOverlayFontScale(): number {
+  return parseOverlayFontScale(read(SETTINGS_KEYS.overlayFontScale));
+}
+
+export function setOverlayFontScale(scale: number) {
+  write(SETTINGS_KEYS.overlayFontScale, String(scale));
 }
 
 export function getHfToken(): string {

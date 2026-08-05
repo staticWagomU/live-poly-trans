@@ -38,6 +38,10 @@
     getMarkdownAutoExport,
     getExportDirectory,
     getFileNameTemplate,
+    getOverlayFadeSeconds,
+    getOverlayFontScale,
+    getOverlayLineCount,
+    getOverlayShowTranslation,
     getOtherSpeakerName,
     getSelfSpeakerName,
     setHfToken,
@@ -45,6 +49,10 @@
     setMarkdownAutoExport,
     setExportDirectory,
     setFileNameTemplate,
+    setOverlayFadeSeconds,
+    setOverlayFontScale,
+    setOverlayLineCount,
+    setOverlayShowTranslation,
     setOtherSpeakerName,
     setSelfSpeakerName
   } from '$lib/settingsStore';
@@ -105,6 +113,10 @@
   let exportDirectory = $state('');
   let fileNameTemplate = $state(DEFAULT_FILE_NAME_TEMPLATE);
   let markdownAutoExport = $state(false);
+  let overlayLineCount = $state(2);
+  let overlayShowTranslation = $state(true);
+  let overlayFadeSeconds = $state(0);
+  let overlayFontScale = $state(1);
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -140,6 +152,10 @@
     exportDirectory = getExportDirectory();
     fileNameTemplate = getFileNameTemplate();
     markdownAutoExport = getMarkdownAutoExport();
+    overlayLineCount = getOverlayLineCount();
+    overlayShowTranslation = getOverlayShowTranslation();
+    overlayFadeSeconds = getOverlayFadeSeconds();
+    overlayFontScale = getOverlayFontScale();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -348,6 +364,26 @@
     markdownAutoExport = getMarkdownAutoExport();
   }
 
+  function saveOverlayLineCount(count: number) {
+    setOverlayLineCount(count);
+    overlayLineCount = getOverlayLineCount();
+  }
+
+  function saveOverlayShowTranslation(enabled: boolean) {
+    setOverlayShowTranslation(enabled);
+    overlayShowTranslation = getOverlayShowTranslation();
+  }
+
+  function saveOverlayFadeSeconds(seconds: number) {
+    setOverlayFadeSeconds(seconds);
+    overlayFadeSeconds = getOverlayFadeSeconds();
+  }
+
+  function saveOverlayFontScale(scale: number) {
+    setOverlayFontScale(scale);
+    overlayFontScale = getOverlayFontScale();
+  }
+
   async function refreshModels() {
     modelsError = null;
     try {
@@ -535,6 +571,75 @@
               <div class="d">{recordingsPath ?? '…'}</div>
             </div>
             <button type="button" class="link-btn" onclick={revealRecordings}>Finderで表示</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>字幕オーバーレイ</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              表示行数
+              <div class="d">画面上に残す最新字幕の行数。</div>
+            </div>
+            <select
+              class="compact-select"
+              aria-label="字幕オーバーレイの表示行数"
+              value={overlayLineCount}
+              onchange={(event) => saveOverlayLineCount(Number(event.currentTarget.value))}
+            >
+              <option value="1">1行</option>
+              <option value="2">2行</option>
+              <option value="3">3行</option>
+            </select>
+          </div>
+          <div class="set-row">
+            <div>
+              訳文を表示
+              <div class="d">サブ言語の翻訳を本文の下に表示します。</div>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              class:on={overlayShowTranslation}
+              role="switch"
+              aria-checked={overlayShowTranslation}
+              aria-label="字幕オーバーレイに訳文を表示"
+              onclick={() => saveOverlayShowTranslation(!overlayShowTranslation)}
+            ></button>
+          </div>
+          <div class="set-row">
+            <div>
+              自動フェード
+              <div class="d">0秒ならフェードしません。</div>
+            </div>
+            <input
+              class="number-input"
+              type="number"
+              min="0"
+              max="10"
+              step="1"
+              value={overlayFadeSeconds}
+              aria-label="字幕オーバーレイの自動フェード秒数"
+              onchange={(event) => saveOverlayFadeSeconds(Number(event.currentTarget.value))}
+            />
+          </div>
+          <div class="set-row">
+            <div>
+              文字サイズ
+              <div class="d">{Math.round(overlayFontScale * 100)}%</div>
+            </div>
+            <input
+              class="range-input"
+              type="range"
+              min="0.7"
+              max="1.8"
+              step="0.05"
+              value={overlayFontScale}
+              aria-label="字幕オーバーレイの文字サイズ"
+              oninput={(event) => saveOverlayFontScale(Number(event.currentTarget.value))}
+            />
           </div>
         </div>
       </div>
@@ -1268,7 +1373,9 @@
 
   .token-input,
   .name-input,
-  .template-input {
+  .template-input,
+  .compact-select,
+  .number-input {
     width: min(220px, 40%);
     border: 1px solid var(--hairline);
     border-radius: 8px;
@@ -1277,6 +1384,15 @@
     padding: 6px 9px;
     font: inherit;
     font-size: 12.5px;
+  }
+
+  .number-input {
+    width: 86px;
+  }
+
+  .range-input {
+    width: min(220px, 42%);
+    accent-color: var(--blue);
   }
 
   .template-input {

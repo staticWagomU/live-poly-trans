@@ -11,6 +11,10 @@ import {
   getLiveSpeakerOverrides,
   getMimiInvert,
   getMimiScale,
+  getOverlayFadeSeconds,
+  getOverlayFontScale,
+  getOverlayLineCount,
+  getOverlayShowTranslation,
   getOtherSpeakerName,
   getSelfSpeakerName,
   getSpeechModel,
@@ -25,6 +29,10 @@ import {
   setIncludeAudio,
   setMimiInvert,
   setMimiScale,
+  setOverlayFadeSeconds,
+  setOverlayFontScale,
+  setOverlayLineCount,
+  setOverlayShowTranslation,
   setOtherSpeakerName,
   setSelfSpeakerName,
   setSpeechModel,
@@ -32,6 +40,7 @@ import {
   subscribeSettings
 } from './settingsStore';
 import { DEFAULT_MIMI_SCALE } from './mimiDisplay';
+import { DEFAULT_OVERLAY_SETTINGS } from './overlaySettings';
 import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
 import { DEFAULT_TRANSCRIPT_FONT_SCALE } from './transcriptFontSize';
 
@@ -107,6 +116,28 @@ describe('settings store', () => {
 
     localStorage.setItem(SETTINGS_KEYS.mimiScale, 'junk');
     expect(getMimiScale()).toBe(DEFAULT_MIMI_SCALE);
+  });
+
+  it('round-trips overlay display settings through their parsers', () => {
+    expect(getOverlayLineCount()).toBe(DEFAULT_OVERLAY_SETTINGS.lineCount);
+    expect(getOverlayShowTranslation()).toBe(DEFAULT_OVERLAY_SETTINGS.showTranslation);
+    expect(getOverlayFadeSeconds()).toBe(DEFAULT_OVERLAY_SETTINGS.fadeSeconds);
+    expect(getOverlayFontScale()).toBe(DEFAULT_OVERLAY_SETTINGS.fontScale);
+
+    setOverlayLineCount(3);
+    setOverlayShowTranslation(false);
+    setOverlayFadeSeconds(8);
+    setOverlayFontScale(1.25);
+
+    expect(getOverlayLineCount()).toBe(3);
+    expect(getOverlayShowTranslation()).toBe(false);
+    expect(getOverlayFadeSeconds()).toBe(8);
+    expect(getOverlayFontScale()).toBe(1.25);
+
+    localStorage.setItem(SETTINGS_KEYS.overlayLineCount, '99');
+    localStorage.setItem(SETTINGS_KEYS.overlayFadeSeconds, 'junk');
+    expect(getOverlayLineCount()).toBe(3);
+    expect(getOverlayFadeSeconds()).toBe(DEFAULT_OVERLAY_SETTINGS.fadeSeconds);
   });
 
   it('round-trips the speech model selection', () => {

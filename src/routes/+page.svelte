@@ -31,6 +31,10 @@
     getIncludeAudio,
     getLiveSpeakerOverrides,
     getMarkdownAutoExport,
+    getOverlayFadeSeconds,
+    getOverlayFontScale,
+    getOverlayLineCount,
+    getOverlayShowTranslation,
     getSpeechModel,
     getTranscriptFontScale,
     SETTINGS_KEYS,
@@ -172,6 +176,10 @@
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let lastOverlayPayload = '';
+  let overlayLineCount = 2;
+  let overlayShowTranslation = true;
+  let overlayFadeSeconds = 0;
+  let overlayFontScale = 1;
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -216,6 +224,10 @@
   onMount(() => {
     transcriptFontScale = getTranscriptFontScale();
     speechModel = getSpeechModel();
+    overlayLineCount = getOverlayLineCount();
+    overlayShowTranslation = getOverlayShowTranslation();
+    overlayFadeSeconds = getOverlayFadeSeconds();
+    overlayFontScale = getOverlayFontScale();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -235,6 +247,20 @@
     const unsubscribeGlossary = subscribeSettings(SETTINGS_KEYS.glossary, () => {
       glossaryRules = getGlossaryRules();
     });
+    const unsubscribeOverlaySettings = [
+      subscribeSettings(SETTINGS_KEYS.overlayLineCount, () => {
+        overlayLineCount = getOverlayLineCount();
+      }),
+      subscribeSettings(SETTINGS_KEYS.overlayShowTranslation, () => {
+        overlayShowTranslation = getOverlayShowTranslation();
+      }),
+      subscribeSettings(SETTINGS_KEYS.overlayFadeSeconds, () => {
+        overlayFadeSeconds = getOverlayFadeSeconds();
+      }),
+      subscribeSettings(SETTINGS_KEYS.overlayFontScale, () => {
+        overlayFontScale = getOverlayFontScale();
+      })
+    ];
     const autoStart = autoStartEnabled;
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
@@ -288,6 +314,7 @@
       cleanupRegistry.dispose();
       unsubscribeSpeakerNames.forEach((unsubscribe) => unsubscribe());
       unsubscribeGlossary();
+      unsubscribeOverlaySettings.forEach((unsubscribe) => unsubscribe());
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
       }
@@ -1201,17 +1228,21 @@
     const lines = buildOverlayCaptionLines([...messages, ...interimMessages], {
       mainLanguage,
       subLanguage,
-      maxLines: 2,
-      showTranslation: true
+      maxLines: overlayLineCount,
+      showTranslation: overlayShowTranslation
     });
-    const payload = JSON.stringify(lines);
+    const settings = {
+      fadeSeconds: overlayFadeSeconds,
+      fontScale: overlayFontScale
+    };
+    const payload = JSON.stringify({ lines, settings });
     if (!force && payload === lastOverlayPayload) {
       return;
     }
 
     lastOverlayPayload = payload;
     try {
-      await emit('overlay-captions', { lines });
+      await emit('overlay-captions', { lines, settings });
     } catch {
       // The overlay window is optional; failing to publish should not affect
       // the live transcript path.

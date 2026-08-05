@@ -3,18 +3,41 @@
   import { onMount } from 'svelte';
   import '$lib/theme.css';
   import type { OverlayCaptionLine } from '$lib/overlayCaptions';
+  import type { OverlaySettings } from '$lib/overlaySettings';
 
   let lines: OverlayCaptionLine[] = [];
+  let settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'> = {
+    fadeSeconds: 0,
+    fontScale: 1
+  };
+  let faded = false;
+  let fadeTimer: ReturnType<typeof setTimeout> | null = null;
 
   onMount(() => {
     let dispose: (() => void) | null = null;
-    void listen<{ lines: OverlayCaptionLine[] }>('overlay-captions', (event) => {
+    void listen<{
+      lines: OverlayCaptionLine[];
+      settings: Pick<OverlaySettings, 'fadeSeconds' | 'fontScale'>;
+    }>('overlay-captions', (event) => {
       lines = event.payload.lines;
+      settings = event.payload.settings;
+      faded = false;
+      if (fadeTimer) {
+        clearTimeout(fadeTimer);
+      }
+      if (settings.fadeSeconds > 0) {
+        fadeTimer = setTimeout(() => {
+          faded = true;
+        }, settings.fadeSeconds * 1000);
+      }
     }).then((unlisten) => {
       dispose = unlisten;
     });
 
     return () => {
+      if (fadeTimer) {
+        clearTimeout(fadeTimer);
+      }
       dispose?.();
     };
   });
@@ -24,8 +47,8 @@
   <title>LivePolyTrans Overlay</title>
 </svelte:head>
 
-<main class="overlay" aria-label="字幕オーバーレイ">
-  <div class="lines">
+<main class="overlay" aria-label="字幕オーバーレイ" style="--overlay-scale: {settings.fontScale}">
+  <div class="lines" class:faded>
     {#if lines.length === 0}
       <div class="line muted">音声を待っています</div>
     {:else}
@@ -63,11 +86,17 @@
     display: grid;
     gap: 8px;
     width: min(100%, 920px);
+    opacity: 1;
+    transition: opacity 180ms ease;
+  }
+
+  .lines.faded {
+    opacity: 0;
   }
 
   .line {
     color: #fff;
-    font-size: 34px;
+    font-size: calc(34px * var(--overlay-scale));
     font-weight: 800;
     line-height: 1.2;
     text-align: center;
@@ -84,7 +113,13 @@
 
   .sub {
     margin-top: 3px;
-    font-size: 22px;
+    font-size: calc(22px * var(--overlay-scale));
     font-weight: 700;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .lines {
+      transition: none;
+    }
   }
 </style>
