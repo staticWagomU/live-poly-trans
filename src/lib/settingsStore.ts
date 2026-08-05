@@ -19,6 +19,10 @@ import {
   speechModelPreferenceValue,
   type SpeechModelSelection
 } from './speechModels';
+import {
+  parseThemePreference,
+  type ThemePreference
+} from './themePreference';
 import { parseTranscriptFontScale } from './transcriptFontSize';
 
 export const SETTINGS_KEYS = {
@@ -42,7 +46,8 @@ export const SETTINGS_KEYS = {
   globalShortcutsEnabled: 'lpt-global-shortcuts-enabled',
   recordingShortcut: 'lpt-recording-shortcut',
   overlayShortcut: 'lpt-overlay-shortcut',
-  keepInMenuBar: 'lpt-keep-in-menu-bar'
+  keepInMenuBar: 'lpt-keep-in-menu-bar',
+  themePreference: 'lpt-theme-preference'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -125,6 +130,14 @@ export function getTranscriptFontScale(): number {
 
 export function setTranscriptFontScale(scale: number) {
   write(SETTINGS_KEYS.transcriptFontScale, String(scale));
+}
+
+export function getThemePreference(): ThemePreference {
+  return parseThemePreference(read(SETTINGS_KEYS.themePreference));
+}
+
+export function setThemePreference(preference: ThemePreference) {
+  write(SETTINGS_KEYS.themePreference, preference);
 }
 
 export function getSpeechModel(): SpeechModelSelection {

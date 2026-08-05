@@ -22,6 +22,7 @@ import {
   getRecordingShortcut,
   getSelfSpeakerName,
   getSpeechModel,
+  getThemePreference,
   getTranscriptFontScale,
   SETTINGS_KEYS,
   setAutoStart,
@@ -44,12 +45,14 @@ import {
   setRecordingShortcut,
   setSelfSpeakerName,
   setSpeechModel,
+  setThemePreference,
   setTranscriptFontScale,
   subscribeSettings
 } from './settingsStore';
 import { DEFAULT_MIMI_SCALE } from './mimiDisplay';
 import { DEFAULT_OVERLAY_SETTINGS } from './overlaySettings';
 import { DEFAULT_FILE_NAME_TEMPLATE } from './saveSettings';
+import { DEFAULT_THEME_PREFERENCE } from './themePreference';
 import { DEFAULT_TRANSCRIPT_FONT_SCALE } from './transcriptFontSize';
 
 function createMemoryStorage(): Storage {
@@ -115,6 +118,16 @@ describe('settings store', () => {
 
     localStorage.setItem(SETTINGS_KEYS.transcriptFontScale, 'junk');
     expect(getTranscriptFontScale()).toBe(DEFAULT_TRANSCRIPT_FONT_SCALE);
+  });
+
+  it('round-trips the theme preference through its parser', () => {
+    expect(getThemePreference()).toBe(DEFAULT_THEME_PREFERENCE);
+    setThemePreference('dark');
+    expect(localStorage.getItem(SETTINGS_KEYS.themePreference)).toBe('dark');
+    expect(getThemePreference()).toBe('dark');
+
+    localStorage.setItem(SETTINGS_KEYS.themePreference, 'solarized');
+    expect(getThemePreference()).toBe(DEFAULT_THEME_PREFERENCE);
   });
 
   it('round-trips the mimi scale through its parser', () => {
