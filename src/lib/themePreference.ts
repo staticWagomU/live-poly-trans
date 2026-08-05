@@ -13,3 +13,7 @@ export function effectiveTheme(
 export function parseThemePreference(value: string | null): ThemePreference {
   return value === 'light' || value === 'dark' ? value : DEFAULT_THEME_PREFERENCE;
 }
+
+export function themeDataAttribute(preference: ThemePreference): EffectiveTheme | null {
+  return preference === 'auto' ? null : preference;
+}
