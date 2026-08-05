@@ -37,6 +37,7 @@ struct CommandLineOptionsTests {
     try formatsTranscriptEvent()
     try formatsTranslationEvent()
     try formatsAudioLevelEvent()
+    try throttlesAudioLevelEventsToInterval()
     try extractsTranscriptSpansFromSpeechAttributes()
     try detectsTranscriptLanguage()
     try buildsMeetingAiPrompts()
@@ -1028,6 +1029,15 @@ struct CommandLineOptionsTests {
     try expectEqual(event.rms, 0.25)
     try expectEqual(event.peak, 0.75)
     try expectEqual(event.timestamp, "1970-01-01T00:00:00Z")
+  }
+
+  static func throttlesAudioLevelEventsToInterval() throws {
+    let limiter = AudioLevelEventLimiter(minimumInterval: 0.1)
+    let start = Date(timeIntervalSince1970: 1_000)
+
+    try expectEqual(limiter.shouldEmit(at: start), true)
+    try expectEqual(limiter.shouldEmit(at: start.addingTimeInterval(0.09)), false)
+    try expectEqual(limiter.shouldEmit(at: start.addingTimeInterval(0.1)), true)
   }
 
   static func extractsTranscriptSpansFromSpeechAttributes() throws {

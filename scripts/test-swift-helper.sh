@@ -24,6 +24,7 @@ swiftc \
   -parse-as-library \
   "${SDK_ARGS[@]}" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSignalLevel.swift" \
+  "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioLevelEventLimiter.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioSilenceGate.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioConversion.swift" \
   "$ROOT_DIR/swift-helper/Sources/LivePolyTransHelper/AudioFileTools.swift" \
