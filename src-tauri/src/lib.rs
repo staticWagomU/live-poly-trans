@@ -1,3 +1,4 @@
+use crate::translation_backend::{translation_event_json, TranslationRuntimeConfig};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::{
@@ -47,6 +48,9 @@ pub const TRAY_PANEL_LABEL: &str = "tray";
 pub const TRAY_PANEL_WIDTH: f64 = 280.0;
 pub const TRAY_PANEL_HEIGHT: f64 = 304.0;
 pub const TRAY_PANEL_MARGIN: f64 = 4.0;
+pub const TRANSLATION_BACKEND_ERROR_EVENT: &str = "translation-backend-error";
+pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://127.0.0.1:11434";
+pub const DEFAULT_OLLAMA_MODEL: &str = "llama3.1";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayWindowState {
@@ -448,6 +452,8 @@ pub fn read_json_lines(
     stdout: impl std::io::Read + Send + 'static,
     session_id: String,
     control_ready: Arc<AtomicBool>,
+    translation_config: Option<TranslationRuntimeConfig>,
+    transcript_file: Option<String>,
 ) {
     std::thread::spawn(move || {
         let reader = BufReader::new(stdout);
@@ -468,12 +474,62 @@ pub fn read_json_lines(
                             value.get("text").and_then(Value::as_str).map(str::len).unwrap_or(0)
                         );
                     }
-                    let _ = app.emit("transcript-event", value);
+                    let _ = app.emit("transcript-event", value.clone());
+                    maybe_spawn_external_translation(
+                        app.clone(),
+                        &value,
+                        translation_config.clone(),
+                        transcript_file.clone(),
+                    );
                 }
                 Err(error) => {
                     let _ = app.emit("helper-error", format!("invalid helper JSON: {error}"));
                 }
             }
+        }
+    });
+}
+
+pub fn maybe_spawn_external_translation(
+    app: AppHandle,
+    event: &Value,
+    translation_config: Option<TranslationRuntimeConfig>,
+    transcript_file: Option<String>,
+) {
+    let Some(config) = translation_config else {
+        return;
+    };
+    let Some(seed) = config.translation_seed(event) else {
+        return;
+    };
+
+    std::thread::spawn(move || match config.translate(&seed.request) {
+        Ok(Some(translated)) => {
+            let translation_event =
+                translation_event_json(&seed, &translated, &chrono::Local::now().to_rfc3339());
+            if let Some(path) = transcript_file {
+                if let Err(error) = append_json_line(&path, &translation_event) {
+                    let _ = app.emit(
+                        "helper-error",
+                        format!("could not record translation event: {error}"),
+                    );
+                }
+            }
+            let _ = app.emit("transcript-event", translation_event);
+        }
+        Ok(None) => {}
+        Err(error) => {
+            let _ = app.emit(
+                TRANSLATION_BACKEND_ERROR_EVENT,
+                serde_json::json!({
+                    "engine": config.engine.as_str(),
+                    "message": error.to_string(),
+                    "fallbackEnabled": config.fallback_enabled,
+                    "stream": seed.stream,
+                    "segmentId": seed.segment_id,
+                    "sessionId": seed.session_id,
+                }),
+            );
         }
     });
 }
@@ -1102,6 +1158,17 @@ pub fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
     }
 
     fs::write(path, contents).map_err(|error| error.to_string())
+}
+
+pub fn append_json_line(path: &str, value: &Value) -> Result<(), String> {
+    let mut line = serde_json::to_vec(value).map_err(|error| error.to_string())?;
+    line.push(b'\n');
+    let mut file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(path)
+        .map_err(|error| error.to_string())?;
+    file.write_all(&line).map_err(|error| error.to_string())
 }
 
 pub fn validate_export_directory_path(path: &Path) -> Result<(), String> {
@@ -1861,6 +1928,10 @@ pub mod commands {
         recording_audio: Option<bool>,
         engine: Option<String>,
         whisper_model: Option<String>,
+        translation_engine: Option<String>,
+        translation_fallback_enabled: Option<bool>,
+        ollama_endpoint: Option<String>,
+        ollama_model: Option<String>,
     ) -> Result<(), String> {
         let children = state.children.clone();
 
@@ -1868,6 +1939,20 @@ pub mod commands {
             let whisper_config =
                 resolve_whisper_config(engine.as_deref(), whisper_model.as_deref())?;
             let stop_grace = stop_grace_for_engine(engine.as_deref());
+            let translation_config = TranslationRuntimeConfig::new(
+                translation_engine.as_deref().unwrap_or("apple"),
+                translation_fallback_enabled.unwrap_or(true),
+                &source_language,
+                Some(&target_language),
+                ollama_endpoint
+                    .as_deref()
+                    .unwrap_or(DEFAULT_OLLAMA_ENDPOINT),
+                ollama_model.as_deref().unwrap_or(DEFAULT_OLLAMA_MODEL),
+            );
+            let helper_translation_enabled = translation_config.helper_translation_enabled();
+            let external_translation_config = translation_config
+                .should_run_external_backend()
+                .then_some(translation_config);
 
             stop_stream_child(&children, &stream)?;
 
@@ -1917,7 +2002,7 @@ pub mod commands {
                     .as_ref()
                     .map(WhisperEngineConfig::from)
                     .as_ref(),
-                true,
+                helper_translation_enabled,
             );
 
             let helper_path = resolve_helper_path()?;
@@ -1948,6 +2033,8 @@ pub mod commands {
                     stdout,
                     session_id.clone(),
                     control_ready.clone(),
+                    external_translation_config.clone(),
+                    transcript_file.clone(),
                 );
             }
 

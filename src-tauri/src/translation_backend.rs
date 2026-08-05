@@ -11,6 +11,101 @@ pub enum TranslationBackendKind {
     Ollama,
 }
 
+impl TranslationBackendKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            TranslationBackendKind::Apple => "apple",
+            TranslationBackendKind::DeepL => "deepl",
+            TranslationBackendKind::Ollama => "ollama",
+        }
+    }
+}
+
+pub fn parse_translation_backend_kind(raw: &str) -> TranslationBackendKind {
+    match raw {
+        "deepl" => TranslationBackendKind::DeepL,
+        "ollama" => TranslationBackendKind::Ollama,
+        _ => TranslationBackendKind::Apple,
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TranslationRuntimeConfig {
+    pub engine: TranslationBackendKind,
+    pub fallback_enabled: bool,
+    pub source_language: String,
+    pub target_language: Option<String>,
+    pub ollama_endpoint: String,
+    pub ollama_model: String,
+}
+
+impl TranslationRuntimeConfig {
+    pub fn new(
+        engine: &str,
+        fallback_enabled: bool,
+        source_language: &str,
+        target_language: Option<&str>,
+        ollama_endpoint: &str,
+        ollama_model: &str,
+    ) -> Self {
+        Self {
+            engine: parse_translation_backend_kind(engine),
+            fallback_enabled,
+            source_language: source_language.to_string(),
+            target_language: target_language
+                .map(str::trim)
+                .filter(|target| !target.is_empty())
+                .map(str::to_string),
+            ollama_endpoint: ollama_endpoint.trim().to_string(),
+            ollama_model: ollama_model.trim().to_string(),
+        }
+    }
+
+    pub fn helper_translation_enabled(&self) -> bool {
+        self.engine == TranslationBackendKind::Apple || self.fallback_enabled
+    }
+
+    pub fn should_run_external_backend(&self) -> bool {
+        self.target_language.is_some()
+            && matches!(
+                self.engine,
+                TranslationBackendKind::DeepL | TranslationBackendKind::Ollama
+            )
+    }
+
+    pub fn translation_seed(&self, event: &Value) -> Option<TranscriptTranslationSeed> {
+        if !self.should_run_external_backend() {
+            return None;
+        }
+
+        transcript_translation_seed(
+            event,
+            &self.source_language,
+            self.target_language.as_deref(),
+        )
+    }
+
+    pub fn translate(
+        &self,
+        request: &TranslationRequest,
+    ) -> Result<Option<String>, TranslationError> {
+        match self.engine {
+            TranslationBackendKind::Apple => Ok(None),
+            TranslationBackendKind::DeepL => {
+                let api_key = read_deepl_api_key_from_keychain()?.ok_or_else(|| {
+                    TranslationError::MissingCredential(
+                        "DeepL API key is not configured".to_string(),
+                    )
+                })?;
+                DeepLHttpBackend::new(api_key).translate(request)
+            }
+            TranslationBackendKind::Ollama => {
+                OllamaHttpBackend::new(&self.ollama_endpoint, &self.ollama_model).translate(request)
+            }
+        }
+    }
+}
+
 pub trait TranslationBackend {
     fn kind(&self) -> TranslationBackendKind;
     fn translate(&self, request: &TranslationRequest) -> Result<Option<String>, TranslationError>;
@@ -105,12 +200,9 @@ pub fn transcript_translation_seed(
     }
 
     let language = event.get("lang")?.as_str()?;
-    let target_language = opposite_translation_language(language, source_language, target_language)?;
-    let request = TranslationRequest::new(
-        event.get("text")?.as_str()?,
-        language,
-        target_language,
-    )?;
+    let target_language =
+        opposite_translation_language(language, source_language, target_language)?;
+    let request = TranslationRequest::new(event.get("text")?.as_str()?, language, target_language)?;
 
     Some(TranscriptTranslationSeed {
         stream: event.get("stream")?.as_str()?.to_string(),
@@ -565,6 +657,41 @@ mod tests {
                 "sessionId": "speaker-session"
             })
         );
+    }
+
+    #[test]
+    fn runtime_config_keeps_helper_translation_only_for_apple_or_fallback() {
+        let apple = TranslationRuntimeConfig::new(
+            "apple",
+            true,
+            "en-US",
+            Some("ja-JP"),
+            "http://127.0.0.1:11434",
+            "llama3.1",
+        );
+        let deepl_without_fallback = TranslationRuntimeConfig::new(
+            "deepl",
+            false,
+            "en-US",
+            Some("ja-JP"),
+            "http://127.0.0.1:11434",
+            "llama3.1",
+        );
+        let ollama_with_fallback = TranslationRuntimeConfig::new(
+            "ollama",
+            true,
+            "en-US",
+            Some("ja-JP"),
+            "http://127.0.0.1:11434",
+            "llama3.1",
+        );
+
+        assert!(apple.helper_translation_enabled());
+        assert!(!apple.should_run_external_backend());
+        assert!(!deepl_without_fallback.helper_translation_enabled());
+        assert!(deepl_without_fallback.should_run_external_backend());
+        assert!(ollama_with_fallback.helper_translation_enabled());
+        assert!(ollama_with_fallback.should_run_external_backend());
     }
 
     #[test]

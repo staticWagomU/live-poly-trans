@@ -50,6 +50,10 @@
     getSpeechModel,
     getThemePreference,
     getTranscriptFontScale,
+    getTranslationEngine,
+    getTranslationFallbackEnabled,
+    getOllamaEndpoint,
+    getOllamaModel,
     SETTINGS_KEYS,
     setAutoStart as storeAutoStart,
     setIncludeAudio as storeIncludeAudio,
@@ -123,6 +127,7 @@
   import { completeCaptureStop } from '$lib/captureLifecycle';
   import type { CaptionFontFamily, CaptionLineHeight } from '$lib/captionAppearance';
   import { themeDataAttribute, type ThemePreference } from '$lib/themePreference';
+  import type { TranslationEngine } from '$lib/translationSettings';
   import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
   import type { TrayPanelState } from '$lib/trayPanel';
   import {
@@ -145,6 +150,15 @@
     stream: AudioStream;
     sessionId: string;
     code: number | null;
+  };
+
+  type TranslationBackendErrorPayload = {
+    engine: string;
+    message: string;
+    fallbackEnabled: boolean;
+    stream: AudioStream;
+    segmentId: string;
+    sessionId: string;
   };
 
   const summaryRefreshDelayMs = 6000;
@@ -208,6 +222,11 @@
   let captionLineHeight: CaptionLineHeight = 'normal';
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
+  let translationEngine: TranslationEngine = 'apple';
+  let translationFallbackEnabled = true;
+  let ollamaEndpoint = 'http://127.0.0.1:11434';
+  let ollamaModel = 'llama3.1';
+  let lastTranslationErrorNoticeKey = '';
   let confirmingClear = false;
   let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
   let aiOpen = false;
@@ -221,8 +240,15 @@
   let pttHeld = false;
   let pttReconciling = false;
   let permissionNotice: string | null = null;
-  let settingsPane: 'general' | 'appearance' | 'privacy' | 'model' | 'langs' | 'glossary' | 'save' =
-    'general';
+  let settingsPane:
+    | 'general'
+    | 'appearance'
+    | 'privacy'
+    | 'model'
+    | 'translation'
+    | 'langs'
+    | 'glossary'
+    | 'save' = 'general';
   let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
   let glossaryRules: GlossaryRule[] = [];
 
@@ -264,6 +290,10 @@
     applyThemePreference(themePreference);
     captionFontFamily = getCaptionFontFamily();
     captionLineHeight = getCaptionLineHeight();
+    translationEngine = getTranslationEngine();
+    translationFallbackEnabled = getTranslationFallbackEnabled();
+    ollamaEndpoint = getOllamaEndpoint();
+    ollamaModel = getOllamaModel();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -322,6 +352,26 @@
       subscribeSettings(SETTINGS_KEYS.captionLineHeight, () => {
         captionLineHeight = getCaptionLineHeight();
         void publishOverlayCaptions();
+      }),
+      subscribeSettings(SETTINGS_KEYS.translationEngine, () => {
+        translationEngine = getTranslationEngine();
+        lastTranslationErrorNoticeKey = '';
+        void restartTranscriptionIfRunning();
+      }),
+      subscribeSettings(SETTINGS_KEYS.translationFallbackEnabled, () => {
+        translationFallbackEnabled = getTranslationFallbackEnabled();
+        lastTranslationErrorNoticeKey = '';
+        void restartTranscriptionIfRunning();
+      }),
+      subscribeSettings(SETTINGS_KEYS.ollamaEndpoint, () => {
+        ollamaEndpoint = getOllamaEndpoint();
+        lastTranslationErrorNoticeKey = '';
+        void restartTranscriptionIfRunning();
+      }),
+      subscribeSettings(SETTINGS_KEYS.ollamaModel, () => {
+        ollamaModel = getOllamaModel();
+        lastTranslationErrorNoticeKey = '';
+        void restartTranscriptionIfRunning();
       })
     ];
     const autoStart = autoStartEnabled;
@@ -339,6 +389,11 @@
       cleanupRegistry.add(
         listen<string>('helper-error', (event) => {
           appError = event.payload;
+        })
+      ),
+      cleanupRegistry.add(
+        listen<TranslationBackendErrorPayload>('translation-backend-error', (event) => {
+          handleTranslationBackendError(event.payload);
         })
       ),
       cleanupRegistry.add(
@@ -587,6 +642,22 @@
     } else if (event.state === 'language-ready') {
       statusMessage = null;
     }
+  }
+
+  function handleTranslationBackendError(payload: TranslationBackendErrorPayload) {
+    const key = `${payload.engine}:${payload.message}:${payload.fallbackEnabled}`;
+    if (key === lastTranslationErrorNoticeKey) {
+      return;
+    }
+    lastTranslationErrorNoticeKey = key;
+
+    const label =
+      payload.engine === 'deepl' ? 'DeepL' : payload.engine === 'ollama' ? 'Ollama' : '翻訳';
+    showActionNotice(
+      payload.fallbackEnabled
+        ? `${label}翻訳に失敗しました。Apple 翻訳へフォールバックします。`
+        : `${label}翻訳に失敗しました: ${payload.message}`
+    );
   }
 
   async function applyTranscriptEvent(event: TranscriptEvent) {
@@ -1002,6 +1073,10 @@
         // channel instead.
         recordingDir: recordingSession?.dir ?? null,
         recordingAudio: includeAudioEnabled,
+        translationEngine,
+        translationFallbackEnabled,
+        ollamaEndpoint,
+        ollamaModel,
         ...streamEnginePayload(speechModel)
       });
     } catch (error) {
