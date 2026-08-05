@@ -906,6 +906,17 @@ pub fn unique_destination(dir: &Path, base_name: &str, extension: &str) -> PathB
     first
 }
 
+/// Writes frontend-generated export text to a destination the user picked
+/// in the save dialog; because the path is user-chosen no directory
+/// allowlist applies, but an empty path is still a plain input error.
+pub fn write_text_file(path: &str, contents: &str) -> Result<(), String> {
+    if path.trim().is_empty() {
+        return Err("save path is empty".to_string());
+    }
+
+    fs::write(path, contents).map_err(|error| error.to_string())
+}
+
 fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
@@ -2422,6 +2433,13 @@ pub mod commands {
         .await
         .map_err(|error| error.to_string())?
     }
+
+    #[tauri::command]
+    pub async fn save_text_file(path: String, contents: String) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || write_text_file(&path, &contents))
+            .await
+            .map_err(|error| error.to_string())?
+    }
 }
 
 pub fn run() {
@@ -2458,7 +2476,8 @@ pub fn run() {
             commands::list_recordings,
             commands::read_recording_transcript,
             commands::recording_waveform,
-            commands::export_recording
+            commands::export_recording,
+            commands::save_text_file
         ])
         .setup(|app| {
             let _ = app.get_webview_window("main");
@@ -3091,6 +3110,25 @@ mod tests {
 
         assert!(delete_recording_dir(&root, "../evil").is_err());
         assert!(delete_recording_dir(&root, "a/b").is_err());
+    }
+
+    #[test]
+    fn write_text_file_writes_contents_to_the_given_path() {
+        let dir = std::env::temp_dir().join(format!("lpt-save-text-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("transcript.srt");
+
+        let result = write_text_file(path.to_str().unwrap(), "1\nこんにちは\n");
+        let written = fs::read_to_string(&path);
+        let _ = fs::remove_dir_all(&dir);
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(written.unwrap(), "1\nこんにちは\n");
+    }
+
+    #[test]
+    fn write_text_file_rejects_an_empty_path() {
+        assert!(write_text_file("  ", "text").is_err());
     }
 
     #[test]
