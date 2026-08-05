@@ -849,6 +849,17 @@ pub struct RecordingMeta {
     pub speakers: Option<HashMap<String, SpeakerMeta>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RecordingSearchHit {
+    #[serde(rename = "recordingId")]
+    pub recording_id: String,
+    #[serde(rename = "entryIndex")]
+    pub entry_index: usize,
+    pub snippet: String,
+    #[serde(rename = "timestampMs")]
+    pub timestamp_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct RecordingFileInfo {
     pub name: String,
@@ -954,6 +965,74 @@ pub fn validate_export_directory_path(path: &Path) -> Result<(), String> {
         .map_err(|error| format!("export directory is not writable: {error}"))?;
     drop(file);
     fs::remove_file(&probe).map_err(|error| error.to_string())
+}
+
+fn parse_segment_start_ms(segment_id: Option<&str>) -> i64 {
+    segment_id
+        .and_then(|value| value.split('-').next())
+        .and_then(|value| value.parse::<i64>().ok())
+        .unwrap_or(0)
+}
+
+fn snippet_around(text: &str, match_start: usize, match_len: usize) -> String {
+    let chars: Vec<char> = text.chars().collect();
+    let start = match_start.saturating_sub(24);
+    let end = (match_start + match_len + 24).min(chars.len());
+    let mut snippet = String::new();
+    if start > 0 {
+        snippet.push('…');
+    }
+    snippet.extend(chars[start..end].iter());
+    if end < chars.len() {
+        snippet.push('…');
+    }
+    snippet
+}
+
+pub fn search_transcript_events(
+    recording_id: &str,
+    query: &str,
+    events: &[Value],
+) -> Vec<RecordingSearchHit> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Vec::new();
+    }
+
+    let mut hits = Vec::new();
+    let mut entry_index = 0usize;
+    for event in events {
+        let is_live_final = event.get("type").and_then(Value::as_str) == Some("transcript")
+            && event.get("isFinal").and_then(Value::as_bool) == Some(true);
+        let is_whisperx = event.get("type").and_then(Value::as_str) == Some("whisperx");
+        if !is_live_final && !is_whisperx {
+            continue;
+        }
+
+        let Some(text) = event.get("text").and_then(Value::as_str) else {
+            continue;
+        };
+        let haystack = text.to_lowercase();
+        if let Some(byte_index) = haystack.find(&needle) {
+            let match_start = haystack[..byte_index].chars().count();
+            let match_len = needle.chars().count();
+            let timestamp_ms = event
+                .get("startMs")
+                .and_then(Value::as_i64)
+                .unwrap_or_else(|| {
+                    parse_segment_start_ms(event.get("segmentId").and_then(Value::as_str))
+                });
+            hits.push(RecordingSearchHit {
+                recording_id: recording_id.to_string(),
+                entry_index,
+                snippet: snippet_around(text, match_start, match_len),
+                timestamp_ms,
+            });
+        }
+        entry_index += 1;
+    }
+
+    hits
 }
 
 fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2404,6 +2483,24 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn search_recordings(
+        app: AppHandle,
+        query: String,
+    ) -> Result<Vec<RecordingSearchHit>, String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let recordings = list_recordings_blocking(&app)?;
+            let mut hits = Vec::new();
+            for recording in recordings {
+                let events = read_recording_transcript_blocking(&app, &recording.id)?;
+                hits.extend(search_transcript_events(&recording.id, &query, &events));
+            }
+            Ok(hits)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
+    #[tauri::command]
     pub async fn recording_waveform(
         app: AppHandle,
         id: String,
@@ -2559,6 +2656,7 @@ pub fn run() {
             commands::delete_recording,
             commands::list_recordings,
             commands::read_recording_transcript,
+            commands::search_recordings,
             commands::recording_waveform,
             commands::export_recording,
             commands::save_text_file,
@@ -3377,6 +3475,44 @@ mod tests {
         assert!(validate_export_directory_path(&dir).is_err());
 
         let _ = fs::remove_file(&dir);
+    }
+
+    #[test]
+    fn search_transcript_events_matches_case_insensitively_with_snippets() {
+        let events = vec![serde_json::json!({
+            "type": "transcript",
+            "isFinal": true,
+            "segmentId": "1200-800",
+            "text": "We discussed Claude Code adoption today."
+        })];
+
+        let hits = search_transcript_events("rec-1", "claude", &events);
+
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].recording_id, "rec-1");
+        assert_eq!(hits[0].entry_index, 0);
+        assert_eq!(hits[0].timestamp_ms, 1200);
+        assert!(hits[0].snippet.contains("Claude Code"));
+    }
+
+    #[test]
+    fn search_transcript_events_ignores_blank_queries_and_non_final_transcripts() {
+        let events = vec![
+            serde_json::json!({
+                "type": "transcript",
+                "isFinal": false,
+                "segmentId": "0-100",
+                "text": "Claude"
+            }),
+            serde_json::json!({
+                "type": "translation",
+                "segmentId": "0-100",
+                "trans": "Claude"
+            }),
+        ];
+
+        assert!(search_transcript_events("rec-1", " ", &events).is_empty());
+        assert!(search_transcript_events("rec-1", "claude", &events).is_empty());
     }
 
     #[test]
