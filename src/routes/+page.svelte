@@ -1,7 +1,7 @@
 <script lang="ts">
   import '$lib/theme.css';
   import { invoke } from '@tauri-apps/api/core';
-  import { listen } from '@tauri-apps/api/event';
+  import { emit, listen } from '@tauri-apps/api/event';
   import { onMount, tick } from 'svelte';
   import {
     chooseDefaultLanguagePair,
@@ -104,6 +104,7 @@
   } from '$lib/captureState';
   import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
   import { completeCaptureStop } from '$lib/captureLifecycle';
+  import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
   import {
     maxRestartAttempts,
     remainingRestartAttempts,
@@ -170,6 +171,7 @@
   let isActionsLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+  let lastOverlayPayload = '';
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -209,6 +211,7 @@
         .filter((message) => message.role === 'self')
         .map((message) => message.text)
     : [];
+  $: publishOverlayCaptions();
 
   onMount(() => {
     transcriptFontScale = getTranscriptFontScale();
@@ -1185,9 +1188,33 @@
 
   async function toggleOverlay() {
     try {
-      await invoke<boolean>('toggle_overlay');
+      const visible = await invoke<boolean>('toggle_overlay');
+      if (visible) {
+        setTimeout(() => void publishOverlayCaptions(true), 100);
+      }
     } catch (error) {
       appError = String(error);
+    }
+  }
+
+  async function publishOverlayCaptions(force = false) {
+    const lines = buildOverlayCaptionLines([...messages, ...interimMessages], {
+      mainLanguage,
+      subLanguage,
+      maxLines: 2,
+      showTranslation: true
+    });
+    const payload = JSON.stringify(lines);
+    if (!force && payload === lastOverlayPayload) {
+      return;
+    }
+
+    lastOverlayPayload = payload;
+    try {
+      await emit('overlay-captions', { lines });
+    } catch {
+      // The overlay window is optional; failing to publish should not affect
+      // the live transcript path.
     }
   }
 
