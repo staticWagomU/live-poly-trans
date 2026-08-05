@@ -113,16 +113,21 @@
   :global(html),
   :global(body) {
     width: 100%;
-    min-height: 100%;
+    height: 100%;
     margin: 0;
     overflow: hidden;
     background: transparent;
   }
 
+  :global(*) {
+    box-sizing: border-box;
+  }
+
   .tray-panel {
-    width: 280px;
-    min-height: 100vh;
+    width: 100vw;
+    height: 100vh;
     padding: 8px;
+    overflow: hidden;
     color: var(--ink);
     background: var(--menu-bg);
     backdrop-filter: blur(34px) saturate(190%);

@@ -1264,7 +1264,7 @@
 
       <div class="set-group">
         <h3>エンジン</h3>
-        <div class="set-card">
+        <div class="set-card popover-card">
           <div class="set-row">
             <div>
               翻訳エンジン
@@ -1761,6 +1761,12 @@
     max-width: 640px;
   }
 
+  .set-card.popover-card {
+    position: relative;
+    z-index: 1;
+    overflow: visible;
+  }
+
   .set-row {
     display: flex;
     align-items: center;
@@ -2003,6 +2009,8 @@
     top: calc(100% + 6px);
     right: 0;
     width: 260px;
+    max-height: calc(100vh - 180px);
+    overflow-y: auto;
     border: 1px solid var(--hairline);
     border-radius: 10px;
     background: var(--canvas);

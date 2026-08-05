@@ -673,6 +673,8 @@
     position: absolute;
     top: calc(100% + 8px);
     right: 0;
+    max-height: calc(100vh - 96px);
+    overflow-y: auto;
     border-radius: 12px;
     background: var(--menu-bg);
     backdrop-filter: blur(24px) saturate(180%);
