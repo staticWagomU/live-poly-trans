@@ -17,7 +17,9 @@ export const SETTINGS_KEYS = {
   speechModel: 'lpt-speech-model',
   mimiScale: 'lpt-mimi-scale',
   mimiInvert: 'lpt-mimi-invert',
-  hfToken: 'lpt-hf-token'
+  hfToken: 'lpt-hf-token',
+  selfSpeakerName: 'lpt-self-speaker-name',
+  otherSpeakerName: 'lpt-other-speaker-name'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -132,4 +134,48 @@ export function setHfToken(value: string) {
   } else {
     remove(SETTINGS_KEYS.hfToken);
   }
+}
+
+/// Custom display names for the two live speakers. Empty string means "not
+/// customized" — the transcript keeps its original Speaker A/B labels.
+export function getSelfSpeakerName(): string {
+  return read(SETTINGS_KEYS.selfSpeakerName) ?? '';
+}
+
+export function setSelfSpeakerName(value: string) {
+  setSpeakerName(SETTINGS_KEYS.selfSpeakerName, value);
+}
+
+export function getOtherSpeakerName(): string {
+  return read(SETTINGS_KEYS.otherSpeakerName) ?? '';
+}
+
+export function setOtherSpeakerName(value: string) {
+  setSpeakerName(SETTINGS_KEYS.otherSpeakerName, value);
+}
+
+function setSpeakerName(key: SettingsKey, value: string) {
+  const trimmed = value.trim();
+  if (trimmed) {
+    write(key, trimmed);
+  } else {
+    remove(key);
+  }
+}
+
+/// Speakers-map view of the live name settings, keyed by the helper's fixed
+/// speakerIds ('self' for the mic, 'system-audio' for the other side) so
+/// resolveSpeakerName can be reused verbatim. Blank names are omitted; null
+/// when nothing is customized so callers can skip resolution entirely.
+export function getLiveSpeakerOverrides(): Record<string, { name: string }> | null {
+  const overrides: Record<string, { name: string }> = {};
+  const selfName = getSelfSpeakerName();
+  if (selfName !== '') {
+    overrides.self = { name: selfName };
+  }
+  const otherName = getOtherSpeakerName();
+  if (otherName !== '') {
+    overrides['system-audio'] = { name: otherName };
+  }
+  return Object.keys(overrides).length > 0 ? overrides : null;
 }

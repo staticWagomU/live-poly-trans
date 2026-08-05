@@ -26,7 +26,14 @@
     type SpeechModelSelection,
     type SpeechModelsPayload
   } from '$lib/speechModels';
-  import { getHfToken, setHfToken } from '$lib/settingsStore';
+  import {
+    getHfToken,
+    getOtherSpeakerName,
+    getSelfSpeakerName,
+    setHfToken,
+    setOtherSpeakerName,
+    setSelfSpeakerName
+  } from '$lib/settingsStore';
 
   type LanguageDetectionPayload = {
     installed: LanguageInfo[];
@@ -73,6 +80,8 @@
   let permissionError = $state<string | null>(null);
   let busyPermission = $state<PermissionKind | null>(null);
   let hfToken = $state('');
+  let selfSpeakerName = $state('');
+  let otherSpeakerName = $state('');
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
   let busyLanguage = $state<string | null>(null);
@@ -94,6 +103,8 @@
 
   onMount(() => {
     hfToken = getHfToken();
+    selfSpeakerName = getSelfSpeakerName();
+    otherSpeakerName = getOtherSpeakerName();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -181,6 +192,18 @@
   function saveHfToken(value: string) {
     hfToken = value;
     setHfToken(value);
+  }
+
+  // The setters trim and treat blank as "back to default", so the inputs
+  // re-read the stored value to show what will actually be displayed.
+  function saveSelfSpeakerName(value: string) {
+    setSelfSpeakerName(value);
+    selfSpeakerName = getSelfSpeakerName();
+  }
+
+  function saveOtherSpeakerName(value: string) {
+    setOtherSpeakerName(value);
+    otherSpeakerName = getOtherSpeakerName();
   }
 
   async function refreshModels() {
@@ -296,6 +319,44 @@
               aria-label="起動時に自動で開始"
               onclick={() => onAutoStartChange?.(!autoStartEnabled)}
             ></button>
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>ライブの話者名</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              自分(マイク)
+              <div class="d">
+                ライブ字幕とテキスト書き出しに表示される名前。空欄で既定の「Speaker A」に戻ります。
+              </div>
+            </div>
+            <input
+              class="name-input"
+              type="text"
+              placeholder="Speaker A"
+              aria-label="自分の話者名"
+              value={selfSpeakerName}
+              onchange={(event) => saveSelfSpeakerName(event.currentTarget.value)}
+            />
+          </div>
+          <div class="set-row">
+            <div>
+              相手(システム音声)
+              <div class="d">
+                Zoom などの相手側の名前。空欄で既定の「Speaker B」に戻ります。
+              </div>
+            </div>
+            <input
+              class="name-input"
+              type="text"
+              placeholder="Speaker B"
+              aria-label="相手の話者名"
+              value={otherSpeakerName}
+              onchange={(event) => saveOtherSpeakerName(event.currentTarget.value)}
+            />
           </div>
         </div>
       </div>
@@ -880,7 +941,8 @@
     }
   }
 
-  .token-input {
+  .token-input,
+  .name-input {
     width: min(220px, 40%);
     border: 1px solid var(--hairline);
     border-radius: 8px;

@@ -4,8 +4,11 @@ import {
   getHfToken,
   getHfTokenOrNull,
   getIncludeAudio,
+  getLiveSpeakerOverrides,
   getMimiInvert,
   getMimiScale,
+  getOtherSpeakerName,
+  getSelfSpeakerName,
   getSpeechModel,
   getTranscriptFontScale,
   SETTINGS_KEYS,
@@ -14,6 +17,8 @@ import {
   setIncludeAudio,
   setMimiInvert,
   setMimiScale,
+  setOtherSpeakerName,
+  setSelfSpeakerName,
   setSpeechModel,
   setTranscriptFontScale,
   subscribeSettings
@@ -120,6 +125,54 @@ describe('settings store', () => {
     expect(getHfTokenOrNull()).toBeNull();
   });
 
+  it('defaults live speaker names to empty strings when unset', () => {
+    expect(getSelfSpeakerName()).toBe('');
+    expect(getOtherSpeakerName()).toBe('');
+  });
+
+  it('trims live speaker names on save and removes them when blank', () => {
+    setSelfSpeakerName('  田中  ');
+    setOtherSpeakerName('  山田  ');
+    expect(localStorage.getItem(SETTINGS_KEYS.selfSpeakerName)).toBe('田中');
+    expect(localStorage.getItem(SETTINGS_KEYS.otherSpeakerName)).toBe('山田');
+    expect(getSelfSpeakerName()).toBe('田中');
+    expect(getOtherSpeakerName()).toBe('山田');
+
+    setSelfSpeakerName('   ');
+    setOtherSpeakerName('');
+    expect(localStorage.getItem(SETTINGS_KEYS.selfSpeakerName)).toBeNull();
+    expect(localStorage.getItem(SETTINGS_KEYS.otherSpeakerName)).toBeNull();
+  });
+
+  it('returns null live speaker overrides when both names are blank', () => {
+    expect(getLiveSpeakerOverrides()).toBeNull();
+  });
+
+  it('builds live speaker overrides keyed by the fixed live speaker ids', () => {
+    setSelfSpeakerName('田中');
+    setOtherSpeakerName('山田');
+    expect(getLiveSpeakerOverrides()).toEqual({
+      self: { name: '田中' },
+      'system-audio': { name: '山田' }
+    });
+  });
+
+  it('omits blank names from the live speaker overrides', () => {
+    setOtherSpeakerName('山田');
+    expect(getLiveSpeakerOverrides()).toEqual({ 'system-audio': { name: '山田' } });
+  });
+
+  it('notifies subscribers when a live speaker name changes', () => {
+    let notified = 0;
+    subscribeSettings(SETTINGS_KEYS.selfSpeakerName, () => {
+      notified += 1;
+    });
+
+    setSelfSpeakerName('田中');
+    setSelfSpeakerName('');
+    expect(notified).toBe(2);
+  });
+
   it('notifies subscribers of the written key only', () => {
     const autoStartEvents: boolean[] = [];
     const hfTokenEvents: number[] = [];
@@ -161,7 +214,11 @@ describe('settings store without localStorage', () => {
     expect(getSpeechModel()).toEqual({ engine: 'builtin' });
     expect(getHfToken()).toBe('');
     expect(getHfTokenOrNull()).toBeNull();
+    expect(getSelfSpeakerName()).toBe('');
+    expect(getOtherSpeakerName()).toBe('');
+    expect(getLiveSpeakerOverrides()).toBeNull();
     expect(() => setAutoStart(false)).not.toThrow();
     expect(() => setHfToken('token')).not.toThrow();
+    expect(() => setSelfSpeakerName('田中')).not.toThrow();
   });
 });

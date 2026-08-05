@@ -25,15 +25,19 @@
   import {
     getAutoStart,
     getIncludeAudio,
+    getLiveSpeakerOverrides,
     getSpeechModel,
     getTranscriptFontScale,
+    SETTINGS_KEYS,
     setAutoStart as storeAutoStart,
     setIncludeAudio as storeIncludeAudio,
     setSpeechModel as storeSpeechModel,
-    setTranscriptFontScale as storeTranscriptFontScale
+    setTranscriptFontScale as storeTranscriptFontScale,
+    subscribeSettings
   } from '$lib/settingsStore';
+  import { resolveSpeakerName } from '$lib/speakers';
   import { applyTranscriptMessage } from '$lib/transcriptInterim';
-  import { chatMessagesToTranscriptEntries } from '$lib/export/types';
+  import { chatMessagesToTranscriptEntries, type TranscriptEntry } from '$lib/export/types';
   import { toPlainText } from '$lib/export/plainText';
   import {
     buildTextExport,
@@ -160,6 +164,7 @@
   let pttReconciling = false;
   let permissionNotice: string | null = null;
   let settingsPane: 'general' | 'privacy' = 'general';
+  let liveSpeakerOverrides: Record<string, { name: string }> | null = null;
 
   $: isTranscribing = activeStreams.size > 0;
   $: isMicCapturing = activeStreams.has('mic');
@@ -187,6 +192,17 @@
     speechModel = getSpeechModel();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
+    liveSpeakerOverrides = getLiveSpeakerOverrides();
+    // A name edited in Settings shows up in the live captions right away;
+    // the incoming events and stored transcripts keep their original labels.
+    const unsubscribeSpeakerNames = [
+      SETTINGS_KEYS.selfSpeakerName,
+      SETTINGS_KEYS.otherSpeakerName
+    ].map((key) =>
+      subscribeSettings(key, () => {
+        liveSpeakerOverrides = getLiveSpeakerOverrides();
+      })
+    );
     const autoStart = autoStartEnabled;
 
     const cleanupRegistry = createAsyncCleanupRegistry((error) => {
@@ -238,6 +254,7 @@
 
     return () => {
       cleanupRegistry.dispose();
+      unsubscribeSpeakerNames.forEach((unsubscribe) => unsubscribe());
       if (summaryRefreshTimer) {
         clearTimeout(summaryRefreshTimer);
       }
@@ -922,8 +939,21 @@
     }, 5000);
   }
 
+  // Custom live speaker names live in settings, not the messages, so
+  // frontend-generated text (clipboard / save-as) resolves labels here.
+  // The ⌘S JSON path stays raw on purpose: it is the faithful record.
+  function resolveLiveEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
+    if (!liveSpeakerOverrides) {
+      return entries;
+    }
+    return entries.map((entry) => ({
+      ...entry,
+      speakerLabel: resolveSpeakerName(entry, liveSpeakerOverrides)
+    }));
+  }
+
   async function copyTranscript() {
-    const text = toPlainText(chatMessagesToTranscriptEntries(messages));
+    const text = toPlainText(resolveLiveEntries(chatMessagesToTranscriptEntries(messages)));
 
     try {
       await navigator.clipboard.writeText(text);
@@ -956,7 +986,7 @@
       return;
     }
 
-    const entries = chatMessagesToTranscriptEntries(messages);
+    const entries = resolveLiveEntries(chatMessagesToTranscriptEntries(messages));
     const now = new Date();
     try {
       const file = buildTextExport(format, entries, {
@@ -1088,6 +1118,7 @@
           {captureModeLabel}
           {speechModel}
           {confirmingClear}
+          speakerOverrides={liveSpeakerOverrides}
           onTogglePause={toggleTranscription}
           onCopy={copyTranscript}
           onSave={saveTranscript}

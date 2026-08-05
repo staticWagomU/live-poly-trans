@@ -1,6 +1,7 @@
 <script lang="ts">
   import { formatRecordingTimer } from '$lib/captureState';
   import { isScrolledToBottom } from '$lib/scroll';
+  import { resolveSpeakerName } from '$lib/speakers';
   import { displayTranscriptMessage } from '$lib/transcriptDisplay';
   import { isRecordingMarker, windowThreadItems, type ThreadItem } from '$lib/transcripts';
   import type { SpeechModelSelection } from '$lib/speechModels';
@@ -18,6 +19,9 @@
   export let captureModeLabel: string;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
+  // Custom names from settings for the two live speakers; resolution stays
+  // at display time so the underlying messages keep their original labels.
+  export let speakerOverrides: Record<string, { name: string }> | null = null;
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
@@ -138,7 +142,7 @@
             class:interim={!item.isFinal}
             class:in-rec={item.inRecording}
           >
-            <div class="who"><i></i>{item.speakerLabel}</div>
+            <div class="who"><i></i>{resolveSpeakerName(item, speakerOverrides)}</div>
             <p class="txt">{transcriptDisplay.primaryText}</p>
             {#if transcriptDisplay.secondaryText}
               <p class="sub">{transcriptDisplay.secondaryText}</p>

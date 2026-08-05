@@ -18,6 +18,7 @@
   export let captureModeLabel: string;
   export let speechModel: SpeechModelSelection;
   export let confirmingClear: boolean;
+  export let speakerOverrides: Record<string, { name: string }> | null = null;
   export let onTogglePause: () => void;
   export let onCopy: () => void;
   export let onSave: () => void;
@@ -65,6 +66,7 @@
     {captureModeLabel}
     {speechModel}
     {confirmingClear}
+    {speakerOverrides}
     {onTogglePause}
     {onCopy}
     {onSave}
