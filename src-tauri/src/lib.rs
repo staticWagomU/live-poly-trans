@@ -2277,6 +2277,7 @@ pub mod commands {
             .inner_size(980.0, 180.0)
             .min_inner_size(360.0, 96.0)
             .decorations(false)
+            .transparent(true)
             .background_color(tauri::utils::config::Color(0, 0, 0, 0))
             .always_on_top(true)
             .visible_on_all_workspaces(true)
