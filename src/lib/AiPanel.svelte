@@ -42,7 +42,7 @@
   {#if aiUnavailable}
     <h3>Meeting AI</h3>
     <div class="ai-card placeholder">
-      この Mac では Apple Intelligence を利用できないため、要約と質問は使えません。
+      この Mac では Apple Intelligence を利用できないため、要約・アクション・質問は使えません。
       macOS のアップデートと Apple Intelligence の有効化をご確認ください。
     </div>
   {:else}
