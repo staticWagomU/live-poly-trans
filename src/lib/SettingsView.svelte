@@ -38,22 +38,28 @@
     getMarkdownAutoExport,
     getExportDirectory,
     getFileNameTemplate,
+    getGlobalShortcutsEnabled,
     getOverlayFadeSeconds,
     getOverlayFontScale,
     getOverlayLineCount,
     getOverlayShowTranslation,
     getOtherSpeakerName,
+    getRecordingShortcut,
+    getOverlayShortcut,
     getSelfSpeakerName,
     setHfToken,
     setGlossaryRules,
     setMarkdownAutoExport,
     setExportDirectory,
     setFileNameTemplate,
+    setGlobalShortcutsEnabled,
     setOverlayFadeSeconds,
     setOverlayFontScale,
     setOverlayLineCount,
     setOverlayShowTranslation,
     setOtherSpeakerName,
+    setRecordingShortcut,
+    setOverlayShortcut,
     setSelfSpeakerName
   } from '$lib/settingsStore';
 
@@ -117,6 +123,9 @@
   let overlayShowTranslation = $state(true);
   let overlayFadeSeconds = $state(0);
   let overlayFontScale = $state(1);
+  let globalShortcutsEnabled = $state(true);
+  let recordingShortcut = $state('CommandOrControl+Alt+R');
+  let overlayShortcut = $state('CommandOrControl+Alt+L');
   let saveSettingsError = $state<string | null>(null);
   let payload = $state<LanguageDetectionPayload | null>(null);
   let query = $state('');
@@ -156,6 +165,9 @@
     overlayShowTranslation = getOverlayShowTranslation();
     overlayFadeSeconds = getOverlayFadeSeconds();
     overlayFontScale = getOverlayFontScale();
+    globalShortcutsEnabled = getGlobalShortcutsEnabled();
+    recordingShortcut = getRecordingShortcut();
+    overlayShortcut = getOverlayShortcut();
     void refresh();
     void refreshModels();
     void refreshPermissions();
@@ -382,6 +394,21 @@
   function saveOverlayFontScale(scale: number) {
     setOverlayFontScale(scale);
     overlayFontScale = getOverlayFontScale();
+  }
+
+  function saveGlobalShortcutsEnabled(enabled: boolean) {
+    setGlobalShortcutsEnabled(enabled);
+    globalShortcutsEnabled = getGlobalShortcutsEnabled();
+  }
+
+  function saveRecordingShortcut(shortcut: string) {
+    setRecordingShortcut(shortcut);
+    recordingShortcut = getRecordingShortcut();
+  }
+
+  function saveOverlayShortcut(shortcut: string) {
+    setOverlayShortcut(shortcut);
+    overlayShortcut = getOverlayShortcut();
   }
 
   async function refreshModels() {
@@ -639,6 +666,53 @@
               value={overlayFontScale}
               aria-label="字幕オーバーレイの文字サイズ"
               oninput={(event) => saveOverlayFontScale(Number(event.currentTarget.value))}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div class="set-group">
+        <h3>グローバルショートカット</h3>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              有効
+              <div class="d">他のアプリを操作中でも LivePolyTrans の操作を受け付けます。</div>
+            </div>
+            <button
+              type="button"
+              class="switch"
+              class:on={globalShortcutsEnabled}
+              role="switch"
+              aria-checked={globalShortcutsEnabled}
+              aria-label="グローバルショートカットを有効化"
+              onclick={() => saveGlobalShortcutsEnabled(!globalShortcutsEnabled)}
+            ></button>
+          </div>
+          <div class="set-row">
+            <div>
+              録音開始/停止
+              <div class="d">既定: CommandOrControl+Alt+R</div>
+            </div>
+            <input
+              class="shortcut-input"
+              type="text"
+              value={recordingShortcut}
+              aria-label="録音開始停止ショートカット"
+              onchange={(event) => saveRecordingShortcut(event.currentTarget.value)}
+            />
+          </div>
+          <div class="set-row">
+            <div>
+              オーバーレイ切替
+              <div class="d">既定: CommandOrControl+Alt+L</div>
+            </div>
+            <input
+              class="shortcut-input"
+              type="text"
+              value={overlayShortcut}
+              aria-label="オーバーレイ切替ショートカット"
+              onchange={(event) => saveOverlayShortcut(event.currentTarget.value)}
             />
           </div>
         </div>
@@ -1374,6 +1448,7 @@
   .token-input,
   .name-input,
   .template-input,
+  .shortcut-input,
   .compact-select,
   .number-input {
     width: min(220px, 40%);
@@ -1397,6 +1472,11 @@
 
   .template-input {
     width: min(240px, 42%);
+    font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  }
+
+  .shortcut-input {
+    width: min(260px, 46%);
     font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
   }
 

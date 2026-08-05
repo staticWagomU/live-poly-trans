@@ -27,6 +27,7 @@
     getAutoStart,
     getExportDirectory,
     getFileNameTemplate,
+    getGlobalShortcutsEnabled,
     getGlossaryRules,
     getIncludeAudio,
     getLiveSpeakerOverrides,
@@ -35,6 +36,8 @@
     getOverlayFontScale,
     getOverlayLineCount,
     getOverlayShowTranslation,
+    getOverlayShortcut,
+    getRecordingShortcut,
     getSpeechModel,
     getTranscriptFontScale,
     SETTINGS_KEYS,
@@ -180,6 +183,9 @@
   let overlayShowTranslation = true;
   let overlayFadeSeconds = 0;
   let overlayFontScale = 1;
+  let globalShortcutsEnabled = true;
+  let recordingShortcut = 'CommandOrControl+Alt+R';
+  let overlayShortcut = 'CommandOrControl+Alt+L';
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
   let speechModel: SpeechModelSelection = { engine: 'builtin' };
   let confirmingClear = false;
@@ -228,6 +234,9 @@
     overlayShowTranslation = getOverlayShowTranslation();
     overlayFadeSeconds = getOverlayFadeSeconds();
     overlayFontScale = getOverlayFontScale();
+    globalShortcutsEnabled = getGlobalShortcutsEnabled();
+    recordingShortcut = getRecordingShortcut();
+    overlayShortcut = getOverlayShortcut();
     autoStartEnabled = getAutoStart();
     includeAudioEnabled = getIncludeAudio();
     liveSpeakerOverrides = getLiveSpeakerOverrides();
@@ -259,6 +268,18 @@
       }),
       subscribeSettings(SETTINGS_KEYS.overlayFontScale, () => {
         overlayFontScale = getOverlayFontScale();
+      }),
+      subscribeSettings(SETTINGS_KEYS.globalShortcutsEnabled, () => {
+        globalShortcutsEnabled = getGlobalShortcutsEnabled();
+        void configureGlobalShortcuts();
+      }),
+      subscribeSettings(SETTINGS_KEYS.recordingShortcut, () => {
+        recordingShortcut = getRecordingShortcut();
+        void configureGlobalShortcuts();
+      }),
+      subscribeSettings(SETTINGS_KEYS.overlayShortcut, () => {
+        overlayShortcut = getOverlayShortcut();
+        void configureGlobalShortcuts();
       })
     ];
     const autoStart = autoStartEnabled;
@@ -319,6 +340,7 @@
           cleanupRegistry.dispose();
         }
       });
+    void configureGlobalShortcuts();
 
     return () => {
       cleanupRegistry.dispose();
@@ -378,6 +400,18 @@
         break;
       default:
         console.warn(`Unknown tray command: ${command}`);
+    }
+  }
+
+  async function configureGlobalShortcuts() {
+    try {
+      await invoke('configure_global_shortcuts', {
+        enabled: globalShortcutsEnabled,
+        recordingShortcut,
+        overlayShortcut
+      });
+    } catch (error) {
+      appError = `Global shortcut setup failed: ${String(error)}`;
     }
   }
 

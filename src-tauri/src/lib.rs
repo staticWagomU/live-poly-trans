@@ -17,7 +17,7 @@ use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, Position, Size, State, WebviewUrl,
     WebviewWindow, WebviewWindowBuilder,
 };
-use tauri_plugin_global_shortcut::{Code, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 pub mod capture_helper_protocol;
 pub mod whisper_engine_audio;
@@ -2175,6 +2175,17 @@ pub mod commands {
     }
 
     #[tauri::command]
+    pub async fn configure_global_shortcuts(
+        app: AppHandle,
+        enabled: bool,
+        recording_shortcut: String,
+        overlay_shortcut: String,
+    ) -> Result<(), String> {
+        configure_global_shortcuts_for_app(&app, enabled, &recording_shortcut, &overlay_shortcut)
+            .map_err(|error| error.to_string())
+    }
+
+    #[tauri::command]
     pub async fn ai_ask(
         state: State<'_, HelperSession>,
         question: String,
@@ -2981,6 +2992,7 @@ pub fn run() {
             commands::start_overlay_drag,
             commands::finish_overlay_adjustment,
             commands::overlay_adjustment_enabled,
+            commands::configure_global_shortcuts,
             commands::create_recording,
             commands::finalize_recording,
             commands::start_recording_session,
@@ -3112,6 +3124,40 @@ fn setup_global_shortcuts(app: &AppHandle) -> Result<(), Box<dyn std::error::Err
             })
             .build(),
     )?;
+    Ok(())
+}
+
+fn configure_global_shortcuts_for_app(
+    app: &AppHandle,
+    enabled: bool,
+    recording_shortcut: &str,
+    overlay_shortcut: &str,
+) -> Result<(), Box<dyn std::error::Error>> {
+    app.global_shortcut().unregister_all()?;
+    if !enabled {
+        return Ok(());
+    }
+
+    let recording = recording_shortcut.trim();
+    if !recording.is_empty() {
+        app.global_shortcut()
+            .on_shortcut(recording, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    let _ = app.emit("tray-command", TRAY_COMMAND_TOGGLE_RECORDING);
+                }
+            })?;
+    }
+
+    let overlay = overlay_shortcut.trim();
+    if !overlay.is_empty() {
+        app.global_shortcut()
+            .on_shortcut(overlay, |app, _shortcut, event| {
+                if event.state == ShortcutState::Pressed {
+                    let _ = app.emit("tray-command", TRAY_COMMAND_TOGGLE_OVERLAY);
+                }
+            })?;
+    }
+
     Ok(())
 }
 

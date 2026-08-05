@@ -5,6 +5,7 @@ import {
   getMarkdownAutoExport,
   getExportDirectory,
   getFileNameTemplate,
+  getGlobalShortcutsEnabled,
   getHfToken,
   getHfTokenOrNull,
   getIncludeAudio,
@@ -15,7 +16,9 @@ import {
   getOverlayFontScale,
   getOverlayLineCount,
   getOverlayShowTranslation,
+  getOverlayShortcut,
   getOtherSpeakerName,
+  getRecordingShortcut,
   getSelfSpeakerName,
   getSpeechModel,
   getTranscriptFontScale,
@@ -25,6 +28,7 @@ import {
   setMarkdownAutoExport,
   setExportDirectory,
   setFileNameTemplate,
+  setGlobalShortcutsEnabled,
   setHfToken,
   setIncludeAudio,
   setMimiInvert,
@@ -33,7 +37,9 @@ import {
   setOverlayFontScale,
   setOverlayLineCount,
   setOverlayShowTranslation,
+  setOverlayShortcut,
   setOtherSpeakerName,
+  setRecordingShortcut,
   setSelfSpeakerName,
   setSpeechModel,
   setTranscriptFontScale,
@@ -138,6 +144,25 @@ describe('settings store', () => {
     localStorage.setItem(SETTINGS_KEYS.overlayFadeSeconds, 'junk');
     expect(getOverlayLineCount()).toBe(3);
     expect(getOverlayFadeSeconds()).toBe(DEFAULT_OVERLAY_SETTINGS.fadeSeconds);
+  });
+
+  it('round-trips global shortcut preferences', () => {
+    expect(getGlobalShortcutsEnabled()).toBe(true);
+    expect(getRecordingShortcut()).toBe('CommandOrControl+Alt+R');
+    expect(getOverlayShortcut()).toBe('CommandOrControl+Alt+L');
+
+    setGlobalShortcutsEnabled(false);
+    setRecordingShortcut('  Alt+Shift+R  ');
+    setOverlayShortcut('Alt+Shift+L');
+
+    expect(getGlobalShortcutsEnabled()).toBe(false);
+    expect(getRecordingShortcut()).toBe('Alt+Shift+R');
+    expect(getOverlayShortcut()).toBe('Alt+Shift+L');
+
+    setRecordingShortcut(' ');
+    setOverlayShortcut('');
+    expect(getRecordingShortcut()).toBe('CommandOrControl+Alt+R');
+    expect(getOverlayShortcut()).toBe('CommandOrControl+Alt+L');
   });
 
   it('round-trips the speech model selection', () => {

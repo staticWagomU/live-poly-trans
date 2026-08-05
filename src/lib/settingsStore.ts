@@ -38,7 +38,10 @@ export const SETTINGS_KEYS = {
   overlayLineCount: 'lpt-overlay-line-count',
   overlayShowTranslation: 'lpt-overlay-show-translation',
   overlayFadeSeconds: 'lpt-overlay-fade-seconds',
-  overlayFontScale: 'lpt-overlay-font-scale'
+  overlayFontScale: 'lpt-overlay-font-scale',
+  globalShortcutsEnabled: 'lpt-global-shortcuts-enabled',
+  recordingShortcut: 'lpt-recording-shortcut',
+  overlayShortcut: 'lpt-overlay-shortcut'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -177,6 +180,33 @@ export function getOverlayFontScale(): number {
 
 export function setOverlayFontScale(scale: number) {
   write(SETTINGS_KEYS.overlayFontScale, String(scale));
+}
+
+export const DEFAULT_RECORDING_SHORTCUT = 'CommandOrControl+Alt+R';
+export const DEFAULT_OVERLAY_SHORTCUT = 'CommandOrControl+Alt+L';
+
+export function getGlobalShortcutsEnabled(): boolean {
+  return read(SETTINGS_KEYS.globalShortcutsEnabled) !== '0';
+}
+
+export function setGlobalShortcutsEnabled(enabled: boolean) {
+  write(SETTINGS_KEYS.globalShortcutsEnabled, enabled ? '1' : '0');
+}
+
+export function getRecordingShortcut(): string {
+  return read(SETTINGS_KEYS.recordingShortcut) ?? DEFAULT_RECORDING_SHORTCUT;
+}
+
+export function setRecordingShortcut(shortcut: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.recordingShortcut, shortcut);
+}
+
+export function getOverlayShortcut(): string {
+  return read(SETTINGS_KEYS.overlayShortcut) ?? DEFAULT_OVERLAY_SHORTCUT;
+}
+
+export function setOverlayShortcut(shortcut: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.overlayShortcut, shortcut);
 }
 
 export function getHfToken(): string {
