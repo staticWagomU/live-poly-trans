@@ -44,8 +44,13 @@ impl TranslationRequest {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum TranslationError {
+    MissingCredential(String),
+    Network(String),
     InvalidResponse(String),
 }
+
+pub const DEEPL_API_ENDPOINT: &str = "https://api.deepl.com/v2/translate";
+pub const DEEPL_FREE_API_ENDPOINT: &str = "https://api-free.deepl.com/v2/translate";
 
 pub fn deepl_language_code(language: &str) -> String {
     let upper = language.replace('_', "-").to_ascii_uppercase();
@@ -69,6 +74,22 @@ pub fn deepl_form_fields(request: &TranslationRequest) -> Vec<(&'static str, Str
     ]
 }
 
+pub fn deepl_json_request(request: &TranslationRequest) -> Value {
+    json!({
+        "text": [request.text.clone()],
+        "source_lang": deepl_language_code(&request.source_language),
+        "target_lang": deepl_language_code(&request.target_language),
+    })
+}
+
+pub fn deepl_endpoint_for_key(api_key: &str) -> &'static str {
+    if api_key.trim().ends_with(":fx") {
+        DEEPL_FREE_API_ENDPOINT
+    } else {
+        DEEPL_API_ENDPOINT
+    }
+}
+
 pub fn parse_deepl_response(body: &str) -> Result<String, TranslationError> {
     let value: Value = serde_json::from_str(body)
         .map_err(|error| TranslationError::InvalidResponse(error.to_string()))?;
@@ -80,6 +101,55 @@ pub fn parse_deepl_response(body: &str) -> Result<String, TranslationError> {
         .and_then(Value::as_str)
         .map(str::to_string)
         .ok_or_else(|| TranslationError::InvalidResponse("missing translations[0].text".into()))
+}
+
+#[derive(Debug, Clone)]
+pub struct DeepLHttpBackend {
+    endpoint: String,
+    api_key: String,
+}
+
+impl DeepLHttpBackend {
+    pub fn new(api_key: impl Into<String>) -> Self {
+        let api_key = api_key.into();
+        Self {
+            endpoint: deepl_endpoint_for_key(&api_key).to_string(),
+            api_key,
+        }
+    }
+
+    pub fn with_endpoint(api_key: impl Into<String>, endpoint: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            api_key: api_key.into(),
+        }
+    }
+}
+
+impl TranslationBackend for DeepLHttpBackend {
+    fn kind(&self) -> TranslationBackendKind {
+        TranslationBackendKind::DeepL
+    }
+
+    fn translate(&self, request: &TranslationRequest) -> Result<Option<String>, TranslationError> {
+        let api_key = self.api_key.trim();
+        if api_key.is_empty() {
+            return Err(TranslationError::MissingCredential(
+                "DeepL API key is not configured".to_string(),
+            ));
+        }
+
+        let auth = format!("DeepL-Auth-Key {api_key}");
+        let response = ureq::post(&self.endpoint)
+            .set("Authorization", &auth)
+            .set("Content-Type", "application/json")
+            .send_json(deepl_json_request(request))
+            .map_err(http_error)?;
+        let body = response
+            .into_string()
+            .map_err(|error| TranslationError::Network(error.to_string()))?;
+        parse_deepl_response(&body).map(Some)
+    }
 }
 
 pub fn ollama_chat_request(model: &str, request: &TranslationRequest) -> Value {
@@ -102,6 +172,10 @@ pub fn ollama_chat_request(model: &str, request: &TranslationRequest) -> Value {
     })
 }
 
+pub fn ollama_chat_url(endpoint: &str) -> String {
+    format!("{}/api/chat", endpoint.trim_end_matches('/'))
+}
+
 pub fn parse_ollama_chat_response(body: &str) -> Result<String, TranslationError> {
     let value: Value = serde_json::from_str(body)
         .map_err(|error| TranslationError::InvalidResponse(error.to_string()))?;
@@ -114,9 +188,118 @@ pub fn parse_ollama_chat_response(body: &str) -> Result<String, TranslationError
         .ok_or_else(|| TranslationError::InvalidResponse("missing message.content".into()))
 }
 
+#[derive(Debug, Clone)]
+pub struct OllamaHttpBackend {
+    endpoint: String,
+    model: String,
+}
+
+impl OllamaHttpBackend {
+    pub fn new(endpoint: impl Into<String>, model: impl Into<String>) -> Self {
+        Self {
+            endpoint: endpoint.into(),
+            model: model.into(),
+        }
+    }
+}
+
+impl TranslationBackend for OllamaHttpBackend {
+    fn kind(&self) -> TranslationBackendKind {
+        TranslationBackendKind::Ollama
+    }
+
+    fn translate(&self, request: &TranslationRequest) -> Result<Option<String>, TranslationError> {
+        let model = self.model.trim();
+        if model.is_empty() {
+            return Err(TranslationError::MissingCredential(
+                "Ollama model is not configured".to_string(),
+            ));
+        }
+
+        let response = ureq::post(&ollama_chat_url(&self.endpoint))
+            .set("Content-Type", "application/json")
+            .send_json(ollama_chat_request(model, request))
+            .map_err(http_error)?;
+        let body = response
+            .into_string()
+            .map_err(|error| TranslationError::Network(error.to_string()))?;
+        parse_ollama_chat_response(&body).map(Some)
+    }
+}
+
+fn http_error(error: ureq::Error) -> TranslationError {
+    match error {
+        ureq::Error::Status(code, response) => {
+            let body = response.into_string().unwrap_or_default();
+            TranslationError::Network(format!("HTTP {code}: {body}"))
+        }
+        ureq::Error::Transport(error) => TranslationError::Network(error.to_string()),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{
+        io::{Read, Write},
+        net::TcpListener,
+        thread,
+        time::Duration,
+    };
+
+    fn serve_json_once(body: &'static str) -> (String, thread::JoinHandle<String>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let handle = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+
+            let mut request = Vec::new();
+            let mut buffer = [0_u8; 1024];
+            loop {
+                match stream.read(&mut buffer) {
+                    Ok(0) => break,
+                    Ok(count) => {
+                        request.extend_from_slice(&buffer[..count]);
+                        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                            let text = String::from_utf8_lossy(&request);
+                            if let Some(length) = content_length(&text) {
+                                let header_end = text.find("\r\n\r\n").unwrap() + 4;
+                                if request.len() >= header_end + length {
+                                    break;
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            let response = format!(
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream.write_all(response.as_bytes()).unwrap();
+            String::from_utf8_lossy(&request).to_string()
+        });
+        (url, handle)
+    }
+
+    fn content_length(request: &str) -> Option<usize> {
+        request.lines().find_map(|line| {
+            let (name, value) = line.split_once(':')?;
+            if name.eq_ignore_ascii_case("content-length") {
+                value.trim().parse().ok()
+            } else {
+                None
+            }
+        })
+    }
 
     #[test]
     fn translation_request_rejects_blank_or_same_language_input() {
@@ -144,6 +327,22 @@ mod tests {
                 ("target_lang", "JA".to_string()),
             ]
         );
+    }
+
+    #[test]
+    fn builds_deepl_json_request_and_endpoint() {
+        let request = TranslationRequest::new("hello", "en-US", "ja-JP").unwrap();
+
+        assert_eq!(
+            deepl_json_request(&request),
+            json!({
+                "text": ["hello"],
+                "source_lang": "EN-US",
+                "target_lang": "JA",
+            })
+        );
+        assert_eq!(deepl_endpoint_for_key("secret"), DEEPL_API_ENDPOINT);
+        assert_eq!(deepl_endpoint_for_key("secret:fx"), DEEPL_FREE_API_ENDPOINT);
     }
 
     #[test]
@@ -185,5 +384,41 @@ mod tests {
             "こんにちは"
         );
         assert!(parse_ollama_chat_response(r#"{"message":{"content":" "}}"#).is_err());
+    }
+
+    #[test]
+    fn deepl_backend_posts_translation_request() {
+        let (base_url, handle) = serve_json_once(r#"{"translations":[{"text":"こんにちは"}]}"#);
+        let backend =
+            DeepLHttpBackend::with_endpoint("secret:fx", format!("{base_url}/v2/translate"));
+        let request = TranslationRequest::new("hello", "en-US", "ja-JP").unwrap();
+
+        assert_eq!(
+            backend.translate(&request).unwrap(),
+            Some("こんにちは".to_string())
+        );
+        let raw_request = handle.join().unwrap();
+        assert!(raw_request.starts_with("POST /v2/translate HTTP/1.1"));
+        assert!(raw_request.contains("Authorization: DeepL-Auth-Key secret:fx"));
+        assert!(raw_request.contains(r#""text":["hello"]"#));
+        assert!(raw_request.contains(r#""source_lang":"EN-US""#));
+        assert!(raw_request.contains(r#""target_lang":"JA""#));
+    }
+
+    #[test]
+    fn ollama_backend_posts_chat_request() {
+        let (base_url, handle) = serve_json_once(r#"{"message":{"content":" こんにちは "}}"#);
+        let backend = OllamaHttpBackend::new(base_url, "llama3.1");
+        let request = TranslationRequest::new("hello", "en-US", "ja-JP").unwrap();
+
+        assert_eq!(
+            backend.translate(&request).unwrap(),
+            Some("こんにちは".to_string())
+        );
+        let raw_request = handle.join().unwrap();
+        assert!(raw_request.starts_with("POST /api/chat HTTP/1.1"));
+        assert!(raw_request.contains(r#""model":"llama3.1""#));
+        assert!(raw_request.contains(r#""stream":false"#));
+        assert!(raw_request.contains("Translate from en-US to ja-JP"));
     }
 }
