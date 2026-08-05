@@ -1035,6 +1035,57 @@ pub fn search_transcript_events(
     hits
 }
 
+pub fn read_recording_transcript_events(dir: &Path) -> Vec<Value> {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return Vec::new();
+    };
+
+    let mut events = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
+            continue;
+        }
+
+        let Ok(contents) = fs::read_to_string(&path) else {
+            continue;
+        };
+
+        for line in contents.lines() {
+            if let Ok(value) = serde_json::from_str::<Value>(line) {
+                events.push(value);
+            }
+        }
+    }
+
+    events
+}
+
+pub fn search_recordings_in_root(
+    root: &Path,
+    query: &str,
+) -> Result<Vec<RecordingSearchHit>, String> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Ok(Vec::new());
+    };
+
+    let mut hits = Vec::new();
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+
+        let Some(meta) = read_recording_meta(&dir) else {
+            continue;
+        };
+        let events = read_recording_transcript_events(&dir);
+        hits.extend(search_transcript_events(&meta.id, query, &events));
+    }
+
+    Ok(hits)
+}
+
 fn recordings_dir(app: &AppHandle) -> Result<PathBuf, String> {
     Ok(app
         .path()
@@ -2457,29 +2508,7 @@ pub mod commands {
 
     fn read_recording_transcript_blocking(app: &AppHandle, id: &str) -> Result<Vec<Value>, String> {
         let dir = recording_dir_for(app, id)?;
-        let Ok(entries) = fs::read_dir(&dir) else {
-            return Ok(Vec::new());
-        };
-
-        let mut events = Vec::new();
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|ext| ext.to_str()) != Some("jsonl") {
-                continue;
-            }
-
-            let Ok(contents) = fs::read_to_string(&path) else {
-                continue;
-            };
-
-            for line in contents.lines() {
-                if let Ok(value) = serde_json::from_str::<Value>(line) {
-                    events.push(value);
-                }
-            }
-        }
-
-        Ok(events)
+        Ok(read_recording_transcript_events(&dir))
     }
 
     #[tauri::command]
@@ -2488,13 +2517,8 @@ pub mod commands {
         query: String,
     ) -> Result<Vec<RecordingSearchHit>, String> {
         tauri::async_runtime::spawn_blocking(move || {
-            let recordings = list_recordings_blocking(&app)?;
-            let mut hits = Vec::new();
-            for recording in recordings {
-                let events = read_recording_transcript_blocking(&app, &recording.id)?;
-                hits.extend(search_transcript_events(&recording.id, &query, &events));
-            }
-            Ok(hits)
+            let root = recordings_dir(&app)?;
+            search_recordings_in_root(&root, &query)
         })
         .await
         .map_err(|error| error.to_string())?
@@ -3513,6 +3537,67 @@ mod tests {
 
         assert!(search_transcript_events("rec-1", " ", &events).is_empty());
         assert!(search_transcript_events("rec-1", "claude", &events).is_empty());
+    }
+
+    #[test]
+    fn search_recordings_in_root_scans_100_recordings_with_interactive_latency() {
+        let root =
+            std::env::temp_dir().join(format!("lpt-search-100-recordings-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+
+        for recording_index in 0..100 {
+            let id = format!("rec-{recording_index:03}");
+            let dir = root.join(&id);
+            fs::create_dir_all(&dir).unwrap();
+            write_recording_meta(
+                &dir,
+                &RecordingMeta {
+                    id: id.clone(),
+                    started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                    ended_at: Some("2026-08-05T10:30:00+09:00".to_string()),
+                    source: None,
+                    trims: None,
+                    speakers: None,
+                },
+            )
+            .unwrap();
+
+            let mut lines = String::new();
+            for entry_index in 0..80 {
+                let text = if recording_index == 42 && entry_index == 17 {
+                    "The team discussed Claude Code rollout.".to_string()
+                } else {
+                    format!("Routine meeting line {recording_index}-{entry_index}")
+                };
+                lines.push_str(
+                    &serde_json::json!({
+                        "type": "transcript",
+                        "isFinal": true,
+                        "segmentId": format!("{}-500", entry_index * 1000),
+                        "text": text
+                    })
+                    .to_string(),
+                );
+                lines.push('\n');
+            }
+            fs::write(dir.join("transcript.jsonl"), lines).unwrap();
+        }
+
+        let started = Instant::now();
+        let hits = search_recordings_in_root(&root, "claude").unwrap();
+        let elapsed = started.elapsed();
+        let _ = fs::remove_dir_all(&root);
+
+        eprintln!(
+            "search_recordings_100_recordings_elapsed_ms={}",
+            elapsed.as_millis()
+        );
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].recording_id, "rec-042");
+        assert!(
+            elapsed < Duration::from_millis(250),
+            "100-recording search took {elapsed:?}"
+        );
     }
 
     #[test]
