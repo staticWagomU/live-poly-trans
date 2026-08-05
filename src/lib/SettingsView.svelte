@@ -139,6 +139,7 @@
   } = $props();
 
   type WhisperxRunner = { program: string; prefixArgs?: string[] };
+  const translationEngines = ['apple', 'deepl', 'ollama'] as const;
 
   // Seed only: which pane opens is the caller's business once (the privacy
   // banner deep-links here), and the view remounts each time Settings opens.
@@ -181,6 +182,7 @@
   let deeplApiKeyInput = $state('');
   let deeplApiKeyConfigured = $state(false);
   let deeplKeyBusy = $state<'save' | 'test' | null>(null);
+  let translationEngineMenuOpen = $state(false);
   let translationSettingsError = $state<string | null>(null);
   let translationSettingsNotice = $state<string | null>(null);
   let saveSettingsError = $state<string | null>(null);
@@ -521,6 +523,7 @@
   function saveTranslationEngine(engine: TranslationEngine) {
     setTranslationEngine(engine);
     translationEngine = getTranslationEngine();
+    translationEngineMenuOpen = false;
   }
 
   function saveTranslationFallbackEnabled(enabled: boolean) {
@@ -1269,17 +1272,41 @@
                 {translationEngineDescription(translationEngine)}
               </div>
             </div>
-            <select
-              class="compact-select"
-              aria-label="翻訳エンジン"
-              value={translationEngine}
-              onchange={(event) =>
-                saveTranslationEngine(event.currentTarget.value as TranslationEngine)}
-            >
-              <option value="apple">{translationEngineLabel('apple')}</option>
-              <option value="deepl">{translationEngineLabel('deepl')}</option>
-              <option value="ollama">{translationEngineLabel('ollama')}</option>
-            </select>
+            <div class="translation-engine-picker">
+              <button
+                type="button"
+                class="popup-button"
+                aria-haspopup="menu"
+                aria-expanded={translationEngineMenuOpen}
+                onclick={() => (translationEngineMenuOpen = !translationEngineMenuOpen)}
+              >
+                <span>{translationEngineLabel(translationEngine)}</span>
+                <span aria-hidden="true">⌄</span>
+              </button>
+              {#if translationEngineMenuOpen}
+                <div class="engine-menu" role="menu" aria-label="翻訳エンジン">
+                  {#each translationEngines as typedEngine (typedEngine)}
+                    <button
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={translationEngine === typedEngine}
+                      class:active={translationEngine === typedEngine}
+                      onclick={() => saveTranslationEngine(typedEngine)}
+                    >
+                      <span class="engine-check" aria-hidden="true">
+                        {translationEngine === typedEngine ? '✓' : ''}
+                      </span>
+                      <span>
+                        <span class="engine-name">{translationEngineLabel(typedEngine)}</span>
+                        <span class="engine-detail">
+                          {translationEngineDescription(typedEngine)}
+                        </span>
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
           <div class="set-row">
             <div>
@@ -1949,6 +1976,79 @@
   .model-input {
     width: min(180px, 36%);
     font-family: ui-monospace, 'SF Mono', 'Menlo', monospace;
+  }
+
+  .translation-engine-picker {
+    position: relative;
+    flex: 0 0 auto;
+  }
+
+  .popup-button {
+    min-width: 156px;
+    border: 1px solid var(--hairline);
+    border-radius: 8px;
+    background: var(--canvas);
+    color: var(--ink);
+    padding: 6px 9px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    font-size: 12.5px;
+  }
+
+  .engine-menu {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + 6px);
+    right: 0;
+    width: 260px;
+    border: 1px solid var(--hairline);
+    border-radius: 10px;
+    background: var(--canvas);
+    box-shadow: 0 14px 36px rgba(0, 0, 0, 0.18);
+    padding: 5px;
+  }
+
+  .engine-menu button {
+    width: 100%;
+    min-height: 48px;
+    border-radius: 7px;
+    padding: 7px 8px;
+    display: grid;
+    grid-template-columns: 18px minmax(0, 1fr);
+    gap: 8px;
+    text-align: left;
+  }
+
+  .engine-menu button:hover,
+  .engine-menu button.active {
+    background: var(--hover-wash);
+  }
+
+  .engine-check {
+    color: var(--blue);
+    font-size: 13px;
+    line-height: 1.2;
+  }
+
+  .engine-name,
+  .engine-detail {
+    display: block;
+    min-width: 0;
+  }
+
+  .engine-name {
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .engine-detail {
+    color: var(--muted);
+    font-size: 11.5px;
+    line-height: 1.35;
+    white-space: normal;
   }
 
   .token-input:disabled {
