@@ -13,6 +13,12 @@ export type ActionItemsParseResult =
   | { ok: true; items: ActionItem[] }
   | { ok: false; error: string };
 
+export type ActionItemSourceWindow = {
+  id: string;
+  startMessageIndex: number;
+  endMessageIndex?: number;
+};
+
 export function actionItemKey(item: Pick<ActionItem, 'text' | 'assignee'>): string {
   return `${item.text.trim().toLowerCase()}|${item.assignee?.trim().toLowerCase() ?? ''}`;
 }
@@ -103,4 +109,21 @@ export function actionItemsForMarkdown(items: ActionItem[]): string[] {
     const suffix = metadata.length === 0 ? '' : ` (${metadata.join(', ')})`;
     return `[${item.done ? 'x' : ' '}] ${item.text}${suffix}`;
   });
+}
+
+export function actionItemsForRecordingWindow(
+  items: ActionItem[],
+  window: ActionItemSourceWindow
+): ActionItem[] {
+  return items
+    .filter(
+      (item) =>
+        item.sourceIndex !== null &&
+        item.sourceIndex >= window.startMessageIndex &&
+        (window.endMessageIndex === undefined || item.sourceIndex < window.endMessageIndex)
+    )
+    .map((item) => ({
+      ...item,
+      sourceIndex: item.sourceIndex === null ? null : item.sourceIndex - window.startMessageIndex
+    }));
 }

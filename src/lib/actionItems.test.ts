@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   actionItemsForMarkdown,
+  actionItemsForRecordingWindow,
   mergeActionItems,
   parseActionItemsJson,
   rebaseActionSourceIndexes,
@@ -99,5 +100,24 @@ describe('actionItemsForMarkdown', () => {
     expect(actionItemsForMarkdown([item({ assignee: null, timestampMs: null })])).toEqual([
       '[ ] 告知文を書く'
     ]);
+  });
+});
+
+describe('actionItemsForRecordingWindow', () => {
+  it('keeps actions within a recording window and rebases source indexes', () => {
+    const actions = [
+      item({ id: 'before', sourceIndex: 1 }),
+      item({ id: 'inside', text: 'QA を依頼する', sourceIndex: 4 }),
+      item({ id: 'after', sourceIndex: 8 }),
+      item({ id: 'missing', sourceIndex: null })
+    ];
+
+    expect(
+      actionItemsForRecordingWindow(actions, {
+        id: 'rec-1',
+        startMessageIndex: 3,
+        endMessageIndex: 8
+      })
+    ).toEqual([item({ id: 'inside', text: 'QA を依頼する', sourceIndex: 1 })]);
   });
 });

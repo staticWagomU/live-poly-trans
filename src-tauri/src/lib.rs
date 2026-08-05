@@ -857,6 +857,28 @@ pub struct SpeakerMeta {
     pub color: Option<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RecordingActionItem {
+    pub id: String,
+    pub text: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assignee: Option<String>,
+    #[serde(
+        rename = "timestampMs",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub timestamp_ms: Option<i64>,
+    #[serde(
+        rename = "sourceIndex",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub source_index: Option<i64>,
+    #[serde(default)]
+    pub done: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RecordingMeta {
     pub id: String,
@@ -874,6 +896,11 @@ pub struct RecordingMeta {
     /// Custom speaker names/colors by speaker id.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub speakers: Option<HashMap<String, SpeakerMeta>>,
+    /// AI-extracted action items for this recording. Stored in meta.json so
+    /// checkbox state can survive app restarts without rewriting transcript
+    /// jsonl.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub actions: Option<Vec<RecordingActionItem>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -906,6 +933,7 @@ pub struct RecordingSummary {
     pub source: Option<String>,
     pub trims: Option<HashMap<String, TrimRange>>,
     pub speakers: Option<HashMap<String, SpeakerMeta>>,
+    pub actions: Option<Vec<RecordingActionItem>>,
     pub files: Vec<RecordingFileInfo>,
 }
 
@@ -1151,6 +1179,22 @@ pub fn update_recording_speakers_in_dir(
         None
     } else {
         Some(speakers)
+    };
+    write_recording_meta(dir, &meta)
+}
+
+/// Replaces AI action items in meta.json wholesale. An empty list removes the
+/// key so recordings with no actionable follow-up keep compact metadata.
+pub fn update_recording_actions_in_dir(
+    dir: &Path,
+    actions: Vec<RecordingActionItem>,
+) -> Result<(), String> {
+    let mut meta = read_recording_meta(dir)
+        .ok_or_else(|| format!("recording meta not found in {}", dir.display()))?;
+    meta.actions = if actions.is_empty() {
+        None
+    } else {
+        Some(actions)
     };
     write_recording_meta(dir, &meta)
 }
@@ -1965,6 +2009,7 @@ pub mod commands {
                 source: None,
                 trims: None,
                 speakers: None,
+                actions: None,
             },
         )?;
 
@@ -2383,6 +2428,7 @@ pub mod commands {
                     source: Some("external".to_string()),
                     trims: None,
                     speakers: None,
+                    actions: None,
                 },
             )?;
 
@@ -2483,6 +2529,22 @@ pub mod commands {
         .map_err(|error| error.to_string())?
     }
 
+    /// Saves AI action items into meta.json. The frontend owns extraction and
+    /// checkbox state; Rust only persists the current snapshot.
+    #[tauri::command]
+    pub async fn update_recording_actions(
+        app: AppHandle,
+        id: String,
+        actions: Vec<RecordingActionItem>,
+    ) -> Result<(), String> {
+        tauri::async_runtime::spawn_blocking(move || {
+            let dir = recording_dir_for(&app, &id)?;
+            update_recording_actions_in_dir(&dir, actions)
+        })
+        .await
+        .map_err(|error| error.to_string())?
+    }
+
     #[tauri::command]
     pub async fn list_recordings(app: AppHandle) -> Result<Vec<RecordingSummary>, String> {
         tauri::async_runtime::spawn_blocking(move || list_recordings_blocking(&app))
@@ -2534,6 +2596,7 @@ pub mod commands {
                 source: meta.source,
                 trims: meta.trims,
                 speakers: meta.speakers,
+                actions: meta.actions,
                 files,
             });
         }
@@ -2720,6 +2783,7 @@ pub fn run() {
             commands::import_audio_file,
             commands::trim_recording,
             commands::update_recording_speakers,
+            commands::update_recording_actions,
             commands::whisperx_status,
             commands::ensure_uv,
             commands::permission_status,
@@ -3304,6 +3368,7 @@ mod tests {
                 source: None,
                 trims: None,
                 speakers: None,
+                actions: None,
             },
         )
         .unwrap();
@@ -3316,6 +3381,7 @@ mod tests {
                 source: None,
                 trims: None,
                 speakers: None,
+                actions: None,
             },
         )
         .unwrap();
@@ -3366,6 +3432,7 @@ mod tests {
                 source: None,
                 trims: None,
                 speakers: Some(speakers),
+                actions: None,
             },
         )
         .unwrap();
@@ -3385,10 +3452,12 @@ mod tests {
         let legacy = r#"{"id":"rec-1","startedAt":"2026-08-05T10:00:00+09:00"}"#;
         let meta: RecordingMeta = serde_json::from_str(legacy).unwrap();
         assert!(meta.speakers.is_none());
+        assert!(meta.actions.is_none());
 
-        // A meta without speakers must not gain a `speakers` key on rewrite.
+        // A meta without optional keys must not gain them on rewrite.
         let json = serde_json::to_string(&meta).unwrap();
         assert!(!json.contains("speakers"));
+        assert!(!json.contains("actions"));
     }
 
     #[test]
@@ -3404,6 +3473,7 @@ mod tests {
                 source: None,
                 trims: None,
                 speakers: None,
+                actions: None,
             },
         )
         .unwrap();
@@ -3450,6 +3520,7 @@ mod tests {
                 source: None,
                 trims: None,
                 speakers: Some(speakers),
+                actions: None,
             },
         )
         .unwrap();
@@ -3473,6 +3544,81 @@ mod tests {
 
         let result = update_recording_speakers_in_dir(&root, HashMap::new());
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_recording_actions_in_dir_saves_items_into_meta() {
+        let root = std::env::temp_dir().join(format!("lpt-update-actions-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        write_recording_meta(
+            &root,
+            &RecordingMeta {
+                id: "rec-1".to_string(),
+                started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                ended_at: Some("2026-08-05T10:30:00+09:00".to_string()),
+                source: None,
+                trims: None,
+                speakers: None,
+                actions: None,
+            },
+        )
+        .unwrap();
+
+        let result = update_recording_actions_in_dir(
+            &root,
+            vec![RecordingActionItem {
+                id: "a-1".to_string(),
+                text: "告知文を書く".to_string(),
+                assignee: Some("自分".to_string()),
+                timestamp_ms: Some(63_000),
+                source_index: Some(2),
+                done: true,
+            }],
+        );
+        let meta = read_recording_meta(&root).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(result, Ok(()));
+        assert_eq!(meta.ended_at.as_deref(), Some("2026-08-05T10:30:00+09:00"));
+        let actions = meta.actions.unwrap();
+        assert_eq!(actions[0].text, "告知文を書く");
+        assert!(actions[0].done);
+    }
+
+    #[test]
+    fn update_recording_actions_in_dir_clears_meta_with_an_empty_list() {
+        let root =
+            std::env::temp_dir().join(format!("lpt-update-actions-clear-{}", std::process::id()));
+        fs::create_dir_all(&root).unwrap();
+        write_recording_meta(
+            &root,
+            &RecordingMeta {
+                id: "rec-1".to_string(),
+                started_at: "2026-08-05T10:00:00+09:00".to_string(),
+                ended_at: None,
+                source: None,
+                trims: None,
+                speakers: None,
+                actions: Some(vec![RecordingActionItem {
+                    id: "a-1".to_string(),
+                    text: "告知文を書く".to_string(),
+                    assignee: None,
+                    timestamp_ms: None,
+                    source_index: None,
+                    done: false,
+                }]),
+            },
+        )
+        .unwrap();
+
+        let result = update_recording_actions_in_dir(&root, Vec::new());
+        let meta = read_recording_meta(&root).unwrap();
+        let raw = fs::read_to_string(root.join("meta.json")).unwrap();
+        fs::remove_dir_all(&root).unwrap();
+
+        assert_eq!(result, Ok(()));
+        assert!(meta.actions.is_none());
+        assert!(!raw.contains("actions"));
     }
 
     #[test]
@@ -3607,6 +3753,7 @@ mod tests {
                     source: None,
                     trims: None,
                     speakers: None,
+                    actions: None,
                 },
             )
             .unwrap();

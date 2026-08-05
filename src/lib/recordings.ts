@@ -1,3 +1,4 @@
+import type { ActionItem } from './actionItems';
 import { defaultStreamSpeakerLabel, diarizedSpeakerLabel } from './speakers';
 
 export type RecordingFileInfo = {
@@ -21,6 +22,8 @@ export type RecordingSpeaker = {
   color?: string | null;
 };
 
+export type RecordingActionItem = ActionItem;
+
 export type RecordingSummary = {
   id: string;
   startedAt: string;
@@ -31,6 +34,8 @@ export type RecordingSummary = {
   trims?: Record<string, RecordingTrimRange> | null;
   /// Custom speaker names/colors keyed by speaker id.
   speakers?: Record<string, RecordingSpeaker> | null;
+  /// AI action items persisted in meta.json.
+  actions?: RecordingActionItem[] | null;
   files: RecordingFileInfo[];
 };
 

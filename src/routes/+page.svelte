@@ -67,9 +67,11 @@
   } from '$lib/transcripts';
   import {
     actionItemsForMarkdown,
+    actionItemsForRecordingWindow,
     mergeActionItems,
     parseActionItemsJson,
     rebaseActionSourceIndexes,
+    type ActionItemSourceWindow,
     type ActionItem
   } from '$lib/actionItems';
   import {
@@ -144,6 +146,7 @@
   // before the bump must not resurrect a session the user already stopped.
   let captureGeneration = 0;
   let recordingSession: RecordingSession | null = null;
+  let latestActionRecordingWindow: ActionItemSourceWindow | null = null;
   let recordingElapsed = 0;
   let recordingTimer: ReturnType<typeof setInterval> | null = null;
   let isRecordingBusy = false;
@@ -667,6 +670,10 @@
         startedAtMs: Date.now(),
         startMessageIndex: messages.length
       };
+      latestActionRecordingWindow = {
+        id: created.id,
+        startMessageIndex: messages.length
+      };
       recordingElapsed = 0;
       recordingTimer = setInterval(() => {
         if (recordingSession) {
@@ -687,6 +694,11 @@
     }
 
     recordingSession = null;
+    latestActionRecordingWindow = {
+      id: session.id,
+      startMessageIndex: session.startMessageIndex,
+      endMessageIndex: messages.length
+    };
     if (recordingTimer) {
       clearInterval(recordingTimer);
       recordingTimer = null;
@@ -695,6 +707,7 @@
 
     try {
       await invoke('stop_recording_session', { id: session.id });
+      await persistRecordingActions(latestActionRecordingWindow);
       markers = [
         ...markers,
         recordingStopMarker(session.id, new Date().toISOString(), messages.length, durationSeconds)
@@ -739,7 +752,11 @@
         participants: uniqueSpeakerLabels(entries),
         summary: aiSummary.trim() === '' ? undefined : aiSummary,
         actionItems: actionItemsForMarkdown(
-          actionItems.filter((item) => item.sourceIndex !== null && item.sourceIndex >= session.startMessageIndex)
+          actionItemsForRecordingWindow(actionItems, {
+            id: session.id,
+            startMessageIndex: session.startMessageIndex,
+            endMessageIndex: messages.length
+          })
         )
       }
     });
@@ -963,6 +980,7 @@
         actionItems,
         rebaseActionSourceIndexes(parsed.items, globalOffset)
       );
+      void persistLatestRecordingActions();
       actionNewCount += Math.max(0, actionItems.length - beforeCount);
       actionCoveredCount = messages.length;
       actionsError = null;
@@ -978,6 +996,7 @@
 
   function toggleActionItem(id: string, done: boolean) {
     actionItems = actionItems.map((item) => (item.id === id ? { ...item, done } : item));
+    void persistLatestRecordingActions();
   }
 
   function jumpToActionSource(item: ActionItem) {
@@ -991,6 +1010,25 @@
 
   function acknowledgeActionItems() {
     actionNewCount = 0;
+  }
+
+  async function persistRecordingActions(window: ActionItemSourceWindow | null) {
+    if (window === null) {
+      return;
+    }
+
+    await invoke('update_recording_actions', {
+      id: window.id,
+      actions: actionItemsForRecordingWindow(actionItems, window)
+    });
+  }
+
+  async function persistLatestRecordingActions() {
+    try {
+      await persistRecordingActions(latestActionRecordingWindow);
+    } catch (error) {
+      appError = String(error);
+    }
   }
 
   async function askMeetingQuestion() {
@@ -1171,6 +1209,7 @@
     messages = [];
     interimMessages = [];
     markers = [];
+    latestActionRecordingWindow = null;
     aiSummary = '';
     summaryCoveredCount = 0;
     summaryError = null;
