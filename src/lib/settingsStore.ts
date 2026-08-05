@@ -29,6 +29,12 @@ import {
   parseThemePreference,
   type ThemePreference
 } from './themePreference';
+import {
+  normalizeOllamaEndpoint,
+  normalizeOllamaModel,
+  parseTranslationEngine,
+  type TranslationEngine
+} from './translationSettings';
 import { parseTranscriptFontScale } from './transcriptFontSize';
 
 export const SETTINGS_KEYS = {
@@ -55,7 +61,11 @@ export const SETTINGS_KEYS = {
   keepInMenuBar: 'lpt-keep-in-menu-bar',
   themePreference: 'lpt-theme-preference',
   captionFontFamily: 'lpt-caption-font-family',
-  captionLineHeight: 'lpt-caption-line-height'
+  captionLineHeight: 'lpt-caption-line-height',
+  translationEngine: 'lpt-translation-engine',
+  translationFallbackEnabled: 'lpt-translation-fallback-enabled',
+  ollamaEndpoint: 'lpt-ollama-endpoint',
+  ollamaModel: 'lpt-ollama-model'
 } as const;
 
 export type SettingsKey = (typeof SETTINGS_KEYS)[keyof typeof SETTINGS_KEYS];
@@ -162,6 +172,38 @@ export function getCaptionLineHeight(): CaptionLineHeight {
 
 export function setCaptionLineHeight(preference: CaptionLineHeight) {
   write(SETTINGS_KEYS.captionLineHeight, preference);
+}
+
+export function getTranslationEngine(): TranslationEngine {
+  return parseTranslationEngine(read(SETTINGS_KEYS.translationEngine));
+}
+
+export function setTranslationEngine(engine: TranslationEngine) {
+  write(SETTINGS_KEYS.translationEngine, engine);
+}
+
+export function getTranslationFallbackEnabled(): boolean {
+  return read(SETTINGS_KEYS.translationFallbackEnabled) !== '0';
+}
+
+export function setTranslationFallbackEnabled(enabled: boolean) {
+  write(SETTINGS_KEYS.translationFallbackEnabled, enabled ? '1' : '0');
+}
+
+export function getOllamaEndpoint(): string {
+  return normalizeOllamaEndpoint(read(SETTINGS_KEYS.ollamaEndpoint));
+}
+
+export function setOllamaEndpoint(endpoint: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.ollamaEndpoint, endpoint);
+}
+
+export function getOllamaModel(): string {
+  return normalizeOllamaModel(read(SETTINGS_KEYS.ollamaModel));
+}
+
+export function setOllamaModel(model: string) {
+  writeTrimmedOrRemove(SETTINGS_KEYS.ollamaModel, model);
 }
 
 export function getSpeechModel(): SpeechModelSelection {

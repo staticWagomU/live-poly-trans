@@ -26,6 +26,10 @@ import {
   getSpeechModel,
   getThemePreference,
   getTranscriptFontScale,
+  getTranslationEngine,
+  getTranslationFallbackEnabled,
+  getOllamaEndpoint,
+  getOllamaModel,
   SETTINGS_KEYS,
   setAutoStart,
   setCaptionFontFamily,
@@ -51,6 +55,10 @@ import {
   setSpeechModel,
   setThemePreference,
   setTranscriptFontScale,
+  setTranslationEngine,
+  setTranslationFallbackEnabled,
+  setOllamaEndpoint,
+  setOllamaModel,
   subscribeSettings
 } from './settingsStore';
 import { DEFAULT_MIMI_SCALE } from './mimiDisplay';
@@ -62,6 +70,11 @@ import {
   DEFAULT_CAPTION_FONT_FAMILY,
   DEFAULT_CAPTION_LINE_HEIGHT
 } from './captionAppearance';
+import {
+  DEFAULT_OLLAMA_ENDPOINT,
+  DEFAULT_OLLAMA_MODEL,
+  DEFAULT_TRANSLATION_ENGINE
+} from './translationSettings';
 
 function createMemoryStorage(): Storage {
   const data = new Map<string, string>();
@@ -153,6 +166,44 @@ describe('settings store', () => {
     localStorage.setItem(SETTINGS_KEYS.captionLineHeight, 'wide');
     expect(getCaptionFontFamily()).toBe(DEFAULT_CAPTION_FONT_FAMILY);
     expect(getCaptionLineHeight()).toBe(DEFAULT_CAPTION_LINE_HEIGHT);
+  });
+
+  it('round-trips translation engine and fallback preferences', () => {
+    expect(getTranslationEngine()).toBe(DEFAULT_TRANSLATION_ENGINE);
+    expect(getTranslationFallbackEnabled()).toBe(true);
+
+    setTranslationEngine('deepl');
+    setTranslationFallbackEnabled(false);
+    expect(localStorage.getItem(SETTINGS_KEYS.translationEngine)).toBe('deepl');
+    expect(localStorage.getItem(SETTINGS_KEYS.translationFallbackEnabled)).toBe('0');
+    expect(getTranslationEngine()).toBe('deepl');
+    expect(getTranslationFallbackEnabled()).toBe(false);
+
+    localStorage.setItem(SETTINGS_KEYS.translationEngine, 'google');
+    expect(getTranslationEngine()).toBe(DEFAULT_TRANSLATION_ENGINE);
+
+    setTranslationFallbackEnabled(true);
+    expect(localStorage.getItem(SETTINGS_KEYS.translationFallbackEnabled)).toBe('1');
+    expect(getTranslationFallbackEnabled()).toBe(true);
+  });
+
+  it('round-trips Ollama translation settings without storing blank overrides', () => {
+    expect(getOllamaEndpoint()).toBe(DEFAULT_OLLAMA_ENDPOINT);
+    expect(getOllamaModel()).toBe(DEFAULT_OLLAMA_MODEL);
+
+    setOllamaEndpoint('  http://localhost:11434  ');
+    setOllamaModel('  llama3.1:8b  ');
+    expect(localStorage.getItem(SETTINGS_KEYS.ollamaEndpoint)).toBe('http://localhost:11434');
+    expect(localStorage.getItem(SETTINGS_KEYS.ollamaModel)).toBe('llama3.1:8b');
+    expect(getOllamaEndpoint()).toBe('http://localhost:11434');
+    expect(getOllamaModel()).toBe('llama3.1:8b');
+
+    setOllamaEndpoint(' ');
+    setOllamaModel('');
+    expect(localStorage.getItem(SETTINGS_KEYS.ollamaEndpoint)).toBeNull();
+    expect(localStorage.getItem(SETTINGS_KEYS.ollamaModel)).toBeNull();
+    expect(getOllamaEndpoint()).toBe(DEFAULT_OLLAMA_ENDPOINT);
+    expect(getOllamaModel()).toBe(DEFAULT_OLLAMA_MODEL);
   });
 
   it('round-trips the mimi scale through its parser', () => {
@@ -396,6 +447,10 @@ describe('settings store without localStorage', () => {
     expect(getExportDirectory()).toBe('');
     expect(getFileNameTemplate()).toBe(DEFAULT_FILE_NAME_TEMPLATE);
     expect(getMarkdownAutoExport()).toBe(false);
+    expect(getTranslationEngine()).toBe(DEFAULT_TRANSLATION_ENGINE);
+    expect(getTranslationFallbackEnabled()).toBe(true);
+    expect(getOllamaEndpoint()).toBe(DEFAULT_OLLAMA_ENDPOINT);
+    expect(getOllamaModel()).toBe(DEFAULT_OLLAMA_MODEL);
     expect(() => setAutoStart(false)).not.toThrow();
     expect(() =>
       setGlossaryRules([{ from: 'a', to: 'b', matchType: 'text', enabled: true }])
