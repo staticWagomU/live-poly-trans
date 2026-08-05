@@ -80,3 +80,14 @@ export function mergeActionItems(current: ActionItem[], incoming: ActionItem[]):
 
   return merged;
 }
+
+export function rebaseActionSourceIndexes(items: ActionItem[], offset: number): ActionItem[] {
+  if (offset === 0) {
+    return items;
+  }
+
+  return items.map((item) => ({
+    ...item,
+    sourceIndex: item.sourceIndex === null ? null : item.sourceIndex + offset
+  }));
+}

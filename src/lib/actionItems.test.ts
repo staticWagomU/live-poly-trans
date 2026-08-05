@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { mergeActionItems, parseActionItemsJson, type ActionItem } from './actionItems';
+import {
+  mergeActionItems,
+  parseActionItemsJson,
+  rebaseActionSourceIndexes,
+  type ActionItem
+} from './actionItems';
 
 function item(overrides: Partial<ActionItem> = {}): ActionItem {
   return {
@@ -65,5 +70,19 @@ describe('mergeActionItems', () => {
         item({ id: 'a-2', text: 'QA を依頼する', assignee: '佐藤', sourceIndex: 4 })
       ]).map((entry) => entry.text)
     ).toEqual(['告知文を書く', 'QA を依頼する']);
+  });
+});
+
+describe('rebaseActionSourceIndexes', () => {
+  it('adds the bounded transcript offset to source indexes', () => {
+    expect(rebaseActionSourceIndexes([item({ sourceIndex: 2 })], 8)).toEqual([
+      item({ sourceIndex: 10 })
+    ]);
+  });
+
+  it('leaves missing source indexes untouched', () => {
+    expect(rebaseActionSourceIndexes([item({ sourceIndex: null })], 8)).toEqual([
+      item({ sourceIndex: null })
+    ]);
   });
 });

@@ -1,6 +1,7 @@
 <script lang="ts">
   import AiPanel from '$lib/AiPanel.svelte';
   import CaptionThread from '$lib/CaptionThread.svelte';
+  import type { ActionItem } from '$lib/actionItems';
   import type { ChatTurn } from '$lib/aiContext';
   import type { GlossaryRule } from '$lib/glossary';
   import type { LiveSpeakerOverrides } from '$lib/settingsStore';
@@ -32,10 +33,18 @@
   export let summaryError: string | null;
   export let isSummaryLoading: boolean;
   export let aiUnavailable: boolean;
+  export let actionItems: ActionItem[] = [];
+  export let actionNewCount = 0;
+  export let actionsError: string | null = null;
+  export let isActionsLoading = false;
   export let chatTurns: ChatTurn[];
   export let aiQuestion: string;
   export let isAnswerLoading: boolean;
   export let onRefreshSummary: () => void;
+  export let onRefreshActions: () => void;
+  export let onToggleAction: (id: string, done: boolean) => void;
+  export let onJumpAction: (item: ActionItem) => void;
+  export let onOpenActions: () => void;
   export let onAsk: () => void;
 
   let thread: CaptionThread | undefined;
@@ -50,6 +59,10 @@
 
   export function scrollToLatest(behavior: ScrollBehavior = 'smooth') {
     thread?.scrollToLatest(behavior);
+  }
+
+  export async function scrollToMessageIndex(index: number, behavior: ScrollBehavior = 'smooth') {
+    await thread?.scrollToMessageIndex(index, behavior);
   }
 </script>
 
@@ -83,10 +96,18 @@
       {summaryError}
       {isSummaryLoading}
       {aiUnavailable}
+      {actionItems}
+      {actionNewCount}
+      {actionsError}
+      {isActionsLoading}
       {chatTurns}
       bind:aiQuestion
       {isAnswerLoading}
       {onRefreshSummary}
+      {onRefreshActions}
+      {onToggleAction}
+      {onJumpAction}
+      {onOpenActions}
       {onAsk}
     />
   {/if}

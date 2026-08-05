@@ -66,6 +66,12 @@
     type TranscriptEvent
   } from '$lib/transcripts';
   import {
+    mergeActionItems,
+    parseActionItemsJson,
+    rebaseActionSourceIndexes,
+    type ActionItem
+  } from '$lib/actionItems';
+  import {
     boundMessagesByChars,
     planSummaryRequest,
     recentChatHistory,
@@ -149,10 +155,15 @@
   let aiSummary = '';
   let summaryCoveredCount = 0;
   let summaryError: string | null = null;
+  let actionItems: ActionItem[] = [];
+  let actionCoveredCount = 0;
+  let actionNewCount = 0;
+  let actionsError: string | null = null;
   let aiQuestion = '';
   let chatTurns: ChatTurn[] = [];
   let appError: string | null = null;
   let isSummaryLoading = false;
+  let isActionsLoading = false;
   let isAnswerLoading = false;
   let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
   let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
@@ -877,6 +888,7 @@
 
     summaryRefreshTimer = setTimeout(() => {
       void generateMeetingSummary(true);
+      void extractMeetingActions(true);
     }, summaryRefreshDelayMs);
   }
 
@@ -911,6 +923,69 @@
     } finally {
       isSummaryLoading = false;
     }
+  }
+
+  async function extractMeetingActions(automatic = false) {
+    if (isActionsLoading) {
+      return;
+    }
+
+    const source = messages.slice(actionCoveredCount);
+    if (source.length === 0) {
+      return;
+    }
+
+    const bounded = boundMessagesByChars(source, 6000);
+    const globalOffset = actionCoveredCount + source.length - bounded.kept.length;
+    isActionsLoading = true;
+    if (!automatic) {
+      appError = null;
+    }
+
+    try {
+      const raw = await invoke<string>('ai_extract_actions', {
+        messages: bounded.kept,
+        language: mainLanguage
+      });
+      const parsed = parseActionItemsJson(raw);
+      if (!parsed.ok) {
+        actionsError = parsed.error;
+        return;
+      }
+
+      const beforeCount = actionItems.length;
+      actionItems = mergeActionItems(
+        actionItems,
+        rebaseActionSourceIndexes(parsed.items, globalOffset)
+      );
+      actionNewCount += Math.max(0, actionItems.length - beforeCount);
+      actionCoveredCount = messages.length;
+      actionsError = null;
+    } catch (error) {
+      actionsError = String(error);
+      if (/Apple Intelligence is unavailable/i.test(actionsError)) {
+        aiUnavailable = true;
+      }
+    } finally {
+      isActionsLoading = false;
+    }
+  }
+
+  function toggleActionItem(id: string, done: boolean) {
+    actionItems = actionItems.map((item) => (item.id === id ? { ...item, done } : item));
+  }
+
+  function jumpToActionSource(item: ActionItem) {
+    if (item.sourceIndex === null) {
+      liveView?.scrollToLatest();
+      return;
+    }
+
+    void liveView?.scrollToMessageIndex(item.sourceIndex);
+  }
+
+  function acknowledgeActionItems() {
+    actionNewCount = 0;
   }
 
   async function askMeetingQuestion() {
@@ -1092,6 +1167,10 @@
     aiSummary = '';
     summaryCoveredCount = 0;
     summaryError = null;
+    actionItems = [];
+    actionCoveredCount = 0;
+    actionNewCount = 0;
+    actionsError = null;
     chatTurns = [];
     appError = null;
     actionNotice = null;
@@ -1186,10 +1265,18 @@
           {summaryError}
           {isSummaryLoading}
           {aiUnavailable}
+          {actionItems}
+          {actionNewCount}
+          {actionsError}
+          {isActionsLoading}
           {chatTurns}
           bind:aiQuestion
           {isAnswerLoading}
           onRefreshSummary={() => generateMeetingSummary(false)}
+          onRefreshActions={() => extractMeetingActions(false)}
+          onToggleAction={toggleActionItem}
+          onJumpAction={jumpToActionSource}
+          onOpenActions={acknowledgeActionItems}
           onAsk={askMeetingQuestion}
         />
       {:else if activeTab === 'recordings'}

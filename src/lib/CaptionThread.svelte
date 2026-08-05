@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { tick } from 'svelte';
   import { formatRecordingTimer } from '$lib/captureState';
   import { applyGlossary, type GlossaryRule } from '$lib/glossary';
   import { isScrolledToBottom } from '$lib/scroll';
@@ -45,6 +46,11 @@
   let windowLimit = defaultWindowLimit;
 
   $: windowed = windowThreadItems(threadItems, windowLimit);
+  $: sourceIndexById = new Map(
+    threadItems
+      .filter((entry) => !isRecordingMarker(entry))
+      .map((entry, index) => [entry.id, index] as const)
+  );
   $: if (threadItems.length === 0 && windowLimit !== defaultWindowLimit) {
     windowLimit = defaultWindowLimit;
   }
@@ -89,6 +95,19 @@
     showJumpToLatest = false;
   }
 
+  export async function scrollToMessageIndex(index: number, behavior: ScrollBehavior = 'smooth') {
+    if (!messagesContainer || index < 0) {
+      return;
+    }
+
+    windowLimit = Math.max(windowLimit, threadItems.length);
+    await tick();
+    messagesContainer
+      .querySelector(`[data-source-index="${index}"]`)
+      ?.scrollIntoView({ block: 'center', behavior });
+    syncJumpToLatestButton();
+  }
+
   function handleMessagesScroll() {
     syncJumpToLatestButton();
   }
@@ -108,6 +127,10 @@
       return timestamp;
     }
     return parsed.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+  }
+
+  function sourceIndexFor(item: ChatMessage): number {
+    return sourceIndexById.get(item.id) ?? -1;
   }
 </script>
 
@@ -165,6 +188,7 @@
             class:mic={item.role === 'self'}
             class:interim={!item.isFinal}
             class:in-rec={item.inRecording}
+            data-source-index={sourceIndexFor(item)}
           >
             <div class="who"><i></i>{resolveSpeakerName(item, speakerOverrides)}</div>
             <p class="txt">{transcriptDisplay.primaryText}</p>
