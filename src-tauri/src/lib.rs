@@ -51,6 +51,7 @@ pub const TRAY_PANEL_MARGIN: f64 = 4.0;
 pub const TRANSLATION_BACKEND_ERROR_EVENT: &str = "translation-backend-error";
 pub const DEFAULT_OLLAMA_ENDPOINT: &str = "http://127.0.0.1:11434";
 pub const DEFAULT_OLLAMA_MODEL: &str = "llama3.1";
+static QUIT_CLEANUP_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OverlayWindowState {
@@ -136,6 +137,32 @@ pub fn shortcut_command(shortcut: &Shortcut) -> Option<&'static str> {
         return Some(TRAY_COMMAND_TOGGLE_OVERLAY);
     }
     None
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QuitLifecycleEvent {
+    ExitRequested,
+    Exit,
+    Other,
+}
+
+pub fn quit_lifecycle_event(event: &tauri::RunEvent) -> QuitLifecycleEvent {
+    match event {
+        tauri::RunEvent::ExitRequested { .. } => QuitLifecycleEvent::ExitRequested,
+        tauri::RunEvent::Exit => QuitLifecycleEvent::Exit,
+        _ => QuitLifecycleEvent::Other,
+    }
+}
+
+pub fn should_cleanup_for_quit_lifecycle(event: QuitLifecycleEvent) -> bool {
+    matches!(
+        event,
+        QuitLifecycleEvent::ExitRequested | QuitLifecycleEvent::Exit
+    )
+}
+
+pub fn claim_quit_cleanup(cleanup_started: &AtomicBool) -> bool {
+    !cleanup_started.swap(true, Ordering::AcqRel)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -3214,7 +3241,9 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while running LivePolyTrans")
         .run(|app, event| {
-            if matches!(event, tauri::RunEvent::Exit) {
+            if should_cleanup_for_quit_lifecycle(quit_lifecycle_event(&event))
+                && claim_quit_cleanup(&QUIT_CLEANUP_STARTED)
+            {
                 shutdown_capture_on_exit(app);
             }
         });
@@ -3363,12 +3392,7 @@ fn set_tray_recording_indicator(app: &AppHandle, recording: bool) {
 pub fn tray_waveform_icon_rgba(recording: bool) -> Vec<u8> {
     let size = TRAY_WAVEFORM_ICON_SIZE;
     let mut rgba = vec![0; (size * size * 4) as usize];
-    for (x, y, width, height) in [
-        (3, 6, 2, 7),
-        (6, 3, 2, 12),
-        (9, 5, 2, 9),
-        (12, 4, 2, 11),
-    ] {
+    for (x, y, width, height) in [(3, 6, 2, 7), (6, 3, 2, 12), (9, 5, 2, 9), (12, 4, 2, 11)] {
         set_rgba_rect(&mut rgba, size, x, y, width, height, [0, 0, 0, 255]);
     }
 
@@ -4685,22 +4709,45 @@ mod tests {
     fn tray_waveform_icon_draws_template_bars() {
         let rgba = tray_waveform_icon_rgba(false);
 
-        assert_eq!(rgba.len(), (TRAY_WAVEFORM_ICON_SIZE * TRAY_WAVEFORM_ICON_SIZE * 4) as usize);
-        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 4, 8), [0, 0, 0, 255]);
-        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 0, 0), [0, 0, 0, 0]);
+        assert_eq!(
+            rgba.len(),
+            (TRAY_WAVEFORM_ICON_SIZE * TRAY_WAVEFORM_ICON_SIZE * 4) as usize
+        );
+        assert_eq!(
+            rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 4, 8),
+            [0, 0, 0, 255]
+        );
+        assert_eq!(
+            rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 0, 0),
+            [0, 0, 0, 0]
+        );
     }
 
     #[test]
     fn tray_waveform_icon_draws_recording_dot() {
         let rgba = tray_waveform_icon_rgba(true);
 
-        assert_eq!(rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 15, 3), [255, 59, 48, 255]);
+        assert_eq!(
+            rgba_pixel(&rgba, TRAY_WAVEFORM_ICON_SIZE, 15, 3),
+            [255, 59, 48, 255]
+        );
     }
 
     #[test]
     fn tray_recording_icon_is_not_template_so_the_red_dot_is_visible() {
         assert!(tray_icon_is_template(false));
         assert!(!tray_icon_is_template(true));
+    }
+
+    #[test]
+    fn quit_lifecycle_events_request_capture_cleanup() {
+        assert!(should_cleanup_for_quit_lifecycle(
+            QuitLifecycleEvent::ExitRequested
+        ));
+        assert!(should_cleanup_for_quit_lifecycle(QuitLifecycleEvent::Exit));
+        assert!(!should_cleanup_for_quit_lifecycle(
+            QuitLifecycleEvent::Other
+        ));
     }
 
     #[test]
