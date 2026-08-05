@@ -12,6 +12,7 @@
     isTranscribing: false,
     recordingElapsedSeconds: 0,
     captureMode: 'both',
+    activeStreams: [],
     mainLanguage: 'ja-JP',
     subLanguage: 'en-US',
     overlayVisible: false,

@@ -33,6 +33,7 @@ export type TrayPanelState = {
   isTranscribing: boolean;
   recordingElapsedSeconds: number;
   captureMode: CaptureMode;
+  activeStreams: AudioStream[];
   mainLanguage: string;
   subLanguage: string;
   overlayVisible: boolean;
@@ -50,7 +51,12 @@ export function buildTrayPanelView(state: TrayPanelState): TrayPanelView {
     )}`,
     overlayChecked: state.overlayVisible,
     lanes: streamsForCaptureMode(state.captureMode).map((stream) =>
-      trayLaneView(stream, state.audioLevelHistory, state.isTranscribing, nowMs)
+      trayLaneView(
+        stream,
+        state.audioLevelHistory,
+        state.isTranscribing && state.activeStreams.includes(stream),
+        nowMs
+      )
     )
   };
 }

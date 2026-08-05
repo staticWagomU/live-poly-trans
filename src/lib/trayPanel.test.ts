@@ -9,6 +9,7 @@ describe('buildTrayPanelView', () => {
       isTranscribing: true,
       recordingElapsedSeconds: 754,
       captureMode: 'both',
+      activeStreams: ['mic', 'speaker'],
       mainLanguage: 'ja-JP',
       subLanguage: 'en-US',
       overlayVisible: true,
@@ -28,6 +29,7 @@ describe('buildTrayPanelView', () => {
       isTranscribing: true,
       recordingElapsedSeconds: 0,
       captureMode: 'speaker',
+      activeStreams: ['speaker'],
       mainLanguage: 'en-US',
       subLanguage: '',
       overlayVisible: false,
@@ -55,5 +57,25 @@ describe('buildTrayPanelView', () => {
         statusLabel: '無音 3秒'
       })
     ]);
+  });
+
+  it('marks a selected lane inactive when its stream is not running', () => {
+    const view = buildTrayPanelView({
+      isRecording: false,
+      isTranscribing: true,
+      recordingElapsedSeconds: 0,
+      captureMode: 'both',
+      activeStreams: ['mic'],
+      mainLanguage: 'ja-JP',
+      subLanguage: 'en-US',
+      overlayVisible: false,
+      audioLevelHistory: emptyAudioLevelHistory(),
+      nowMs: 1_000
+    });
+
+    expect(view.lanes[0]).toEqual(expect.objectContaining({ stream: 'mic', state: 'unknown' }));
+    expect(view.lanes[1]).toEqual(
+      expect.objectContaining({ stream: 'speaker', state: 'inactive', statusLabel: '停止中' })
+    );
   });
 });
