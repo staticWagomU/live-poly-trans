@@ -36,11 +36,16 @@ impl StreamScheduler {
         engine: &mut dyn AsrEngine,
         lang: Option<&str>,
     ) -> anyhow::Result<Option<StepOutput>> {
-        let _ = (engine, lang);
         if self.buffer.len() - self.window_start < MIN_WINDOW_SAMPLES {
             return Ok(None);
         }
-        unimplemented!()
+        let window = &self.buffer[self.window_start..];
+        let hypothesis = engine.transcribe(window, lang)?;
+        let agreement = self.agreement.feed(&hypothesis.text);
+        Ok(Some(StepOutput {
+            committed_delta: agreement.committed_delta,
+            volatile: agreement.volatile,
+        }))
     }
 }
 
@@ -78,6 +83,22 @@ mod tests {
 
     fn seconds(n: usize) -> Vec<f32> {
         vec![0.0; TARGET_RATE as usize * n]
+    }
+
+    #[test]
+    fn consecutive_steps_commit_agreed_prefix() {
+        let mut engine = FakeEngine::scripted(&["こんにちは、せ", "こんにちは、世界"]);
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        let first = sched.step(&mut engine, None).unwrap().unwrap();
+        assert_eq!(first.committed_delta, "");
+        assert_eq!(first.volatile, "こんにちは、せ");
+        sched.push_audio(&seconds(1));
+        let second = sched.step(&mut engine, None).unwrap().unwrap();
+        assert_eq!(second.committed_delta, "こんにちは、");
+        assert_eq!(second.volatile, "世界");
+        // each step decodes the whole current window
+        assert_eq!(engine.received_samples, vec![2 * 16_000, 3 * 16_000]);
     }
 
     #[test]
