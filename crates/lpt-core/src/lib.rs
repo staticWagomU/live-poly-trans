@@ -5,6 +5,7 @@
 
 pub mod local_agreement;
 pub mod resample;
+pub mod scheduler;
 
 /// Which audio lane an event belongs to.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
