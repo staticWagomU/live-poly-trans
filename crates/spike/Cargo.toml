@@ -1,0 +1,22 @@
+[package]
+name = "spike"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+
+# whisper-rs and llama-cpp-2 each vendor their own ggml; linking both into one
+# binary merges the duplicate C symbols and whisper ends up calling llama's ggml
+# (version-mismatched) at runtime. Features let us build isolated binaries for
+# measurement while the unification strategy is decided (see plan.md Step 0).
+[features]
+default = ["asr", "llm"]
+asr = ["dep:whisper-rs"]
+llm = ["dep:llama-cpp-2"]
+
+[dependencies]
+lpt-core = { path = "../lpt-core" }
+anyhow = "1"
+whisper-rs = { version = "0.16.0", features = ["metal"], optional = true }
+llama-cpp-2 = { version = "0.1.154", features = ["metal"], optional = true }
+hound = "3.5.1"
+libc = "0.2.189"

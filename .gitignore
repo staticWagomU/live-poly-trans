@@ -16,3 +16,8 @@ references/
 .DS_Store
 
 .direnv
+
+# v2 spike artifacts
+/target
+/models
+/assets
