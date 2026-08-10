@@ -34,6 +34,8 @@
               pkgs.clippy
               pkgs.rust-analyzer
               pkgs.pkg-config
+              pkgs.cmake
+              pkgs.uv
             ];
 
             shellHook = ''
