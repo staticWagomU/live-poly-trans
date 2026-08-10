@@ -21,7 +21,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 | ASR | whisper-rs（whisper.cppインプロセス）＋LocalAgreement擬似ストリーミング。モデルサイズ可変 | 153801 |
 | UIシェル | Tauri 2＋Svelte 5 | 153802 |
 | 音声取得 | マイク=cpal / スピーカー=CoreAudio Process Tap（mac, 14.2+）・WASAPIループバック（Win） | 153803 |
-| 翻訳 | Ollama上のローカルLLM既定、trait差し替え | 153804 |
+| 翻訳 | 組み込みローカルLLM（llama.cpp系GGUF）＋アプリ内モデル選択・ダウンロード。Ollama / Codex / Claude Code / DeepLはtraitで将来追加 | 153804 |
 
 ## ビルド順（small-first）
 
@@ -31,6 +31,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 - [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）
 - [ ] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測
+- [ ] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）
 
 ### Step 1: マイク → ASR → 画面表示
 
@@ -42,9 +43,11 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 2: 確定文の翻訳レーン
 
-- [ ] `Translator` trait＋Ollama実装（キュー＋逐次処理、バックプレッシャーあり）
+- [ ] `Translator` trait＋組み込みllama.cpp実装（キュー＋逐次処理、バックプレッシャーあり）
+- [ ] モデル管理（ModelManager）: ASRのWhisperモデルと翻訳LLMを共通の仕組みで選択・ダウンロード・切り替え（PoC段階はローカルパス指定でも可）
 - [ ] finalイベント→翻訳→UIの確定文に訳文を後付け表示
 - [ ] 言語設定: Main（利用者言語）/ Sub の2言語ペア
+- 将来: Ollama（HTTP）/ Codex・Claude Code（CLIサブプロセス）/ DeepL（HTTP）を`Translator`実装として追加
 
 ### Step 3: スピーカーレーン
 

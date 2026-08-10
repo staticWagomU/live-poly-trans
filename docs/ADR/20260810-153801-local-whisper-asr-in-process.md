@@ -80,4 +80,4 @@
 
 ## More Information
 
-前提: [単一プロセスアーキテクチャ](20260810-153800-rebuild-v2-as-single-process-rust-core.md)。関連: [翻訳バックエンド](20260810-153804-ollama-local-llm-translation.md)。v1のLocalAgreement類似実装（rolling re-transcription・安定化）は`v1`ブランチの`src-tauri/src/whisper_engine_*.rs`が参考になる。
+前提: [単一プロセスアーキテクチャ](20260810-153800-rebuild-v2-as-single-process-rust-core.md)。関連: [翻訳バックエンド](20260810-153804-embedded-local-llm-translation.md)。v1のLocalAgreement類似実装（rolling re-transcription・安定化）は`v1`ブランチの`src-tauri/src/whisper_engine_*.rs`が参考になる。
