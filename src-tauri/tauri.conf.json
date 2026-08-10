@@ -1,0 +1,35 @@
+{
+  "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
+  "productName": "LivePolyTrans",
+  "version": "0.1.0",
+  "identifier": "com.staticwagomu.live-poly-trans",
+  "build": {
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../build"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "LivePolyTrans",
+        "label": "main",
+        "width": 980,
+        "height": 700,
+        "minWidth": 640,
+        "minHeight": 420
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/icon.png"],
+    "macOS": {
+      "minimumSystemVersion": "14.2"
+    }
+  }
+}
