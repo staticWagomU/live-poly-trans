@@ -45,11 +45,13 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 1: マイク → ASR → 画面表示
 
-- [ ] ワークスペース初期化（Tauri 2＋Svelte 5、コアはcrateとして分離）
-- [ ] cpalでマイク取得 → リサンプリング（16kHz mono f32）
-- [ ] `AsrEngine` trait＋whisper-rs実装、LocalAgreementによるpartial/final確定
-- [ ] `transcript` イベント（lane / kind: partial|final / text / start_ms）をUIへ
-- [ ] 最小UI: 1ウィンドウのトランスクリプト表示（partialの逐次更新表示）
+- [x] ワークスペース初期化（Tauri 2＋Svelte 5、コアはcrateとして分離: lpt-core / lpt-whisper / src-tauri）
+- [x] cpalでマイク取得 → リサンプリング（16kHz mono f32、線形補間・TDD済み）
+- [x] `AsrEngine` trait＋whisper-rs実装、LocalAgreementによるpartial/final確定（文字単位LCP・TDD済み、テスト11本）
+- [x] `transcript` イベント（committedDelta / volatile）をUIへ ※lane/start_msはStep 3のスピーカーレーン追加時に拡張
+- [x] 最小UI: 1ウィンドウのトランスクリプト表示（確定=白 / volatile=グレーの逐次更新）
+- [x] 無音ゲート（-50dBFS未満はデコードスキップ。無音時のWhisper幻覚対策、Step 0で実測確認）
+- [ ] 実発話での動作確認（アプリ起動済み。Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
 
 ### Step 2: 確定文の翻訳レーン
 
