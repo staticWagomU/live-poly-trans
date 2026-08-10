@@ -34,7 +34,7 @@ impl LocalAgreement {
         let delta_from = self.committed_chars.min(chars.len());
         let delta_to = commit_to.min(chars.len());
         let committed_delta: String = chars[delta_from..delta_to].iter().collect();
-        let volatile: String = chars[delta_to.max(commit_to.min(chars.len()))..].iter().collect();
+        let volatile: String = chars[delta_to..].iter().collect();
         self.committed_chars = commit_to;
         self.prev = Some(hypothesis.to_string());
         Agreement {
