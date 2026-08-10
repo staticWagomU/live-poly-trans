@@ -32,7 +32,14 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）
 - [ ] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測
 - [ ] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）
-- ggml（Metal）が計測予算（部分結果2秒/確定1.5秒/会話ペースの翻訳追従）を満たせない場合のみ、Apple Silicon専用のMLXバックエンド（mlx-rs / mlx-c FFI）を`AsrEngine`/`Translator`の追加実装として検討する。メモリはMLXでもggmlでもほぼ互角のため、省メモリは量子化レベルとモデルサイズで調整する
+- [ ] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証（両者はそれぞれggmlを同梱するため、シンボル衝突・ggmlバージョン不一致・バイナリ肥大の有無を確認）
+- [ ] **MLX比較ハーネス**: 同一音声・同一文でggmlとMLXをA/B比較できるようにする
+  - 擬似ストリーミングのスケジューラ（LocalAgreement）は共通実装にし、推論呼び出し（`transcribe(window)` / `translate(sentence)`）だけをバックエンド差し替えにする（エンジン差と確定ロジック差を混ぜない）
+  - ggml側: whisper-rs / llama-cpp-2（インプロセス）
+  - MLX側: mlx-whisper / mlx-lmを**PoC限定のPythonサイドカー**（stdio）で呼ぶ。製品構成は単一プロセス（ADR-153800）を維持し、MLX採用が決まった時点でmlx-rs / mlx-c FFIによる本実装を検討する
+  - モデルは同一重みで揃える（例: Whisper large-v3-turboのGGUF量子化 vs MLX 4bit、翻訳はqwen3-4b級のGGUF q4 vs MLX 4bit）
+  - 計測指標: 最初の部分結果までの時間 / 発話終了から確定までの時間 / RTF / ピークメモリ（RSS） / 翻訳の文あたりレイテンシーとtok/s / ASR・翻訳同時稼働時の劣化幅
+- PoCアプリの設定でASR・翻訳バックエンド（ggml⇔MLX）を切り替え、体感でも比較できるようにする
 
 ### Step 1: マイク → ASR → 画面表示
 
