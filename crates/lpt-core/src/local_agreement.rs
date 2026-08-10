@@ -14,19 +14,39 @@ pub struct Agreement {
 }
 
 #[derive(Debug, Default)]
-pub struct LocalAgreement;
+pub struct LocalAgreement {
+    prev: Option<String>,
+    committed_chars: usize,
+}
 
 impl LocalAgreement {
     pub fn new() -> Self {
-        Self
+        Self::default()
     }
 
     pub fn feed(&mut self, hypothesis: &str) -> Agreement {
+        let agreed_chars = match &self.prev {
+            Some(prev) => common_prefix_chars(prev, hypothesis),
+            None => 0,
+        };
+        let commit_to = agreed_chars.max(self.committed_chars);
+        let chars: Vec<char> = hypothesis.chars().collect();
+        let committed_delta: String = chars[self.committed_chars..commit_to].iter().collect();
+        let volatile: String = chars[commit_to..].iter().collect();
+        self.committed_chars = commit_to;
+        self.prev = Some(hypothesis.to_string());
         Agreement {
-            committed_delta: String::new(),
-            volatile: hypothesis.to_string(),
+            committed_delta,
+            volatile,
         }
     }
+}
+
+fn common_prefix_chars(a: &str, b: &str) -> usize {
+    a.chars()
+        .zip(b.chars())
+        .take_while(|(x, y)| x == y)
+        .count()
 }
 
 #[cfg(test)]
@@ -39,5 +59,14 @@ mod tests {
         let out = la.feed("こんにちは");
         assert_eq!(out.committed_delta, "");
         assert_eq!(out.volatile, "こんにちは");
+    }
+
+    #[test]
+    fn agreeing_prefix_of_two_hypotheses_is_committed() {
+        let mut la = LocalAgreement::new();
+        la.feed("こんにちは、せ");
+        let out = la.feed("こんにちは、世界");
+        assert_eq!(out.committed_delta, "こんにちは、");
+        assert_eq!(out.volatile, "世界");
     }
 }
