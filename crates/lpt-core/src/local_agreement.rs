@@ -24,6 +24,12 @@ impl LocalAgreement {
         Self::default()
     }
 
+    /// Start a fresh agreement context (call when the audio window slides).
+    pub fn reset(&mut self) {
+        self.prev = None;
+        self.committed_chars = 0;
+    }
+
     pub fn feed(&mut self, hypothesis: &str) -> Agreement {
         let agreed_chars = match &self.prev {
             Some(prev) => common_prefix_chars(prev, hypothesis),
@@ -61,6 +67,17 @@ mod tests {
         let out = la.feed("こんにちは");
         assert_eq!(out.committed_delta, "");
         assert_eq!(out.volatile, "こんにちは");
+    }
+
+    #[test]
+    fn reset_starts_a_fresh_agreement_context() {
+        let mut la = LocalAgreement::new();
+        la.feed("こんにちは");
+        la.feed("こんにちは"); // fully committed
+        la.reset();
+        let out = la.feed("次の文章");
+        assert_eq!(out.committed_delta, "");
+        assert_eq!(out.volatile, "次の文章");
     }
 
     #[test]
