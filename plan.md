@@ -32,6 +32,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）
 - [ ] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測
 - [ ] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）
+- ggml（Metal）が計測予算（部分結果2秒/確定1.5秒/会話ペースの翻訳追従）を満たせない場合のみ、Apple Silicon専用のMLXバックエンド（mlx-rs / mlx-c FFI）を`AsrEngine`/`Translator`の追加実装として検討する。メモリはMLXでもggmlでもほぼ互角のため、省メモリは量子化レベルとモデルサイズで調整する
 
 ### Step 1: マイク → ASR → 画面表示
 
