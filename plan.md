@@ -29,11 +29,13 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 0: 技術検証スパイク
 
-- [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）
-- [ ] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測
-- [ ] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）
-- [ ] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証（両者はそれぞれggmlを同梱するため、シンボル衝突・ggmlバージョン不一致・バイナリ肥大の有無を確認）
-- [ ] **MLX比較ハーネス**: 同一音声・同一文でggmlとMLXをA/B比較できるようにする
+実測結果の詳細は [docs/step0-results.md](docs/step0-results.md)（2026-08-10, M4 Pro）。
+
+- [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）※Step 3までに実施
+- [x] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測 — 全予算クリア（最初の部分結果≈1.7s、RSS 1.1GB）。q5_0はq8_0より遅いためq8_0を既定候補に
+- [x] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）— 文あたり0.3〜0.9s、同時稼働時でも最悪4s/文で要件内
+- [x] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証 — **失敗を確認**: ggmlシンボル衝突により実行時SIGABRT。cdylib分離（推奨）/テキストサイドカー/バージョンピン留めの選択肢をStep 2で決定しADR化する
+- [x] **MLX比較ハーネス**: 同一音声・同一文でggmlとMLXをA/B比較できるようにする — 結果: ほぼ互角（ASRでMLXが1割強速い程度）。ggml路線を維持し、MLXバックエンドは追加しない
   - 擬似ストリーミングのスケジューラ（LocalAgreement）は共通実装にし、推論呼び出し（`transcribe(window)` / `translate(sentence)`）だけをバックエンド差し替えにする（エンジン差と確定ロジック差を混ぜない）
   - ggml側: whisper-rs / llama-cpp-2（インプロセス）
   - MLX側: mlx-whisper / mlx-lmを**PoC限定のPythonサイドカー**（stdio）で呼ぶ。製品構成は単一プロセス（ADR-153800）を維持し、MLX採用が決まった時点でmlx-rs / mlx-c FFIによる本実装を検討する
