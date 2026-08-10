@@ -10,6 +10,9 @@ const MIN_WINDOW_SAMPLES: usize = TARGET_RATE as usize;
 /// Beyond this the window slides: re-decode cost grows with window length
 /// (measured in docs/step0-results.md) and old audio no longer changes.
 const MAX_WINDOW_SAMPLES: usize = 15 * TARGET_RATE as usize;
+/// Whisper hallucinates fixed phrases on (near-)silence, so windows quieter
+/// than roughly -50 dBFS RMS are not worth decoding.
+const SILENCE_RMS: f32 = 0.003;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -43,6 +46,10 @@ impl StreamScheduler {
             return Ok(None);
         }
         let window = &self.buffer[self.window_start..];
+        let rms = (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt();
+        if rms < SILENCE_RMS {
+            return Ok(None);
+        }
         let hypothesis = engine.transcribe(window, lang)?;
         let agreement = self.agreement.feed(&hypothesis.text);
         if window.len() >= MAX_WINDOW_SAMPLES {
@@ -88,8 +95,19 @@ mod tests {
         }
     }
 
+    /// Audible fake audio: constant amplitude well above the silence gate.
     fn seconds(n: usize) -> Vec<f32> {
-        vec![0.0; TARGET_RATE as usize * n]
+        vec![0.1; TARGET_RATE as usize * n]
+    }
+
+    #[test]
+    fn silent_window_is_not_decoded() {
+        let mut engine = FakeEngine::scripted(&[]);
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.0005; 2 * TARGET_RATE as usize]); // ambient noise level
+        let out = sched.step(&mut engine, None).unwrap();
+        assert_eq!(out, None);
+        assert!(engine.received_samples.is_empty());
     }
 
     #[test]
