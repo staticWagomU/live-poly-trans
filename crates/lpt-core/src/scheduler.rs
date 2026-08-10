@@ -7,6 +7,9 @@ use crate::AsrEngine;
 
 /// Below this much audio a decode is wasted (whisper needs ~1s).
 const MIN_WINDOW_SAMPLES: usize = TARGET_RATE as usize;
+/// Beyond this the window slides: re-decode cost grows with window length
+/// (measured in docs/step0-results.md) and old audio no longer changes.
+const MAX_WINDOW_SAMPLES: usize = 15 * TARGET_RATE as usize;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -42,6 +45,10 @@ impl StreamScheduler {
         let window = &self.buffer[self.window_start..];
         let hypothesis = engine.transcribe(window, lang)?;
         let agreement = self.agreement.feed(&hypothesis.text);
+        if window.len() >= MAX_WINDOW_SAMPLES {
+            self.window_start = self.buffer.len();
+            self.agreement.reset();
+        }
         Ok(Some(StepOutput {
             committed_delta: agreement.committed_delta,
             volatile: agreement.volatile,
@@ -99,6 +106,20 @@ mod tests {
         assert_eq!(second.volatile, "世界");
         // each step decodes the whole current window
         assert_eq!(engine.received_samples, vec![2 * 16_000, 3 * 16_000]);
+    }
+
+    #[test]
+    fn window_slides_and_agreement_resets_after_max_window() {
+        let mut engine = FakeEngine::scripted(&["長い発話です", "次"]);
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(16));
+        sched.step(&mut engine, None).unwrap().unwrap(); // exceeds 15s max → slides
+        sched.push_audio(&seconds(2));
+        let out = sched.step(&mut engine, None).unwrap().unwrap();
+        assert_eq!(out.committed_delta, ""); // fresh agreement context
+        assert_eq!(out.volatile, "次");
+        // the post-slide decode saw only audio pushed after the slide
+        assert_eq!(engine.received_samples, vec![16 * 16_000, 2 * 16_000]);
     }
 
     #[test]
