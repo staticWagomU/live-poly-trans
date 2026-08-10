@@ -31,6 +31,13 @@ mod tests {
     }
 
     #[test]
+    fn interpolates_between_samples_for_non_integer_ratio() {
+        let input = [0.0, 1.0, 2.0, 3.0];
+        let out = resample_to_16k(&input, 24_000);
+        assert_eq!(out, vec![0.0, 1.5]);
+    }
+
+    #[test]
     fn downsamples_48k_by_taking_every_third_position() {
         let input = [0.0, 3.0, 6.0, 9.0, 12.0, 15.0];
         let out = resample_to_16k(&input, 48_000);
