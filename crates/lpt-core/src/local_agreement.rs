@@ -31,8 +31,10 @@ impl LocalAgreement {
         };
         let commit_to = agreed_chars.max(self.committed_chars);
         let chars: Vec<char> = hypothesis.chars().collect();
-        let committed_delta: String = chars[self.committed_chars..commit_to].iter().collect();
-        let volatile: String = chars[commit_to..].iter().collect();
+        let delta_from = self.committed_chars.min(chars.len());
+        let delta_to = commit_to.min(chars.len());
+        let committed_delta: String = chars[delta_from..delta_to].iter().collect();
+        let volatile: String = chars[delta_to.max(commit_to.min(chars.len()))..].iter().collect();
         self.committed_chars = commit_to;
         self.prev = Some(hypothesis.to_string());
         Agreement {
@@ -59,6 +61,16 @@ mod tests {
         let out = la.feed("こんにちは");
         assert_eq!(out.committed_delta, "");
         assert_eq!(out.volatile, "こんにちは");
+    }
+
+    #[test]
+    fn shorter_hypothesis_than_committed_yields_nothing() {
+        let mut la = LocalAgreement::new();
+        la.feed("こんにちは、世界");
+        la.feed("こんにちは、世界"); // fully committed
+        let out = la.feed("こんに"); // hypothesis shrank below the committed point
+        assert_eq!(out.committed_delta, "");
+        assert_eq!(out.volatile, "");
     }
 
     #[test]
