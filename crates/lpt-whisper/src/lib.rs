@@ -9,6 +9,10 @@
 use anyhow::{Context, Result};
 use lpt_core::{AsrEngine, Hypothesis};
 
+/// Segments whisper itself considers likely non-speech (coughs, breaths,
+/// keyboard noise) hallucinate text; drop them above this probability.
+const NO_SPEECH_THRESHOLD: f32 = 0.6;
+
 pub struct WhisperEngine {
     ctx: whisper_rs::WhisperContext,
     /// When non-empty, auto-detection picks only among these languages
@@ -91,21 +95,24 @@ impl AsrEngine for WhisperEngine {
         params.set_print_progress(false);
         params.set_print_realtime(false);
         params.set_print_timestamps(false);
+        params.set_suppress_nst(true); // no *cough* / event annotations
         state.full(params, samples)?;
 
         let mut text = String::new();
-        let mut start_ms = 0u64;
+        let mut start_ms = None;
         let mut end_ms = 0u64;
         for i in 0..state.full_n_segments() {
             if let Some(seg) = state.get_segment(i) {
-                if i == 0 {
-                    // whisper timestamps are centiseconds
-                    start_ms = (seg.start_timestamp().max(0) * 10) as u64;
+                if seg.no_speech_probability() > NO_SPEECH_THRESHOLD {
+                    continue;
                 }
+                // whisper timestamps are centiseconds
+                start_ms.get_or_insert((seg.start_timestamp().max(0) * 10) as u64);
                 end_ms = (seg.end_timestamp().max(0) * 10) as u64;
                 text.push_str(&seg.to_str_lossy()?);
             }
         }
+        let start_ms = start_ms.unwrap_or(0);
         let detected = whisper_rs::get_lang_str(state.full_lang_id_from_state());
         Ok(Hypothesis {
             text: text.trim().to_string(),
