@@ -34,6 +34,10 @@ pub struct StreamScheduler {
     buffer: Vec<f32>,
     window_start: usize,
     agreement: LocalAgreement,
+    /// Language detected for the current window (auto mode only). Pinning it
+    /// keeps hypotheses stable within a window while letting each new window
+    /// (usually a new speaker turn) re-detect.
+    window_lang: Option<String>,
 }
 
 impl StreamScheduler {
@@ -50,6 +54,7 @@ impl StreamScheduler {
         self.buffer.clear();
         self.window_start = 0;
         self.agreement.reset();
+        self.window_lang = None;
     }
 
     pub fn step(
@@ -64,7 +69,11 @@ impl StreamScheduler {
         if rms(window) < SILENCE_RMS {
             return Ok(None);
         }
-        let hypothesis = engine.transcribe(window, lang)?;
+        let effective_lang = lang.or(self.window_lang.as_deref());
+        let hypothesis = engine.transcribe(window, effective_lang)?;
+        if lang.is_none() && self.window_lang.is_none() {
+            self.window_lang = hypothesis.lang.clone();
+        }
         let agreement = self.agreement.feed(&hypothesis.text);
         let mut committed_delta = agreement.committed_delta;
         let mut volatile = agreement.volatile;
@@ -88,29 +97,42 @@ mod tests {
     use super::*;
     use crate::Hypothesis;
 
-    /// Scripted engine: returns queued texts in order and records call sizes.
+    /// Scripted engine: returns queued (text, detected lang) in order and
+    /// records call sizes and the lang argument it was given.
     struct FakeEngine {
-        script: Vec<String>,
+        script: Vec<(String, Option<String>)>,
         received_samples: Vec<usize>,
+        received_langs: Vec<Option<String>>,
     }
 
     impl FakeEngine {
         fn scripted(texts: &[&str]) -> Self {
+            Self::scripted_with_langs(&texts.iter().map(|t| (*t, None)).collect::<Vec<_>>())
+        }
+
+        fn scripted_with_langs(entries: &[(&str, Option<&str>)]) -> Self {
             Self {
-                script: texts.iter().rev().map(|s| s.to_string()).collect(),
+                script: entries
+                    .iter()
+                    .rev()
+                    .map(|(t, l)| (t.to_string(), l.map(str::to_string)))
+                    .collect(),
                 received_samples: Vec::new(),
+                received_langs: Vec::new(),
             }
         }
     }
 
     impl AsrEngine for FakeEngine {
-        fn transcribe(&mut self, samples: &[f32], _lang: Option<&str>) -> anyhow::Result<Hypothesis> {
+        fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis> {
             self.received_samples.push(samples.len());
-            let text = self.script.pop().expect("script exhausted");
+            self.received_langs.push(lang.map(str::to_string));
+            let (text, detected) = self.script.pop().expect("script exhausted");
             Ok(Hypothesis {
                 text,
                 start_ms: 0,
                 end_ms: (samples.len() * 1000 / TARGET_RATE as usize) as u64,
+                lang: detected,
             })
         }
     }
@@ -118,6 +140,29 @@ mod tests {
     /// Audible fake audio: constant amplitude well above the silence gate.
     fn seconds(n: usize) -> Vec<f32> {
         vec![0.1; TARGET_RATE as usize * n]
+    }
+
+    #[test]
+    fn auto_mode_pins_detected_language_for_the_window() {
+        let mut engine = FakeEngine::scripted_with_langs(&[
+            ("Hello", Some("en")),
+            ("Hello world", Some("en")),
+            ("Hello world", Some("en")),
+            ("こんにちは", Some("ja")),
+        ]);
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        sched.step(&mut engine, None).unwrap(); // first decode: detect
+        sched.push_audio(&seconds(1));
+        sched.step(&mut engine, None).unwrap(); // pinned to detected lang
+        sched.push_audio(&vec![0.0; TARGET_RATE as usize]); // pause → slide
+        sched.step(&mut engine, None).unwrap();
+        sched.push_audio(&seconds(2)); // next speaker, new window
+        sched.step(&mut engine, None).unwrap(); // detection restarts
+        assert_eq!(
+            engine.received_langs,
+            vec![None, Some("en".into()), Some("en".into()), None]
+        );
     }
 
     #[test]

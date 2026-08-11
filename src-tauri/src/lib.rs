@@ -113,7 +113,9 @@ fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, 
             }
         };
         let _ = app.emit("status", "listening");
-        let lang = std::env::var("LPT_LANG").unwrap_or_else(|_| "ja".into());
+        // Unset = auto-detect per utterance window (mixed ja/en meetings);
+        // set LPT_LANG to pin a single language.
+        let lang = std::env::var("LPT_LANG").ok();
         let mut scheduler = lpt_core::scheduler::StreamScheduler::new();
 
         while running.load(Ordering::SeqCst) {
@@ -123,7 +125,7 @@ fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, 
                 scheduler.push_audio(&queued);
                 queued.clear();
             }
-            match scheduler.step(&mut engine, Some(&lang)) {
+            match scheduler.step(&mut engine, lang.as_deref()) {
                 Ok(Some(out)) => {
                     let _ = app.emit(
                         "transcript",

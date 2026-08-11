@@ -21,6 +21,8 @@ pub struct Hypothesis {
     /// Milliseconds from capture start.
     pub start_ms: u64,
     pub end_ms: u64,
+    /// Language the engine detected (or was told) for this window.
+    pub lang: Option<String>,
 }
 
 /// Streaming-agnostic ASR engine: transcribe one window of 16 kHz mono f32.

@@ -28,6 +28,9 @@ impl AsrEngine for WhisperEngine {
         let mut state = self.ctx.create_state()?;
         let mut params =
             whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
+        // None = whisper auto-detects the window's language (costs roughly an
+        // extra decode; the scheduler pins the result for the rest of the
+        // window, so only the first decode per window pays it).
         params.set_language(lang);
         params.set_print_special(false);
         params.set_print_progress(false);
@@ -48,10 +51,12 @@ impl AsrEngine for WhisperEngine {
                 text.push_str(&seg.to_str_lossy()?);
             }
         }
+        let detected = whisper_rs::get_lang_str(state.full_lang_id_from_state());
         Ok(Hypothesis {
             text: text.trim().to_string(),
             start_ms,
             end_ms,
+            lang: detected.map(str::to_string),
         })
     }
 }

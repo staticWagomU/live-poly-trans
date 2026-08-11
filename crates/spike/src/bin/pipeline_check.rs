@@ -14,7 +14,7 @@ use lpt_core::scheduler::StreamScheduler;
 fn main() -> anyhow::Result<()> {
     let model = std::env::var("WHISPER_MODEL")
         .unwrap_or_else(|_| "models/ggml-large-v3-turbo-q8_0.bin".into());
-    let lang = std::env::var("LPT_LANG").unwrap_or_else(|_| "ja".into());
+    let lang = std::env::var("LPT_LANG").ok(); // unset = auto-detect per window
     let secs: u64 = std::env::var("CAPTURE_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
@@ -22,7 +22,7 @@ fn main() -> anyhow::Result<()> {
 
     eprintln!("loading {model} …");
     let mut engine = lpt_whisper::WhisperEngine::load(&model)?;
-    eprintln!("capturing {secs}s from default input (lang={lang})");
+    eprintln!("capturing {secs}s from default input (lang={lang:?})");
 
     let pending: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
     let running = Arc::new(AtomicBool::new(true));
@@ -50,7 +50,7 @@ fn main() -> anyhow::Result<()> {
             scheduler.push_audio(&queued);
             queued.clear();
         }
-        if let Some(out) = scheduler.step(&mut engine, Some(&lang))? {
+        if let Some(out) = scheduler.step(&mut engine, lang.as_deref())? {
             committed.push_str(&out.committed_delta);
             println!("committed: {committed}");
             println!("volatile : {}", out.volatile);
