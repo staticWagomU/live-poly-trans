@@ -13,12 +13,20 @@ const MAX_WINDOW_SAMPLES: usize = 15 * TARGET_RATE as usize;
 /// Whisper hallucinates fixed phrases on (near-)silence, so windows quieter
 /// than roughly -50 dBFS RMS are not worth decoding.
 const SILENCE_RMS: f32 = 0.003;
+/// This much silence at the window tail marks an utterance boundary: the
+/// hypothesis is stable there, so the volatile tail can be flushed to
+/// committed and the window can slide without losing text.
+const TRAILING_SILENCE_SAMPLES: usize = TARGET_RATE as usize;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepOutput {
     pub committed_delta: String,
     pub volatile: String,
+}
+
+fn rms(samples: &[f32]) -> f32 {
+    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt()
 }
 
 #[derive(Debug, Default)]
@@ -37,6 +45,13 @@ impl StreamScheduler {
         self.buffer.extend_from_slice(samples);
     }
 
+    /// Advance past all buffered audio and start a fresh agreement context.
+    fn slide(&mut self) {
+        self.buffer.clear();
+        self.window_start = 0;
+        self.agreement.reset();
+    }
+
     pub fn step(
         &mut self,
         engine: &mut dyn AsrEngine,
@@ -46,19 +61,24 @@ impl StreamScheduler {
             return Ok(None);
         }
         let window = &self.buffer[self.window_start..];
-        let rms = (window.iter().map(|s| s * s).sum::<f32>() / window.len() as f32).sqrt();
-        if rms < SILENCE_RMS {
+        if rms(window) < SILENCE_RMS {
             return Ok(None);
         }
         let hypothesis = engine.transcribe(window, lang)?;
         let agreement = self.agreement.feed(&hypothesis.text);
-        if window.len() >= MAX_WINDOW_SAMPLES {
-            self.window_start = self.buffer.len();
-            self.agreement.reset();
+        let mut committed_delta = agreement.committed_delta;
+        let mut volatile = agreement.volatile;
+
+        let tail = &window[window.len().saturating_sub(TRAILING_SILENCE_SAMPLES)..];
+        let at_utterance_boundary = rms(tail) < SILENCE_RMS;
+        if at_utterance_boundary || window.len() >= MAX_WINDOW_SAMPLES {
+            committed_delta.push_str(&volatile);
+            volatile.clear();
+            self.slide();
         }
         Ok(Some(StepOutput {
-            committed_delta: agreement.committed_delta,
-            volatile: agreement.volatile,
+            committed_delta,
+            volatile,
         }))
     }
 }
@@ -101,6 +121,22 @@ mod tests {
     }
 
     #[test]
+    fn trailing_silence_flushes_volatile_and_slides() {
+        let mut engine = FakeEngine::scripted(&["こんにちは"]);
+        let mut sched = StreamScheduler::new();
+        let mut audio = vec![0.1; 2 * TARGET_RATE as usize]; // speech
+        audio.extend(vec![0.0; TARGET_RATE as usize]); // 1s pause
+        sched.push_audio(&audio);
+        let out = sched.step(&mut engine, None).unwrap().unwrap();
+        assert_eq!(out.committed_delta, "こんにちは"); // flushed, not stuck volatile
+        assert_eq!(out.volatile, "");
+        // window slid past the utterance: the silent remainder is gated
+        sched.push_audio(&vec![0.0; TARGET_RATE as usize]);
+        assert_eq!(sched.step(&mut engine, None).unwrap(), None);
+        assert_eq!(engine.received_samples.len(), 1);
+    }
+
+    #[test]
     fn silent_window_is_not_decoded() {
         let mut engine = FakeEngine::scripted(&[]);
         let mut sched = StreamScheduler::new();
@@ -131,7 +167,10 @@ mod tests {
         let mut engine = FakeEngine::scripted(&["長い発話です", "次"]);
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(16));
-        sched.step(&mut engine, None).unwrap().unwrap(); // exceeds 15s max → slides
+        // exceeds 15s max → volatile is flushed to committed, then slides
+        let flushed = sched.step(&mut engine, None).unwrap().unwrap();
+        assert_eq!(flushed.committed_delta, "長い発話です");
+        assert_eq!(flushed.volatile, "");
         sched.push_audio(&seconds(2));
         let out = sched.step(&mut engine, None).unwrap().unwrap();
         assert_eq!(out.committed_delta, ""); // fresh agreement context
