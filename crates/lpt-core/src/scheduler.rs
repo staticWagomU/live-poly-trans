@@ -3,30 +3,23 @@
 
 use crate::local_agreement::LocalAgreement;
 use crate::resample::TARGET_RATE;
-use crate::AsrEngine;
+use crate::{AsrEngine, SpeechDetector};
 
 /// Below this much audio a decode is wasted (whisper needs ~1s).
 const MIN_WINDOW_SAMPLES: usize = TARGET_RATE as usize;
 /// Beyond this the window slides: re-decode cost grows with window length
 /// (measured in docs/step0-results.md) and old audio no longer changes.
 const MAX_WINDOW_SAMPLES: usize = 15 * TARGET_RATE as usize;
-/// Whisper hallucinates fixed phrases on (near-)silence, so windows quieter
-/// than roughly -50 dBFS RMS are not worth decoding.
-const SILENCE_RMS: f32 = 0.003;
-/// This much silence at the window tail marks an utterance boundary: the
-/// hypothesis is stable there, so the volatile tail can be flushed to
-/// committed and the window can slide without losing text.
-const TRAILING_SILENCE_SAMPLES: usize = TARGET_RATE as usize;
+/// This much non-speech (per VAD) at the window tail marks an utterance
+/// boundary: the hypothesis is stable there, so the volatile tail can be
+/// flushed to committed and the window can slide without losing text.
+const TRAILING_NON_SPEECH_SAMPLES: usize = TARGET_RATE as usize;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct StepOutput {
     pub committed_delta: String,
     pub volatile: String,
-}
-
-fn rms(samples: &[f32]) -> f32 {
-    (samples.iter().map(|s| s * s).sum::<f32>() / samples.len().max(1) as f32).sqrt()
 }
 
 #[derive(Debug, Default)]
@@ -60,15 +53,22 @@ impl StreamScheduler {
     pub fn step(
         &mut self,
         engine: &mut dyn AsrEngine,
+        vad: &mut dyn SpeechDetector,
         lang: Option<&str>,
     ) -> anyhow::Result<Option<StepOutput>> {
         if self.buffer.len() - self.window_start < MIN_WINDOW_SAMPLES {
             return Ok(None);
         }
         let window = &self.buffer[self.window_start..];
-        if rms(window) < SILENCE_RMS {
+        let speech = vad.speech_segments(window)?;
+        let Some(&(_, last_speech_end)) = speech.last() else {
+            // No speech at all: drop the audio so silence and non-speech
+            // noise never accumulate (or reach whisper).
+            self.slide();
             return Ok(None);
-        }
+        };
+        let window_len = window.len();
+
         let effective_lang = lang.or(self.window_lang.as_deref());
         let hypothesis = engine.transcribe(window, effective_lang)?;
         if lang.is_none() && self.window_lang.is_none() {
@@ -78,9 +78,9 @@ impl StreamScheduler {
         let mut committed_delta = agreement.committed_delta;
         let mut volatile = agreement.volatile;
 
-        let tail = &window[window.len().saturating_sub(TRAILING_SILENCE_SAMPLES)..];
-        let at_utterance_boundary = rms(tail) < SILENCE_RMS;
-        if at_utterance_boundary || window.len() >= MAX_WINDOW_SAMPLES {
+        let at_utterance_boundary =
+            window_len.saturating_sub(last_speech_end) >= TRAILING_NON_SPEECH_SAMPLES;
+        if at_utterance_boundary || window_len >= MAX_WINDOW_SAMPLES {
             committed_delta.push_str(&volatile);
             volatile.clear();
             self.slide();
@@ -137,9 +137,43 @@ mod tests {
         }
     }
 
-    /// Audible fake audio: constant amplitude well above the silence gate.
+    /// Audible fake audio: constant amplitude well above AmplitudeVad's bar.
     fn seconds(n: usize) -> Vec<f32> {
         vec![0.1; TARGET_RATE as usize * n]
+    }
+
+    /// Test stand-in for a real VAD: |sample| >= 0.05 counts as speech.
+    struct AmplitudeVad;
+
+    impl crate::SpeechDetector for AmplitudeVad {
+        fn speech_segments(&mut self, samples: &[f32]) -> anyhow::Result<Vec<(usize, usize)>> {
+            let mut segments = Vec::new();
+            let mut start = None;
+            for (i, s) in samples.iter().enumerate() {
+                if s.abs() >= 0.05 {
+                    start.get_or_insert(i);
+                } else if let Some(begin) = start.take() {
+                    segments.push((begin, i));
+                }
+            }
+            if let Some(begin) = start {
+                segments.push((begin, samples.len()));
+            }
+            Ok(segments)
+        }
+    }
+
+    #[test]
+    fn no_speech_window_is_dropped_entirely() {
+        let mut engine = FakeEngine::scripted(&["次"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.0005; 5 * TARGET_RATE as usize]); // noise only
+        assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
+        // the noise was dropped: the next decode sees only the new speech
+        sched.push_audio(&seconds(2));
+        sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(engine.received_samples, vec![2 * 16_000]);
     }
 
     #[test]
@@ -150,15 +184,16 @@ mod tests {
             ("Hello world", Some("en")),
             ("こんにちは", Some("ja")),
         ]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(2));
-        sched.step(&mut engine, None).unwrap(); // first decode: detect
+        sched.step(&mut engine, &mut vad, None).unwrap(); // first decode: detect
         sched.push_audio(&seconds(1));
-        sched.step(&mut engine, None).unwrap(); // pinned to detected lang
+        sched.step(&mut engine, &mut vad, None).unwrap(); // pinned to detected lang
         sched.push_audio(&vec![0.0; TARGET_RATE as usize]); // pause → slide
-        sched.step(&mut engine, None).unwrap();
+        sched.step(&mut engine, &mut vad, None).unwrap();
         sched.push_audio(&seconds(2)); // next speaker, new window
-        sched.step(&mut engine, None).unwrap(); // detection restarts
+        sched.step(&mut engine, &mut vad, None).unwrap(); // detection restarts
         assert_eq!(
             engine.received_langs,
             vec![None, Some("en".into()), Some("en".into()), None]
@@ -168,25 +203,27 @@ mod tests {
     #[test]
     fn trailing_silence_flushes_volatile_and_slides() {
         let mut engine = FakeEngine::scripted(&["こんにちは"]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         let mut audio = vec![0.1; 2 * TARGET_RATE as usize]; // speech
         audio.extend(vec![0.0; TARGET_RATE as usize]); // 1s pause
         sched.push_audio(&audio);
-        let out = sched.step(&mut engine, None).unwrap().unwrap();
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(out.committed_delta, "こんにちは"); // flushed, not stuck volatile
         assert_eq!(out.volatile, "");
         // window slid past the utterance: the silent remainder is gated
         sched.push_audio(&vec![0.0; TARGET_RATE as usize]);
-        assert_eq!(sched.step(&mut engine, None).unwrap(), None);
+        assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
         assert_eq!(engine.received_samples.len(), 1);
     }
 
     #[test]
     fn silent_window_is_not_decoded() {
         let mut engine = FakeEngine::scripted(&[]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&vec![0.0005; 2 * TARGET_RATE as usize]); // ambient noise level
-        let out = sched.step(&mut engine, None).unwrap();
+        let out = sched.step(&mut engine, &mut vad, None).unwrap();
         assert_eq!(out, None);
         assert!(engine.received_samples.is_empty());
     }
@@ -194,13 +231,14 @@ mod tests {
     #[test]
     fn consecutive_steps_commit_agreed_prefix() {
         let mut engine = FakeEngine::scripted(&["こんにちは、せ", "こんにちは、世界"]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(2));
-        let first = sched.step(&mut engine, None).unwrap().unwrap();
+        let first = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(first.committed_delta, "");
         assert_eq!(first.volatile, "こんにちは、せ");
         sched.push_audio(&seconds(1));
-        let second = sched.step(&mut engine, None).unwrap().unwrap();
+        let second = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(second.committed_delta, "こんにちは、");
         assert_eq!(second.volatile, "世界");
         // each step decodes the whole current window
@@ -210,14 +248,15 @@ mod tests {
     #[test]
     fn window_slides_and_agreement_resets_after_max_window() {
         let mut engine = FakeEngine::scripted(&["長い発話です", "次"]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(16));
         // exceeds 15s max → volatile is flushed to committed, then slides
-        let flushed = sched.step(&mut engine, None).unwrap().unwrap();
+        let flushed = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(flushed.committed_delta, "長い発話です");
         assert_eq!(flushed.volatile, "");
         sched.push_audio(&seconds(2));
-        let out = sched.step(&mut engine, None).unwrap().unwrap();
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(out.committed_delta, ""); // fresh agreement context
         assert_eq!(out.volatile, "次");
         // the post-slide decode saw only audio pushed after the slide
@@ -227,9 +266,10 @@ mod tests {
     #[test]
     fn does_not_decode_below_one_second_of_audio() {
         let mut engine = FakeEngine::scripted(&[]);
+        let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(1)[..100]);
-        let out = sched.step(&mut engine, None).unwrap();
+        let out = sched.step(&mut engine, &mut vad, None).unwrap();
         assert_eq!(out, None);
         assert!(engine.received_samples.is_empty());
     }

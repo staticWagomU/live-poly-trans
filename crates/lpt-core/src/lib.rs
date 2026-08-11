@@ -33,6 +33,13 @@ pub trait AsrEngine: Send {
     fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis>;
 }
 
+/// Voice activity detection over one window of 16 kHz mono audio.
+pub trait SpeechDetector {
+    /// Speech regions as (start, end) sample offsets within `samples`,
+    /// in ascending order.
+    fn speech_segments(&mut self, samples: &[f32]) -> anyhow::Result<Vec<(usize, usize)>>;
+}
+
 /// Sentence-level translator (queued, sequential; never blocks recognition).
 pub trait Translator: Send {
     fn translate(&mut self, sentence: &str, source_lang: &str, target_lang: &str)
