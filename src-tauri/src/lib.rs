@@ -24,6 +24,16 @@ struct CaptureState {
     running: Arc<AtomicBool>,
 }
 
+/// Languages the restricted auto-detection may choose between (Main/Sub pair).
+fn allowed_langs() -> Vec<String> {
+    std::env::var("LPT_LANGS")
+        .unwrap_or_else(|_| "ja,en".into())
+        .split(',')
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect()
+}
+
 fn model_path() -> String {
     std::env::var("LPT_WHISPER_MODEL").unwrap_or_else(|_| {
         concat!(
@@ -104,7 +114,7 @@ fn run_capture(running: &AtomicBool, pending: Arc<Mutex<Vec<f32>>>) -> anyhow::R
 fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, app: AppHandle) {
     std::thread::spawn(move || {
         let _ = app.emit("status", "loading model…");
-        let mut engine = match lpt_whisper::WhisperEngine::load(&model_path()) {
+        let mut engine = match lpt_whisper::WhisperEngine::load(&model_path(), &allowed_langs()) {
             Ok(engine) => engine,
             Err(e) => {
                 let _ = app.emit("status", format!("model error: {e:#}"));

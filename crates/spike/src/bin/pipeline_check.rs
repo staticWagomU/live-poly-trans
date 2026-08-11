@@ -20,8 +20,14 @@ fn main() -> anyhow::Result<()> {
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
 
-    eprintln!("loading {model} …");
-    let mut engine = lpt_whisper::WhisperEngine::load(&model)?;
+    let allowed: Vec<String> = std::env::var("LPT_LANGS")
+        .unwrap_or_else(|_| "ja,en".into())
+        .split(',')
+        .map(|l| l.trim().to_string())
+        .filter(|l| !l.is_empty())
+        .collect();
+    eprintln!("loading {model} … (langs {allowed:?})");
+    let mut engine = lpt_whisper::WhisperEngine::load(&model, &allowed)?;
     eprintln!("capturing {secs}s from default input (lang={lang:?})");
 
     let pending: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
