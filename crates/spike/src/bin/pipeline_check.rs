@@ -28,6 +28,9 @@ fn main() -> anyhow::Result<()> {
         .collect();
     eprintln!("loading {model} … (langs {allowed:?})");
     let mut engine = lpt_whisper::WhisperEngine::load(&model, &allowed)?;
+    let vad_model = std::env::var("LPT_VAD_MODEL")
+        .unwrap_or_else(|_| "models/ggml-silero-v5.1.2.bin".into());
+    let mut vad = lpt_whisper::SileroVad::load(&vad_model)?;
     eprintln!("capturing {secs}s from default input (lang={lang:?})");
 
     let pending: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -56,7 +59,7 @@ fn main() -> anyhow::Result<()> {
             scheduler.push_audio(&queued);
             queued.clear();
         }
-        if let Some(out) = scheduler.step(&mut engine, lang.as_deref())? {
+        if let Some(out) = scheduler.step(&mut engine, &mut vad, lang.as_deref())? {
             committed.push_str(&out.committed_delta);
             println!("committed: {committed}");
             println!("volatile : {}", out.volatile);

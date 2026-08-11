@@ -7,7 +7,7 @@
 //! symbol collision is resolved (docs/step0-results.md).
 
 use anyhow::{Context, Result};
-use lpt_core::{AsrEngine, Hypothesis};
+use lpt_core::{AsrEngine, Hypothesis, SpeechDetector};
 
 /// Segments whisper itself considers likely non-speech (coughs, breaths,
 /// keyboard noise) hallucinate text; drop them above this probability.
@@ -18,6 +18,63 @@ pub struct WhisperEngine {
     /// When non-empty, auto-detection picks only among these languages
     /// (e.g. the app's Main/Sub pair) instead of whisper's full set.
     allowed_lang_ids: Vec<i32>,
+}
+
+/// Silero VAD via whisper.cpp. Runs on CPU so it never competes with the
+/// whisper decode for GPU time.
+///
+/// Tuning (all optional, whisper.cpp defaults otherwise):
+/// LPT_VAD_THRESHOLD (0..1, default 0.5), LPT_VAD_MIN_SPEECH_MS,
+/// LPT_VAD_MIN_SILENCE_MS, LPT_VAD_PAD_MS.
+pub struct SileroVad {
+    ctx: whisper_rs::WhisperVadContext,
+}
+
+impl SileroVad {
+    pub fn load(model_path: &str) -> Result<Self> {
+        let mut params = whisper_rs::WhisperVadContextParams::new();
+        params.set_n_threads(2);
+        params.set_use_gpu(false);
+        let ctx = whisper_rs::WhisperVadContext::new(model_path, params)
+            .with_context(|| format!("load VAD model {model_path}"))?;
+        Ok(Self { ctx })
+    }
+
+    fn params() -> whisper_rs::WhisperVadParams {
+        let mut params = whisper_rs::WhisperVadParams::new();
+        if let Some(v) = env_parse::<f32>("LPT_VAD_THRESHOLD") {
+            params.set_threshold(v);
+        }
+        if let Some(v) = env_parse::<i32>("LPT_VAD_MIN_SPEECH_MS") {
+            params.set_min_speech_duration(v);
+        }
+        if let Some(v) = env_parse::<i32>("LPT_VAD_MIN_SILENCE_MS") {
+            params.set_min_silence_duration(v);
+        }
+        if let Some(v) = env_parse::<i32>("LPT_VAD_PAD_MS") {
+            params.set_speech_pad(v);
+        }
+        params
+    }
+}
+
+fn env_parse<T: std::str::FromStr>(name: &str) -> Option<T> {
+    std::env::var(name).ok()?.parse().ok()
+}
+
+impl SpeechDetector for SileroVad {
+    fn speech_segments(&mut self, samples: &[f32]) -> Result<Vec<(usize, usize)>> {
+        let segments = self.ctx.segments_from_samples(Self::params(), samples)?;
+        // timestamps are centiseconds → x160 samples at 16 kHz
+        Ok(segments
+            .map(|seg| {
+                (
+                    ((seg.start * 160.0) as usize).min(samples.len()),
+                    ((seg.end * 160.0) as usize).min(samples.len()),
+                )
+            })
+            .collect())
+    }
 }
 
 /// Pick the allowed language with the highest detection probability.

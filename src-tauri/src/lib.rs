@@ -44,6 +44,16 @@ fn model_path() -> String {
     })
 }
 
+fn vad_model_path() -> String {
+    std::env::var("LPT_VAD_MODEL").unwrap_or_else(|_| {
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../models/ggml-silero-v5.1.2.bin"
+        )
+        .to_string()
+    })
+}
+
 #[tauri::command]
 fn start_capture(app: AppHandle, state: State<'_, CaptureState>) -> Result<(), String> {
     if state.running.swap(true, Ordering::SeqCst) {
@@ -122,6 +132,14 @@ fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, 
                 return;
             }
         };
+        let mut vad = match lpt_whisper::SileroVad::load(&vad_model_path()) {
+            Ok(vad) => vad,
+            Err(e) => {
+                let _ = app.emit("status", format!("vad error: {e:#}"));
+                running.store(false, Ordering::SeqCst);
+                return;
+            }
+        };
         let _ = app.emit("status", "listening");
         // Unset = auto-detect per utterance window (mixed ja/en meetings);
         // set LPT_LANG to pin a single language.
@@ -135,7 +153,7 @@ fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, 
                 scheduler.push_audio(&queued);
                 queued.clear();
             }
-            match scheduler.step(&mut engine, lang.as_deref()) {
+            match scheduler.step(&mut engine, &mut vad, lang.as_deref()) {
                 Ok(Some(out)) => {
                     let _ = app.emit(
                         "transcript",
