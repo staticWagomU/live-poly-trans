@@ -167,8 +167,13 @@ impl LaneRuntime {
         })
     }
 
-    /// Move captured audio into the scheduler and report overruns.
+    /// Move captured audio into the scheduler and report overruns. Fails
+    /// when the stream itself failed (device unplugged): without that the
+    /// session would keep "listening" to silence forever.
     fn pump(&mut self, app: &AppHandle) -> anyhow::Result<()> {
+        if let Some(msg) = self.session.error.lock().unwrap().take() {
+            anyhow::bail!("input stream failed: {msg}");
+        }
         self.drain();
         if !self.mono.is_empty() {
             let resampled = self.resampler.process(&self.mono)?;

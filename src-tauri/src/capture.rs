@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
@@ -24,6 +24,10 @@ pub struct CaptureSession {
     pub channels: usize,
     /// Samples the callback had to drop because the ring was full.
     pub dropped: Arc<AtomicUsize>,
+    /// First stream error (device unplugged, format change, …). The stream
+    /// keeps no audio flowing after one of these, so the pipeline must end
+    /// the session instead of listening to silence forever.
+    pub error: Arc<Mutex<Option<String>>>,
 }
 
 /// Open the default input device on a new thread. The device config and the
@@ -48,18 +52,34 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
     let (producer, consumer) =
         rtrb::RingBuffer::new(src_rate as usize * channels * RING_CAPACITY_SECS);
     let dropped = Arc::new(AtomicUsize::new(0));
+    let error = Arc::new(Mutex::new(None));
 
     let stream_config: cpal::StreamConfig = config.into();
     let stream = match config.sample_format() {
-        cpal::SampleFormat::F32 => {
-            build::<f32>(&device, &stream_config, channels, producer, dropped.clone())
-        }
-        cpal::SampleFormat::I16 => {
-            build::<i16>(&device, &stream_config, channels, producer, dropped.clone())
-        }
-        cpal::SampleFormat::U16 => {
-            build::<u16>(&device, &stream_config, channels, producer, dropped.clone())
-        }
+        cpal::SampleFormat::F32 => build::<f32>(
+            &device,
+            &stream_config,
+            channels,
+            producer,
+            dropped.clone(),
+            error.clone(),
+        ),
+        cpal::SampleFormat::I16 => build::<i16>(
+            &device,
+            &stream_config,
+            channels,
+            producer,
+            dropped.clone(),
+            error.clone(),
+        ),
+        cpal::SampleFormat::U16 => build::<u16>(
+            &device,
+            &stream_config,
+            channels,
+            producer,
+            dropped.clone(),
+            error.clone(),
+        ),
         other => anyhow::bail!("unsupported input sample format: {other:?}"),
     }?;
     stream.play()?;
@@ -68,6 +88,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
         src_rate,
         channels,
         dropped,
+        error,
     }));
     while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
@@ -81,6 +102,7 @@ fn build<T>(
     channels: usize,
     mut producer: rtrb::Producer<f32>,
     dropped: Arc<AtomicUsize>,
+    error: Arc<Mutex<Option<String>>>,
 ) -> Result<cpal::Stream>
 where
     T: SizedSample,
@@ -99,7 +121,13 @@ where
                 dropped.fetch_add(data.len() - writable, Ordering::Relaxed);
             }
         },
-        |err| eprintln!("input stream error: {err}"),
+        move |err| {
+            // First error wins; try_lock so this callback never blocks.
+            if let Ok(mut slot) = error.try_lock() {
+                slot.get_or_insert_with(|| err.to_string());
+            }
+            eprintln!("input stream error: {err}");
+        },
         None,
     )?)
 }
