@@ -57,12 +57,25 @@
     };
   });
 
-  // Follow the live text like a teleprompter: re-runs whenever the
-  // transcript text changes because the attachment reads both states.
+  // Follow the live text like a teleprompter — but only while the reader
+  // is at the tail. Scrolling up to reread history pauses the follow;
+  // returning near the bottom resumes it.
+  let follow = true;
+  const FOLLOW_SLACK_PX = 48;
+
+  function onTranscriptScroll(event: Event) {
+    const el = event.currentTarget as HTMLElement;
+    follow = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+  }
+
+  // Re-runs whenever the transcript text changes because the attachment
+  // reads both states.
   function followTail(el: HTMLElement) {
     void committed;
     void volatileTail;
-    el.scrollTo({ top: el.scrollHeight });
+    if (follow) {
+      el.scrollTo({ top: el.scrollHeight });
+    }
   }
 
   async function toggle() {
@@ -92,14 +105,14 @@
   <header>
     <h1>LivePolyTrans v2</h1>
     <div class="controls">
-      <span class="status">{statusText}</span>
+      <span class="status" role="status">{statusText}</span>
       <button onclick={clear} disabled={busy}>Clear</button>
       <button class="record" class:running onclick={toggle} disabled={busy}>
         {running ? 'Stop' : 'Record'}
       </button>
     </div>
   </header>
-  <section class="transcript" {@attach followTail}>
+  <section class="transcript" onscroll={onTranscriptScroll} {@attach followTail}>
     <p>
       <span class="committed">{committed}</span><span class="volatile">{volatileTail}</span>
     </p>
