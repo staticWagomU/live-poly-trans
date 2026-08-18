@@ -17,6 +17,9 @@ references/
 
 .direnv
 
+# 外部ツール(cclens)のローカルDB
+cclens.db
+
 # v2 spike artifacts
 /target
 /models
