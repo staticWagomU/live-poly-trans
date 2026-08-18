@@ -103,12 +103,12 @@ pub fn run(cmd_rx: Receiver<Cmd>, app: AppHandle) {
     let mut engines: Option<Engines> = None;
     emit_status(&app, "idle", None);
     while let Ok(cmd) = cmd_rx.recv() {
-        if !matches!(cmd, Cmd::Start) {
-            continue; // Stop while idle
-        }
-        match run_session(&cmd_rx, &app, &mut engines) {
-            Ok(()) => emit_status(&app, "idle", None),
-            Err(e) => emit_status(&app, "error", Some(format!("{e:#}"))),
+        match cmd {
+            Cmd::Stop => {} // Stop while idle
+            Cmd::Start => match run_session(&cmd_rx, &app, &mut engines) {
+                Ok(()) => emit_status(&app, "idle", None),
+                Err(e) => emit_status(&app, "error", Some(format!("{e:#}"))),
+            },
         }
     }
 }
@@ -136,29 +136,93 @@ fn run_session(
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     capture::spawn(stop_capture.clone(), ready_tx);
     let result = (|| {
-        let mut session = match ready_rx.recv() {
+        let session = match ready_rx.recv() {
             Ok(session) => session?,
             Err(_) => anyhow::bail!("capture thread died before reporting"),
         };
-        run_capture_loop(cmd_rx, app, engines, &mut session)
+        run_capture_loop(cmd_rx, app, engines, LaneRuntime::new(session)?)
     })();
     stop_capture.store(true, Ordering::SeqCst);
     result
+}
+
+/// Per-lane capture-to-scheduler state. Step 3 adds the speaker lane by
+/// constructing a second runtime; the engines stay shared across lanes.
+struct LaneRuntime {
+    session: capture::CaptureSession,
+    resampler: lpt_core::resample::StreamResampler,
+    scheduler: lpt_core::scheduler::StreamScheduler,
+    /// Downmix scratch buffer, reused across polls.
+    mono: Vec<f32>,
+    reported_drops: usize,
+}
+
+impl LaneRuntime {
+    fn new(session: capture::CaptureSession) -> anyhow::Result<Self> {
+        let resampler = lpt_core::resample::StreamResampler::new(session.src_rate)?;
+        Ok(Self {
+            session,
+            resampler,
+            scheduler: lpt_core::scheduler::StreamScheduler::new(),
+            mono: Vec::new(),
+            reported_drops: 0,
+        })
+    }
+
+    /// Move captured audio into the scheduler and report overruns.
+    fn pump(&mut self, app: &AppHandle) -> anyhow::Result<()> {
+        self.drain();
+        if !self.mono.is_empty() {
+            let resampled = self.resampler.process(&self.mono)?;
+            self.scheduler.push_audio(&resampled);
+            self.mono.clear();
+        }
+        let drops = self.session.dropped.load(Ordering::Relaxed);
+        if drops > self.reported_drops {
+            emit_status(
+                app,
+                "listening",
+                Some(format!("audio overrun: {drops} samples dropped")),
+            );
+            self.reported_drops = drops;
+        }
+        Ok(())
+    }
+
+    /// Move everything the ring currently holds into `mono`, downmixed.
+    fn drain(&mut self) {
+        let channels = self.session.channels;
+        let n = (self.session.consumer.slots() / channels) * channels;
+        if n == 0 {
+            return;
+        }
+        let Ok(chunk) = self.session.consumer.read_chunk(n) else {
+            return;
+        };
+        let (a, b) = chunk.as_slices();
+        // frames may straddle the two slices, so iterate their concatenation
+        let mut samples = a.iter().chain(b.iter());
+        self.mono.reserve(n / channels);
+        for _ in 0..n / channels {
+            let mut frame = 0.0f32;
+            for _ in 0..channels {
+                frame += samples.next().expect("n is a multiple of channels");
+            }
+            self.mono.push(frame / channels as f32);
+        }
+        chunk.commit_all();
+    }
 }
 
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     app: &AppHandle,
     engines: &mut Engines,
-    session: &mut capture::CaptureSession,
+    mut lane: LaneRuntime,
 ) -> anyhow::Result<()> {
-    let mut resampler = lpt_core::resample::StreamResampler::new(session.src_rate)?;
-    let mut scheduler = lpt_core::scheduler::StreamScheduler::new();
     // Unset = auto-detect per utterance window (mixed ja/en meetings);
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
-    let mut mono = Vec::new();
-    let mut reported_drops = 0;
     emit_status(app, "listening", None);
     let mut next_step = Instant::now() + STEP_INTERVAL;
     loop {
@@ -168,23 +232,13 @@ fn run_capture_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
         }
-        drain(session, &mut mono);
-        if !mono.is_empty() {
-            scheduler.push_audio(&resampler.process(&mono)?);
-            mono.clear();
-        }
-        let drops = session.dropped.load(Ordering::Relaxed);
-        if drops > reported_drops {
-            emit_status(
-                app,
-                "listening",
-                Some(format!("audio overrun: {drops} samples dropped")),
-            );
-            reported_drops = drops;
-        }
+        lane.pump(app)?;
         if Instant::now() >= next_step {
             let started = Instant::now();
-            match scheduler.step(&mut engines.engine, &mut engines.vad, lang.as_deref()) {
+            match lane
+                .scheduler
+                .step(&mut engines.engine, &mut engines.vad, lang.as_deref())
+            {
                 Ok(Some(out)) => emit_step(app, out),
                 Ok(None) => {}
                 // Non-fatal: keep listening, surface the message.
@@ -193,32 +247,8 @@ fn run_capture_loop(
             next_step = started + STEP_INTERVAL;
         }
     }
-    if let Some(fin) = scheduler.finish() {
+    if let Some(fin) = lane.scheduler.finish() {
         emit_step(app, fin);
     }
     Ok(())
-}
-
-/// Move everything the ring currently holds into `mono`, downmixed.
-fn drain(session: &mut capture::CaptureSession, mono: &mut Vec<f32>) {
-    let channels = session.channels;
-    let n = (session.consumer.slots() / channels) * channels;
-    if n == 0 {
-        return;
-    }
-    let Ok(chunk) = session.consumer.read_chunk(n) else {
-        return;
-    };
-    let (a, b) = chunk.as_slices();
-    // frames may straddle the two slices, so iterate their concatenation
-    let mut samples = a.iter().chain(b.iter());
-    mono.reserve(n / channels);
-    for _ in 0..n / channels {
-        let mut frame = 0.0f32;
-        for _ in 0..channels {
-            frame += samples.next().expect("n is a multiple of channels");
-        }
-        mono.push(frame / channels as f32);
-    }
-    chunk.commit_all();
 }
