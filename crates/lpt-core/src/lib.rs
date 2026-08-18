@@ -18,8 +18,12 @@ pub enum Lane {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Hypothesis {
     pub text: String,
-    /// Milliseconds from capture start.
+    /// Milliseconds from the start of the *transcribed window* (the samples
+    /// passed to [`AsrEngine::transcribe`]) — not from capture start. The
+    /// scheduler's slide carry-over arithmetic depends on this; a backend
+    /// returning stream-absolute times would silently break it.
     pub start_ms: u64,
+    /// End of the last decoded segment, window-relative like `start_ms`.
     pub end_ms: u64,
     /// Language the engine detected (or was told) for this window.
     pub lang: Option<String>,

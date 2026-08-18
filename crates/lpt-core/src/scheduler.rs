@@ -165,6 +165,11 @@ impl StreamScheduler {
             } else {
                 // Forced slide mid-speech: the decode may not have reached
                 // the window end, and audio past `end_ms` has no text yet.
+                // This trusts whisper's notoriously loose end timestamp:
+                // too early re-decodes committed audio (duplicated text —
+                // the fresh agreement context cannot absorb it), too late
+                // discards untranscribed audio. MAX_CARRY_SAMPLES bounds
+                // either failure to 5 seconds.
                 let end_sample = (hypothesis.end_ms as usize) * (TARGET_RATE as usize) / 1000;
                 let keep_from = end_sample
                     .max(window_len.saturating_sub(MAX_CARRY_SAMPLES))
