@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter};
 
 use crate::capture;
+use lpt_core::Lane;
 
 /// Decode cadence, measured step-start to step-start: a slow decode eats
 /// into the following idle time instead of stacking on top of it.
@@ -29,6 +30,8 @@ pub enum Cmd {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TranscriptPayload {
+    /// Which audio lane the text belongs to ("mic" now; "speaker" in Step 3).
+    lane: &'static str,
     committed_delta: String,
     volatile: String,
     utterance_final: Option<String>,
@@ -100,6 +103,13 @@ fn vad_model_path() -> String {
     })
 }
 
+fn lane_name(lane: Lane) -> &'static str {
+    match lane {
+        Lane::Mic => "mic",
+        Lane::Speaker => "speaker",
+    }
+}
+
 fn emit_status(ui: &Ui, state: &'static str, message: Option<String>) {
     let payload = StatusPayload { state, message };
     *ui.status.lock().unwrap() = payload.clone();
@@ -107,10 +117,11 @@ fn emit_status(ui: &Ui, state: &'static str, message: Option<String>) {
 }
 
 /// Unconditional emit: pass outputs through an [`EmitGate`] first.
-fn emit_step(ui: &Ui, out: lpt_core::scheduler::StepOutput) {
+fn emit_step(ui: &Ui, lane: Lane, out: lpt_core::scheduler::StepOutput) {
     let _ = ui.app.emit(
         "transcript",
         TranscriptPayload {
+            lane: lane_name(lane),
             committed_delta: out.committed_delta,
             volatile: out.volatile,
             utterance_final: out.utterance_final,
@@ -159,7 +170,7 @@ fn run_session(
             Ok(session) => session?,
             Err(_) => anyhow::bail!("capture thread died before reporting"),
         };
-        run_capture_loop(cmd_rx, ui, engines, LaneRuntime::new(session)?)
+        run_capture_loop(cmd_rx, ui, engines, LaneRuntime::new(Lane::Mic, session)?)
     })();
     stop_capture.store(true, Ordering::SeqCst);
     result
@@ -168,6 +179,7 @@ fn run_session(
 /// Per-lane capture-to-scheduler state. Step 3 adds the speaker lane by
 /// constructing a second runtime; the engines stay shared across lanes.
 struct LaneRuntime {
+    lane: Lane,
     session: capture::CaptureSession,
     resampler: lpt_core::resample::StreamResampler,
     scheduler: lpt_core::scheduler::StreamScheduler,
@@ -177,9 +189,10 @@ struct LaneRuntime {
 }
 
 impl LaneRuntime {
-    fn new(session: capture::CaptureSession) -> anyhow::Result<Self> {
+    fn new(lane: Lane, session: capture::CaptureSession) -> anyhow::Result<Self> {
         let resampler = lpt_core::resample::StreamResampler::new(session.src_rate)?;
         Ok(Self {
+            lane,
             session,
             resampler,
             scheduler: lpt_core::scheduler::StreamScheduler::new(),
@@ -289,7 +302,7 @@ fn run_capture_loop(
             {
                 Ok(Some(out)) => {
                     if gate.should_emit(&out) {
-                        emit_step(ui, out);
+                        emit_step(ui, lane.lane, out);
                     }
                 }
                 Ok(None) => {}
@@ -309,13 +322,13 @@ fn run_capture_loop(
         .finish(&mut engines.engine, &mut engines.vad, lang.as_deref())?
     {
         if gate.should_emit(&fin) {
-            emit_step(ui, fin);
+            emit_step(ui, lane.lane, fin);
         }
     }
     // A tail can still be on screen when finish had nothing to flush (the
     // scheduler discarded that hypothesis with a no-speech window drop).
     if gate.volatile_on_screen {
-        emit_step(ui, lpt_core::scheduler::StepOutput::default());
+        emit_step(ui, lane.lane, lpt_core::scheduler::StepOutput::default());
     }
     Ok(())
 }

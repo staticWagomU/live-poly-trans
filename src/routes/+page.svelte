@@ -4,6 +4,9 @@
   import { listen } from '@tauri-apps/api/event';
 
   type TranscriptPayload = {
+    // Single mic lane today; the speaker lane arrives in Step 3 and will
+    // get its own display column.
+    lane: 'mic' | 'speaker';
     committedDelta: string;
     volatile: string;
     utteranceFinal: string | null;
