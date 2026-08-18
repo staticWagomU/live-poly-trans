@@ -85,10 +85,8 @@ fn emit_status(app: &AppHandle, state: &'static str, message: Option<String>) {
     let _ = app.emit("status", StatusPayload { state, message });
 }
 
+/// Unconditional emit: pass outputs through an [`EmitGate`] first.
 fn emit_step(app: &AppHandle, out: lpt_core::scheduler::StepOutput) {
-    if out.committed_delta.is_empty() && out.volatile.is_empty() && out.utterance_final.is_none() {
-        return; // nothing new — don't wake the UI every idle second
-    }
     let _ = app.emit(
         "transcript",
         TranscriptPayload {
@@ -214,6 +212,29 @@ impl LaneRuntime {
     }
 }
 
+/// Decides which step outputs reach the UI. Idle steps are dropped, but an
+/// all-empty output must still go out while a volatile tail is on screen:
+/// LocalAgreement returns an empty volatile to *hide* a contradicted tail,
+/// and swallowing that event would leave ghost text in the UI.
+#[derive(Default)]
+struct EmitGate {
+    volatile_on_screen: bool,
+}
+
+impl EmitGate {
+    fn should_emit(&mut self, out: &lpt_core::scheduler::StepOutput) -> bool {
+        let has_news = !out.committed_delta.is_empty()
+            || !out.volatile.is_empty()
+            || out.utterance_final.is_some();
+        let clears_tail = self.volatile_on_screen && out.volatile.is_empty();
+        if !(has_news || clears_tail) {
+            return false;
+        }
+        self.volatile_on_screen = !out.volatile.is_empty();
+        true
+    }
+}
+
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     app: &AppHandle,
@@ -224,6 +245,7 @@ fn run_capture_loop(
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
     emit_status(app, "listening", None);
+    let mut gate = EmitGate::default();
     let mut next_step = Instant::now() + STEP_INTERVAL;
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -239,7 +261,11 @@ fn run_capture_loop(
                 .scheduler
                 .step(&mut engines.engine, &mut engines.vad, lang.as_deref())
             {
-                Ok(Some(out)) => emit_step(app, out),
+                Ok(Some(out)) => {
+                    if gate.should_emit(&out) {
+                        emit_step(app, out);
+                    }
+                }
                 Ok(None) => {}
                 // Non-fatal: keep listening, surface the message.
                 Err(e) => emit_status(app, "listening", Some(format!("decode error: {e:#}"))),
@@ -256,7 +282,59 @@ fn run_capture_loop(
         .scheduler
         .finish(&mut engines.engine, &mut engines.vad, lang.as_deref())?
     {
-        emit_step(app, fin);
+        if gate.should_emit(&fin) {
+            emit_step(app, fin);
+        }
+    }
+    // A tail can still be on screen when finish had nothing to flush (the
+    // scheduler discarded that hypothesis with a no-speech window drop).
+    if gate.volatile_on_screen {
+        emit_step(app, lpt_core::scheduler::StepOutput::default());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use lpt_core::scheduler::StepOutput;
+
+    fn out(committed: &str, volatile: &str) -> StepOutput {
+        StepOutput {
+            committed_delta: committed.into(),
+            volatile: volatile.into(),
+            utterance_final: None,
+        }
+    }
+
+    #[test]
+    fn gate_drops_idle_steps_but_passes_a_volatile_clear() {
+        let mut gate = EmitGate::default();
+        assert!(!gate.should_emit(&out("", ""))); // nothing shown yet: idle
+        assert!(gate.should_emit(&out("", "こんにち"))); // tail appears
+        // agreement hid the contradicted tail: the UI must be told
+        assert!(gate.should_emit(&out("", "")));
+        assert!(!gate.should_emit(&out("", ""))); // already clear: idle again
+    }
+
+    #[test]
+    fn gate_tracks_the_tail_across_commits() {
+        let mut gate = EmitGate::default();
+        assert!(gate.should_emit(&out("", "こんにち")));
+        assert!(gate.should_emit(&out("こんにちは、", "せ")));
+        // a boundary flush ends with an empty tail; nothing stays on screen
+        assert!(gate.should_emit(&out("世界", "")));
+        assert!(!gate.should_emit(&out("", "")));
+    }
+
+    #[test]
+    fn gate_passes_an_utterance_final_even_without_text_deltas() {
+        let mut gate = EmitGate::default();
+        let fin = StepOutput {
+            committed_delta: String::new(),
+            volatile: String::new(),
+            utterance_final: Some("こんにちは".into()),
+        };
+        assert!(gate.should_emit(&fin));
+    }
 }

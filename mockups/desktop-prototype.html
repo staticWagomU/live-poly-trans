@@ -1,0 +1,1051 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans Desktop Prototype</title>
+<style>
+  :root {
+    --blue: #0a84ff;
+    --blue-soft: rgba(10, 132, 255, 0.15);
+    --green: #30d158;
+    --orange: #ff9f0a;
+    --red: #ff453a;
+    --ink: #1b1b1f;
+    --ink-2: #5b5c64;
+    --muted: #8a8b93;
+    --line: rgba(20, 20, 28, 0.1);
+    --line-dark: rgba(255, 255, 255, 0.14);
+    --glass: rgba(248, 248, 251, 0.76);
+    --glass-strong: rgba(255, 255, 255, 0.88);
+    --panel: #fbfbfd;
+    --shadow-lg: 0 34px 90px rgba(0, 0, 0, 0.34);
+    --shadow-pop: 0 18px 52px rgba(0, 0, 0, 0.26);
+    --ai-grad: linear-gradient(120deg, #0a84ff, #8a63d2 42%, #ff375f 72%, #ff9f0a);
+    --font: "Avenir Next", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 12px;
+    background:
+      radial-gradient(900px 420px at 10% 4%, rgba(255, 183, 77, 0.28), transparent 58%),
+      radial-gradient(920px 520px at 92% 10%, rgba(62, 146, 204, 0.36), transparent 60%),
+      linear-gradient(145deg, #20293c 0%, #2c3251 44%, #161a2c 100%);
+    color: var(--ink);
+    font-family: var(--font);
+  }
+
+  button, input {
+    font: inherit;
+    color: inherit;
+  }
+
+  button {
+    border: 0;
+    background: none;
+    cursor: pointer;
+  }
+
+  button:focus-visible, input:focus-visible {
+    outline: 2px solid var(--blue);
+    outline-offset: 2px;
+  }
+
+  .stage {
+    width: min(1720px, calc(100vw - 24px));
+    height: min(980px, calc(100vh - 24px));
+    min-height: 760px;
+    border: 1px solid rgba(255,255,255,0.18);
+    border-radius: 18px;
+    overflow: hidden;
+    position: relative;
+    box-shadow: 0 44px 120px rgba(0, 0, 0, 0.55);
+    background:
+      radial-gradient(820px 540px at 78% 18%, rgba(151, 204, 255, 0.42), transparent 64%),
+      radial-gradient(780px 620px at 12% 92%, rgba(248, 137, 113, 0.42), transparent 58%),
+      linear-gradient(150deg, #324d75 0%, #6a4d70 48%, #222b50 100%);
+  }
+
+  .stage::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    background-image: linear-gradient(rgba(255,255,255,0.045) 1px, transparent 1px);
+    background-size: 100% 4px;
+    opacity: 0.18;
+    mix-blend-mode: overlay;
+  }
+
+  .menubar {
+    position: absolute;
+    inset: 0 0 auto;
+    height: 30px;
+    z-index: 60;
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    padding: 0 14px;
+    color: rgba(255,255,255,0.94);
+    background: rgba(18, 18, 24, 0.34);
+    backdrop-filter: blur(24px) saturate(170%);
+    font-size: 12px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.36);
+  }
+
+  .menu-app { font-weight: 700; }
+  .menu-muted { opacity: 0.86; }
+  .menu-spacer { flex: 1; }
+  .status-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 7px;
+    border-radius: 6px;
+  }
+  .status-chip.open { background: rgba(255,255,255,0.23); }
+  .rec-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--red);
+    box-shadow: 0 0 8px var(--red);
+    animation: pulse 1.5s ease-in-out infinite;
+  }
+  .wave-glyph {
+    height: 13px;
+    display: inline-flex;
+    align-items: end;
+    gap: 2px;
+  }
+  .wave-glyph i {
+    width: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transform-origin: bottom;
+    animation: eq 1.3s ease-in-out infinite;
+  }
+  .wave-glyph i:nth-child(1) { height: 5px; }
+  .wave-glyph i:nth-child(2) { height: 12px; animation-delay: .12s; }
+  .wave-glyph i:nth-child(3) { height: 8px; animation-delay: .22s; }
+  .wave-glyph i:nth-child(4) { height: 10px; animation-delay: .05s; }
+  .wave-glyph i:nth-child(5) { height: 6px; animation-delay: .18s; }
+
+  .native-popover {
+    position: absolute;
+    top: 36px;
+    right: 38px;
+    z-index: 70;
+    width: 286px;
+    padding: 6px;
+    border-radius: 13px;
+    border: 1px solid var(--line);
+    background: var(--glass);
+    backdrop-filter: blur(34px) saturate(190%);
+    box-shadow: var(--shadow-pop), inset 0 0 0 0.5px rgba(255,255,255,0.28);
+    display: none;
+  }
+  .native-popover.open { display: block; animation: appear .18s ease-out; }
+  .nm-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px 7px;
+  }
+  .nm-title { font-size: 12.5px; font-weight: 700; }
+  .nm-time { margin-left: auto; color: var(--red); font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .nm-caption { padding: 2px 10px 7px; font-size: 10.5px; color: var(--muted); }
+  .nm-sep { height: 1px; background: rgba(0,0,0,0.08); margin: 5px 8px; }
+  .nm-item {
+    width: 100%;
+    min-height: 29px;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 5px 10px;
+    border-radius: 7px;
+    font-size: 13px;
+    text-align: left;
+  }
+  .nm-item:hover { background: var(--blue); color: #fff; }
+  .nm-check { width: 12px; text-align: center; font-size: 11px; }
+  .nm-key, .nm-sub { margin-left: auto; color: var(--muted); font-size: 11.5px; }
+  .nm-item:hover .nm-key, .nm-item:hover .nm-sub { color: rgba(255,255,255,0.76); }
+
+  .desktop-icon {
+    position: absolute;
+    top: 64px;
+    left: 28px;
+    z-index: 5;
+    width: 86px;
+    color: #fff;
+    text-align: center;
+    font-size: 11px;
+    text-shadow: 0 1px 8px rgba(0,0,0,0.5);
+  }
+  .desktop-icon .folder {
+    width: 52px;
+    height: 40px;
+    margin: 0 auto 7px;
+    border-radius: 7px;
+    background: linear-gradient(180deg, #9ed0ff, #3f92e6);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.42), 0 8px 18px rgba(0,0,0,.24);
+    position: relative;
+  }
+  .desktop-icon .folder::before {
+    content: "";
+    position: absolute;
+    left: 5px;
+    top: -6px;
+    width: 24px;
+    height: 11px;
+    border-radius: 5px 5px 0 0;
+    background: #b9ddff;
+  }
+
+  .call-window {
+    position: absolute;
+    left: 92px;
+    right: 110px;
+    top: 72px;
+    bottom: 92px;
+    z-index: 8;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.12);
+    background: #191a20;
+    box-shadow: 0 22px 60px rgba(0,0,0,0.46);
+    display: grid;
+    grid-template-rows: 32px 1fr 50px;
+  }
+  .call-top {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 0 12px;
+    color: #b9bac3;
+    background: #25262d;
+    font-size: 11px;
+  }
+  .traffic { display: flex; gap: 7px; }
+  .traffic i { width: 11px; height: 11px; border-radius: 50%; }
+  .traffic i:nth-child(1) { background: #ff5f57; }
+  .traffic i:nth-child(2) { background: #febc2e; }
+  .traffic i:nth-child(3) { background: #28c840; }
+  .call-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    padding: 12px;
+  }
+  .video-tile {
+    position: relative;
+    border-radius: 12px;
+    overflow: hidden;
+    background:
+      radial-gradient(120px 120px at 48% 38%, rgba(255,255,255,.08), transparent 65%),
+      linear-gradient(150deg, #2d303a, #1f2027);
+    display: grid;
+    place-items: center;
+  }
+  .video-tile.speaking { box-shadow: inset 0 0 0 2px rgba(48,209,88,.72); }
+  .avatar {
+    width: 84px;
+    height: 84px;
+    display: grid;
+    place-items: center;
+    border-radius: 50%;
+    color: #d7d9e2;
+    background: linear-gradient(145deg, #4b5265, #2f3340);
+    font-size: 28px;
+    font-weight: 700;
+    letter-spacing: 0;
+  }
+  .tile-name {
+    position: absolute;
+    left: 12px;
+    bottom: 10px;
+    padding: 4px 9px;
+    border-radius: 6px;
+    color: #f4f4f6;
+    background: rgba(0,0,0,.42);
+    font-size: 11px;
+  }
+  .call-controls {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 12px;
+    background: #202127;
+  }
+  .call-pill {
+    min-width: 34px;
+    height: 32px;
+    padding: 0 12px;
+    display: inline-grid;
+    place-items: center;
+    border-radius: 999px;
+    color: #d9dae1;
+    background: rgba(255,255,255,0.08);
+    font-size: 12px;
+  }
+  .call-pill.end { background: #c42b2b; color: #fff; }
+
+  .app-window {
+    position: absolute;
+    left: 180px;
+    top: 104px;
+    z-index: 20;
+    width: 900px;
+    height: 540px;
+    border-radius: 15px;
+    border: 1px solid rgba(30,30,40,.14);
+    background: var(--panel);
+    box-shadow: var(--shadow-lg), inset 0 0 0 0.5px rgba(255,255,255,0.36);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 53px 1fr;
+  }
+  .app-window.hidden { display: none; }
+  .toolbar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--line);
+    background: rgba(255,255,255,.72);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+  .seg {
+    display: flex;
+    padding: 2px;
+    border-radius: 9px;
+    background: rgba(120,120,128,.16);
+  }
+  .seg button {
+    min-width: 78px;
+    padding: 5px 13px;
+    border-radius: 7px;
+    color: var(--ink-2);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .seg button.active {
+    color: var(--ink);
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,.16);
+  }
+  .toolbar-spacer { flex: 1; }
+  .toolbar-btn {
+    height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 13px;
+    border-radius: 999px;
+    border: 1px solid var(--line);
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .toolbar-btn.primary { color: #fff; border-color: var(--blue); background: var(--blue); }
+  .toolbar-btn.rec { color: #fff; border-color: var(--red); background: var(--red); font-variant-numeric: tabular-nums; }
+  .ai-mark {
+    background: var(--ai-grad);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+    font-weight: 800;
+  }
+
+  .view { display: none; min-height: 0; }
+  .view.active { display: grid; }
+  .live-view { grid-template-columns: minmax(0, 1fr) 318px; }
+  .captions {
+    overflow: auto;
+    padding: 24px 28px;
+    display: grid;
+    gap: 17px;
+    align-content: start;
+  }
+  .caption { display: grid; gap: 3px; }
+  .speaker-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    width: max-content;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .speaker-label .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .caption.me .speaker-label { color: var(--blue); }
+  .caption.them .speaker-label { color: var(--orange); }
+  .caption .main { font-size: 19px; font-weight: 700; line-height: 1.48; letter-spacing: 0; }
+  .caption .sub { color: var(--muted); font-size: 14px; line-height: 1.46; }
+
+  .ai-panel {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr auto;
+    border-left: 1px solid var(--line);
+    background: linear-gradient(90deg, rgba(10,132,255,.06), rgba(255,255,255,.64));
+    position: relative;
+  }
+  .ai-panel::before {
+    content: "";
+    position: absolute;
+    inset: 0 auto 0 0;
+    width: 2px;
+    background: var(--ai-grad);
+  }
+  .ai-tabs {
+    display: flex;
+    gap: 4px;
+    padding: 13px 14px 0;
+  }
+  .ai-tabs button {
+    flex: 1;
+    padding: 7px 0 9px;
+    color: var(--muted);
+    font-size: 12.5px;
+    font-weight: 800;
+    border-bottom: 2px solid transparent;
+  }
+  .ai-tabs button.active {
+    color: var(--ink);
+    border-image: var(--ai-grad) 1;
+    border-bottom: 2px solid;
+  }
+  .ai-body {
+    overflow: auto;
+    padding: 16px;
+    display: none;
+    align-content: start;
+    gap: 10px;
+  }
+  .ai-body.active { display: grid; animation: appear .18s ease-out; }
+  .panel-cap {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .panel-cap button { margin-left: auto; color: var(--blue); font-size: 11px; font-weight: 800; }
+  .todo {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 10px;
+    align-items: start;
+    padding: 10px 11px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    box-shadow: 0 3px 12px rgba(0,0,0,.04);
+    cursor: pointer;
+  }
+  .todo:hover { transform: translateY(-1px); box-shadow: 0 8px 18px rgba(0,0,0,.08); }
+  .todo input { margin-top: 2px; accent-color: var(--blue); }
+  .todo-title { display: block; font-size: 12.5px; font-weight: 700; line-height: 1.45; }
+  .todo-meta { display: flex; gap: 9px; margin-top: 4px; color: var(--muted); font-size: 11px; }
+  .todo-meta .jump { color: var(--blue); font-weight: 700; }
+  .todo.done { opacity: .58; }
+  .todo.done .todo-title { text-decoration: line-through; color: var(--muted); }
+  .summary-box {
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink-2);
+    font-size: 12.5px;
+    line-height: 1.7;
+  }
+  .ask-row {
+    display: flex;
+    gap: 8px;
+    padding: 11px 13px;
+    border-top: 1px solid var(--line);
+  }
+  .ask-row input {
+    flex: 1;
+    min-width: 0;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    padding: 8px 12px;
+    font-size: 12.5px;
+  }
+  .ask-row button {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    color: #fff;
+    background: var(--ai-grad);
+    font-weight: 900;
+  }
+
+  .recordings-view { grid-template-columns: 254px minmax(0, 1fr); }
+  .side {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto 1fr;
+    border-right: 1px solid var(--line);
+    background: rgba(245,245,247,.88);
+  }
+  .searchbox { position: relative; margin: 12px; }
+  .searchbox::before {
+    content: "⌕";
+    position: absolute;
+    left: 10px;
+    top: 6px;
+    color: var(--muted);
+    font-size: 15px;
+  }
+  .searchbox input {
+    width: 100%;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: rgba(120,120,128,.14);
+    padding: 8px 10px 8px 30px;
+    font-size: 12.5px;
+  }
+  .rec-list { overflow: auto; padding: 0 12px 14px; }
+  .grp {
+    margin: 12px 4px 5px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .rec-item {
+    width: 100%;
+    display: grid;
+    gap: 3px;
+    padding: 9px 11px;
+    border-radius: 11px;
+    text-align: left;
+  }
+  .rec-item:hover { background: rgba(120,120,128,.12); }
+  .rec-item.active { background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(10,132,255,.2); }
+  .rec-item .t { font-size: 13px; font-weight: 800; }
+  .rec-item .d, .rec-item .snip { color: var(--muted); font-size: 11px; line-height: 1.35; }
+  mark { border-radius: 3px; padding: 0 2px; background: rgba(255, 214, 10, .42); color: inherit; }
+
+  .detail {
+    min-height: 0;
+    position: relative;
+    display: grid;
+    grid-template-rows: auto auto auto 1fr;
+  }
+  .detail-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 16px 20px 10px;
+  }
+  .detail-head h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+  .meta { color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+  .participants {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 0 20px 12px;
+    flex-wrap: wrap;
+  }
+  .participants .label {
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 28px;
+    padding: 5px 8px 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 700;
+  }
+  .chip:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,.1); }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .chip input {
+    width: 70px;
+    border: 0;
+    outline: 0;
+    padding: 0;
+    background: transparent;
+    font-weight: 800;
+  }
+  .chip .count { color: var(--muted); font-size: 10.5px; }
+  .chip.editing { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+
+  .waveform {
+    margin: 0 20px;
+    height: 64px;
+    border-radius: 12px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    gap: 3px;
+    padding: 0 10px;
+    background: linear-gradient(180deg, var(--blue-soft), rgba(10,132,255,.02));
+    position: relative;
+  }
+  .waveform i {
+    flex: 1;
+    border-radius: 3px;
+    background: linear-gradient(to top, var(--blue), rgba(10,132,255,.3));
+    opacity: .72;
+  }
+  .waveform::after {
+    content: "";
+    position: absolute;
+    left: 41%;
+    top: 6px;
+    bottom: 6px;
+    width: 2px;
+    border-radius: 2px;
+    background: var(--red);
+  }
+  .lines {
+    overflow: auto;
+    display: grid;
+    gap: 11px;
+    align-content: start;
+    padding: 14px 20px 20px;
+  }
+  .line {
+    display: grid;
+    grid-template-columns: 46px auto 1fr;
+    gap: 10px;
+    align-items: baseline;
+  }
+  .line.dim { opacity: .42; }
+  .ts { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
+  .who {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 9px;
+    border-radius: 999px;
+    font-size: 12px;
+    font-weight: 800;
+    white-space: nowrap;
+  }
+  .who .dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+  .who.tanaka { color: var(--blue); background: var(--blue-soft); }
+  .who.sarah { color: #b65f00; background: rgba(255,159,10,.14); }
+  .line-text { font-size: 14px; line-height: 1.55; }
+  .line-text .tr { display: block; margin-top: 1px; color: var(--muted); font-size: 12px; }
+
+  .export-menu {
+    position: absolute;
+    right: 62px;
+    top: 48px;
+    z-index: 35;
+    width: 254px;
+    padding: 6px;
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    background: var(--glass-strong);
+    backdrop-filter: blur(34px) saturate(190%);
+    box-shadow: var(--shadow-pop);
+    display: none;
+  }
+  .export-menu.open { display: block; animation: appear .16s ease-out; }
+  .menu-cap {
+    padding: 6px 10px 4px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 800;
+    letter-spacing: .07em;
+    text-transform: uppercase;
+  }
+  .menu-item {
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    padding: 7px 10px;
+    border-radius: 9px;
+    text-align: left;
+    font-size: 13px;
+  }
+  .menu-item:hover { background: var(--blue); color: #fff; }
+  .menu-item .ext { margin-left: auto; color: var(--muted); font-size: 11px; }
+  .menu-item:hover .ext { color: rgba(255,255,255,.76); }
+  .menu-sep { height: 1px; margin: 5px 6px; background: var(--line); }
+
+  .dock {
+    position: absolute;
+    left: 50%;
+    bottom: 18px;
+    z-index: 55;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: end;
+    gap: 10px;
+    height: 70px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255,255,255,.17);
+    border-radius: 22px;
+    background: rgba(255,255,255,.24);
+    backdrop-filter: blur(28px) saturate(180%);
+    box-shadow: 0 14px 42px rgba(0,0,0,.28);
+  }
+  .dock button {
+    width: 50px;
+    height: 50px;
+    display: grid;
+    place-items: center;
+    border-radius: 13px;
+    background: linear-gradient(145deg, #fdfdff, #bec7d5);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.7), 0 8px 16px rgba(0,0,0,.23);
+    font-size: 11px;
+    font-weight: 900;
+    color: #1c2534;
+    position: relative;
+  }
+  .dock button.active::after {
+    content: "";
+    position: absolute;
+    left: 50%;
+    bottom: -8px;
+    width: 4px;
+    height: 4px;
+    transform: translateX(-50%);
+    border-radius: 50%;
+    background: rgba(255,255,255,.86);
+  }
+  .dock .lpt { color: #fff; background: linear-gradient(145deg, #0a84ff, #8a63d2 58%, #ff9f0a); }
+  .dock .zoom { background: linear-gradient(145deg, #54b7ff, #1d6eed); color: #fff; }
+
+  .toast {
+    position: absolute;
+    right: 24px;
+    bottom: 104px;
+    z-index: 80;
+    width: 270px;
+    display: none;
+    padding: 12px 14px;
+    border: 1px solid rgba(255,255,255,.18);
+    border-radius: 13px;
+    color: #fff;
+    background: rgba(24,24,30,.8);
+    backdrop-filter: blur(24px) saturate(170%);
+    box-shadow: 0 18px 50px rgba(0,0,0,.38);
+    font-size: 12.5px;
+    line-height: 1.55;
+  }
+  .toast.show { display: block; animation: appear .18s ease-out; }
+
+  @keyframes appear {
+    from { opacity: 0; transform: translateY(7px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes pulse { 50% { opacity: .38; } }
+  @keyframes eq {
+    0%, 100% { transform: scaleY(.5); }
+    50% { transform: scaleY(1); }
+  }
+
+  @media (max-width: 980px) {
+    body { padding: 0; }
+    .stage {
+      width: 100vw;
+      min-height: 100vh;
+      border-radius: 0;
+      aspect-ratio: auto;
+    }
+    .app-window {
+      left: 18px;
+      right: 18px;
+      top: 76px;
+      width: auto;
+      height: 580px;
+    }
+    .call-window { left: 20px; right: 20px; }
+    .live-view { grid-template-columns: 1fr; }
+    .ai-panel { display: none; }
+    .recordings-view { grid-template-columns: 1fr; }
+    .side { display: none; }
+    .menu-muted.optional { display: none; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+  <main class="stage" aria-label="LivePolyTrans virtual mac desktop">
+    <div class="menubar">
+      <span class="menu-app">LivePolyTrans</span>
+      <span class="menu-muted optional">File</span>
+      <span class="menu-muted optional">Edit</span>
+      <span class="menu-muted optional">Window</span>
+      <span class="menu-muted optional">Help</span>
+      <span class="menu-spacer"></span>
+      <button class="status-chip open" id="menuButton" type="button" aria-label="LivePolyTrans menu">
+        <span class="wave-glyph" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="rec-dot" id="menuRecDot"></span>
+      </button>
+      <span class="menu-muted">Wi-Fi</span>
+      <span class="menu-muted">82%</span>
+      <span class="menu-muted" id="clock">火 14:02</span>
+    </div>
+
+    <section class="native-popover open" id="nativePopover" aria-label="menu bar resident popover">
+      <div class="nm-head"><span class="rec-dot"></span><span class="nm-title" id="recordState">文字起こし中</span><span class="nm-time" id="recordTime">12:34</span></div>
+      <div class="nm-caption">日本語 ⇄ English · Both</div>
+      <button class="nm-item" id="recordToggle" type="button"><span class="nm-check"></span><span id="recordToggleText">録音を停止</span><span class="nm-key">⌥⌘R</span></button>
+      <button class="nm-item" type="button"><span class="nm-check"></span>一時停止<span class="nm-key">⌥⌘P</span></button>
+      <div class="nm-sep"></div>
+      <button class="nm-item" type="button"><span class="nm-check"></span>音源: Both<span class="nm-sub">変更 ›</span></button>
+      <div class="nm-sep"></div>
+      <button class="nm-item" id="openApp" type="button"><span class="nm-check"></span>LivePolyTrans を開く</button>
+      <button class="nm-item" type="button"><span class="nm-check"></span>設定…<span class="nm-key">⌘,</span></button>
+      <div class="nm-sep"></div>
+      <button class="nm-item" type="button"><span class="nm-check"></span>LivePolyTrans を終了<span class="nm-key">⌘Q</span></button>
+    </section>
+
+    <div class="desktop-icon"><div class="folder"></div><span>Recordings</span></div>
+
+    <section class="call-window" aria-label="video meeting">
+      <div class="call-top"><span class="traffic"><i></i><i></i><i></i></span><span>Zoom ミーティング</span><span class="menu-spacer"></span><span>Live</span></div>
+      <div class="call-grid">
+        <div class="video-tile speaking"><div class="avatar">SC</div><span class="tile-name">Sarah Chen</span></div>
+        <div class="video-tile"><div class="avatar">自分</div><span class="tile-name">田中</span></div>
+      </div>
+      <div class="call-controls">
+        <span class="call-pill">Mic</span><span class="call-pill">Camera</span><span class="call-pill">Share</span><span class="call-pill end">End</span>
+      </div>
+    </section>
+
+    <section class="app-window" id="appWindow" aria-label="LivePolyTrans app window">
+      <div class="toolbar">
+        <span class="traffic"><i></i><i></i><i></i></span>
+        <div class="seg" role="tablist">
+          <button class="active" data-view="live" type="button">Live</button>
+          <button data-view="recordings" type="button">Recordings</button>
+          <button data-view="settings" type="button">Settings</button>
+        </div>
+        <div class="toolbar-spacer"></div>
+        <button class="toolbar-btn"><span class="ai-mark">✦</span> AI</button>
+        <button class="toolbar-btn rec" id="toolbarRec">● 12:34</button>
+      </div>
+
+      <div class="view live-view active" id="view-live">
+        <div class="captions">
+          <div class="caption me"><span class="speaker-label"><span class="dot"></span>田中</span><span class="main">承知しました、では日程を調整してカレンダーに入れておきます。</span><span class="sub">Got it, I'll arrange the schedule and put it on the calendar.</span></div>
+          <div class="caption them"><span class="speaker-label"><span class="dot"></span>Sarah</span><span class="main">We should probably ship the beta by the end of this month.</span><span class="sub">ベータ版は今月末までにリリースした方がよさそうですね。</span></div>
+          <div class="caption them"><span class="speaker-label"><span class="dot"></span>Sarah</span><span class="main">Can you also draft the announcement post by Friday?</span><span class="sub">金曜までに告知文のドラフトも書いてもらえますか？</span></div>
+        </div>
+        <aside class="ai-panel">
+          <div class="ai-tabs">
+            <button data-ai="summary" type="button">要約</button>
+            <button class="active" data-ai="actions" type="button">アクション <span class="ai-mark">3</span></button>
+            <button data-ai="ask" type="button">Ask</button>
+          </div>
+          <div class="ai-body" id="ai-summary">
+            <div class="panel-cap">自動要約 · 14:03 更新<button type="button">コピー</button></div>
+            <div class="summary-box">ベータ版の今月末リリース方針を確認。告知文、カレンダー登録、デザインチーム招待が主な残タスク。</div>
+          </div>
+          <div class="ai-body active" id="ai-actions">
+            <div class="panel-cap">自動抽出 · 14:03 更新<button type="button" id="copyActions">コピー</button></div>
+            <label class="todo"><input type="checkbox" /><span><span class="todo-title">日程を調整してカレンダーに登録する</span><span class="todo-meta"><span>田中</span><span class="jump">14:01 ↗</span></span></span></label>
+            <label class="todo"><input type="checkbox" /><span><span class="todo-title">ベータ版を今月末までにリリースする</span><span class="todo-meta"><span>チーム</span><span class="jump">14:02 ↗</span></span></span></label>
+            <label class="todo"><input type="checkbox" /><span><span class="todo-title">金曜までに告知文のドラフトを書く</span><span class="todo-meta"><span>田中</span><span class="jump">14:03 ↗</span></span></span></label>
+          </div>
+          <div class="ai-body" id="ai-ask">
+            <div class="panel-cap">Ask Live Context</div>
+            <div class="summary-box">「締切だけ一覧にして」など、現在の会議内容に対して質問できます。</div>
+          </div>
+          <div class="ask-row"><input placeholder="この会議について質問…" /><button type="button">↑</button></div>
+        </aside>
+      </div>
+
+      <div class="view recordings-view" id="view-recordings">
+        <aside class="side">
+          <div class="searchbox"><input id="recordingSearch" placeholder="録音を検索" /></div>
+          <div class="rec-list" id="recordingList">
+            <div class="grp" id="searchGroup">今日</div>
+            <button class="rec-item active" type="button"><span class="t">定例ミーティング</span><span class="d">14:00 · 42分 · mic+speaker</span><span class="snip">Sarah: ベータ版は今月末までに…</span></button>
+            <div class="grp">昨日</div>
+            <button class="rec-item" type="button"><span class="t">1on1 Sarah</span><span class="d">11:00 · 28分</span><span class="snip">ベータのフィードバック集約について…</span></button>
+            <button class="rec-item" type="button"><span class="t">プロダクト会議</span><span class="d">7/28 · 51分</span><span class="snip">クローズドベータの対象ユーザー…</span></button>
+          </div>
+        </aside>
+        <div class="detail">
+          <div class="detail-head">
+            <h2>定例ミーティング</h2><span class="meta" id="detailMeta">2026/08/05 14:00 · 42分</span><span class="toolbar-spacer"></span>
+            <button class="toolbar-btn primary" id="exportButton" type="button">書き出し ⌄</button><button class="toolbar-btn" type="button">…</button>
+            <div class="export-menu" id="exportMenu">
+              <div class="menu-cap">音声</div>
+              <button class="menu-item" type="button">マイク音声<span class="ext">.m4a</span></button>
+              <button class="menu-item" type="button">スピーカー音声<span class="ext">.m4a</span></button>
+              <button class="menu-item" type="button">ミックス<span class="ext">.m4a</span></button>
+              <div class="menu-sep"></div>
+              <div class="menu-cap">テキスト</div>
+              <button class="menu-item" type="button">議事録<span class="ext">.md</span></button>
+              <button class="menu-item" type="button">字幕 SubRip<span class="ext">.srt</span></button>
+              <button class="menu-item" type="button">字幕 WebVTT<span class="ext">.vtt</span></button>
+              <button class="menu-item" type="button">従来形式<span class="ext">.json / .txt</span></button>
+              <div class="menu-sep"></div>
+              <button class="menu-item" type="button">書き出しオプション…<span class="ext">⇧⌘E</span></button>
+            </div>
+          </div>
+          <div class="participants">
+            <span class="label">参加者</span>
+            <span class="chip editing"><span class="dot" style="background:#0a84ff"></span><input id="speakerName" value="田中" /><span class="count">26</span></span>
+            <span class="chip"><span class="dot" style="background:#ff9f0a"></span>Sarah<span class="count">19</span></span>
+            <span class="chip"><span class="dot" style="background:#30d158"></span>話者 3<span class="count">4</span></span>
+          </div>
+          <div class="waveform" aria-hidden="true"><i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i></div>
+          <div class="lines" id="transcriptLines">
+            <div class="line"><span class="ts">00:12</span><span class="who tanaka"><span class="dot"></span><span class="speakerText">田中</span></span><span class="line-text">それでは定例を始めます。今日はベータ版のスケジュール確認からです。</span></div>
+            <div class="line"><span class="ts">00:31</span><span class="who sarah"><span class="dot"></span>Sarah</span><span class="line-text">We should probably ship the beta by the end of this month.<span class="tr">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+            <div class="line"><span class="ts">00:58</span><span class="who tanaka"><span class="dot"></span><span class="speakerText">田中</span></span><span class="line-text">了解です。では残タスクを洗い出しましょう。</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="view" id="view-settings" style="place-items:center; color:var(--muted); font-weight:700;">Settings</div>
+    </section>
+
+    <nav class="dock" aria-label="dock">
+      <button class="active lpt" id="dockLpt" type="button">LPT</button>
+      <button class="active zoom" type="button">Zoom</button>
+      <button type="button">Notes</button>
+      <button type="button">Finder</button>
+    </nav>
+
+    <div class="toast" id="toast" role="status"></div>
+  </main>
+
+<script>
+  const qs = (selector) => document.querySelector(selector);
+  const qsa = (selector) => Array.from(document.querySelectorAll(selector));
+
+  const menuButton = qs('#menuButton');
+  const nativePopover = qs('#nativePopover');
+  const appWindow = qs('#appWindow');
+  const toast = qs('#toast');
+  const exportMenu = qs('#exportMenu');
+  let recording = true;
+  let elapsed = 12 * 60 + 34;
+  let toastTimer;
+
+  function formatTime(total) {
+    const minutes = String(Math.floor(total / 60)).padStart(2, '0');
+    const seconds = String(total % 60).padStart(2, '0');
+    return `${minutes}:${seconds}`;
+  }
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 1700);
+  }
+
+  function setRecording(next) {
+    recording = next;
+    qs('#recordState').textContent = recording ? '文字起こし中' : '停止中';
+    qs('#recordToggleText').textContent = recording ? '録音を停止' : '録音を開始';
+    qsa('.rec-dot').forEach((dot) => dot.style.visibility = recording ? 'visible' : 'hidden');
+    qs('#toolbarRec').textContent = recording ? `● ${formatTime(elapsed)}` : '待機中';
+    showToast(recording ? '録音を再開しました' : '録音を停止しました');
+  }
+
+  menuButton.addEventListener('click', () => {
+    nativePopover.classList.toggle('open');
+    menuButton.classList.toggle('open', nativePopover.classList.contains('open'));
+  });
+
+  qs('#recordToggle').addEventListener('click', () => setRecording(!recording));
+  qs('#openApp').addEventListener('click', () => {
+    appWindow.classList.remove('hidden');
+    qs('#dockLpt').classList.add('active');
+  });
+  qs('#dockLpt').addEventListener('click', () => {
+    appWindow.classList.toggle('hidden');
+    qs('#dockLpt').classList.toggle('active', !appWindow.classList.contains('hidden'));
+  });
+
+  qsa('.seg [data-view]').forEach((button) => {
+    button.addEventListener('click', () => {
+      qsa('.seg [data-view]').forEach((b) => b.classList.toggle('active', b === button));
+      qsa('.view').forEach((view) => view.classList.toggle('active', view.id === `view-${button.dataset.view}`));
+      exportMenu.classList.remove('open');
+    });
+  });
+
+  qsa('.ai-tabs button').forEach((button) => {
+    button.addEventListener('click', () => {
+      qsa('.ai-tabs button').forEach((b) => b.classList.toggle('active', b === button));
+      qsa('.ai-body').forEach((panel) => panel.classList.toggle('active', panel.id === `ai-${button.dataset.ai}`));
+    });
+  });
+
+  qsa('.todo input').forEach((box) => {
+    box.addEventListener('change', () => box.closest('.todo').classList.toggle('done', box.checked));
+  });
+  qs('#copyActions').addEventListener('click', () => showToast('アクションアイテムをコピーしました'));
+
+  qs('#exportButton').addEventListener('click', () => exportMenu.classList.toggle('open'));
+  qsa('.export-menu .menu-item').forEach((item) => {
+    item.addEventListener('click', () => {
+      exportMenu.classList.remove('open');
+      showToast(`${item.textContent.trim()} を選択しました`);
+    });
+  });
+
+  qs('#speakerName').addEventListener('input', (event) => {
+    qsa('.speakerText').forEach((node) => node.textContent = event.target.value || '話者 1');
+  });
+
+  qs('#recordingSearch').addEventListener('input', (event) => {
+    const term = event.target.value.trim();
+    const searching = term.length > 0;
+    qs('#searchGroup').textContent = searching ? '3件の録音 · 7件の発言' : '今日';
+    qs('#detailMeta').textContent = searching ? `「${term}」3件ヒット · ↑↓で移動 · ↩でシーク` : '2026/08/05 14:00 · 42分';
+    qsa('#transcriptLines .line').forEach((line, index) => line.classList.toggle('dim', searching && index !== 1));
+    if (searching) {
+      qsa('.rec-item .snip').forEach((snip) => {
+        snip.innerHTML = snip.textContent.replaceAll(term, `<mark>${term}</mark>`);
+      });
+    } else {
+      qsa('.rec-item .snip').forEach((snip) => snip.innerHTML = snip.textContent);
+    }
+  });
+
+  setInterval(() => {
+    if (!recording) return;
+    elapsed += 1;
+    const time = formatTime(elapsed);
+    qs('#recordTime').textContent = time;
+    qs('#toolbarRec').textContent = `● ${time}`;
+  }, 1000);
+</script>
+</body>
+</html>

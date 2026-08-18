@@ -25,7 +25,7 @@ const MAX_CARRY_SAMPLES: usize = 5 * TARGET_RATE as usize;
 const ONSET_GUARD_SAMPLES: usize = 3 * TARGET_RATE as usize / 10;
 
 /// One decode step's outcome.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StepOutput {
     pub committed_delta: String,
     pub volatile: String,
