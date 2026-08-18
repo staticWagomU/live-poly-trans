@@ -188,19 +188,12 @@ mod tests {
         probs[1] = 0.9; // highest overall, but not an allowed language
         probs[3] = 0.2;
         probs[7] = 0.5;
+        // the winner's probability comes along so callers can gate pinning
         assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some((7, 0.5)));
     }
 
     #[test]
     fn empty_allowed_set_returns_none() {
         assert_eq!(best_allowed_lang(&[0.1, 0.9], &[]), None);
-    }
-
-    #[test]
-    fn reports_probability_so_callers_can_gate_pinning() {
-        let mut probs = vec![0.0; 10];
-        probs[3] = 0.2;
-        probs[7] = 0.5;
-        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some((7, 0.5)));
     }
 }
