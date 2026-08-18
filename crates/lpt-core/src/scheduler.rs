@@ -139,6 +139,8 @@ impl StreamScheduler {
         let hypothesis = engine.transcribe(window, effective_lang)?;
         // Pin only from a hypothesis that produced text: a decode whose
         // segments were all no-speech still reports a (meaningless) language.
+        // The engine withholds `lang` when its detection was unconfident,
+        // which likewise leaves detection open for the next decode.
         if lang.is_none() && self.window_lang.is_none() && !hypothesis.text.is_empty() {
             self.window_lang = hypothesis.lang.clone();
         }
@@ -358,6 +360,31 @@ mod tests {
         sched.push_audio(&seconds(1));
         sched.step(&mut engine, &mut vad, None).unwrap();
         // detection stays open until a hypothesis with text pins it
+        assert_eq!(
+            engine.received_langs,
+            vec![None, None, Some("ja".into())]
+        );
+    }
+
+    #[test]
+    fn auto_mode_keeps_detection_open_while_the_engine_withholds_a_language() {
+        // The engine reports no language when its detection was not
+        // confident (e.g. a coin-flip over the first second of a window).
+        // Detection must stay open — re-run each decode — until a
+        // confident hypothesis pins it.
+        let mut engine = FakeEngine::scripted_with_langs(&[
+            ("こんにちは", None),
+            ("こんにちは 皆さん", Some("ja")),
+            ("こんにちは 皆さん", Some("ja")),
+        ]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        sched.step(&mut engine, &mut vad, None).unwrap();
+        sched.push_audio(&seconds(1));
+        sched.step(&mut engine, &mut vad, None).unwrap();
+        sched.push_audio(&seconds(1));
+        sched.step(&mut engine, &mut vad, None).unwrap();
         assert_eq!(
             engine.received_langs,
             vec![None, None, Some("ja".into())]

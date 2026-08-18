@@ -13,6 +13,15 @@ use lpt_core::{AsrEngine, Hypothesis, SpeechDetector};
 /// keyboard noise) hallucinate text; drop them above this probability.
 const NO_SPEECH_THRESHOLD: f32 = 0.6;
 
+/// Below this detection probability the guessed language is used for the
+/// current decode but withheld from the hypothesis, so the scheduler keeps
+/// re-detecting instead of pinning it for the whole window. The first decode
+/// of a window sees as little as 1s of audio, where ja/en detection is close
+/// to a coin flip — and whisper forced to the wrong language does not
+/// misrecognize, it silently *translates* (Japanese speech comes out as
+/// fluent English). Override with LPT_LANG_PIN_THRESHOLD.
+const LANG_PIN_THRESHOLD: f32 = 0.6;
+
 pub struct WhisperEngine {
     /// Decode state, created once and reused: whisper_init_state allocates
     /// KV caches and buffers, which is wasteful per window. The state keeps
@@ -21,6 +30,8 @@ pub struct WhisperEngine {
     /// When non-empty, auto-detection picks only among these languages
     /// (e.g. the app's Main/Sub pair) instead of whisper's full set.
     allowed_lang_ids: Vec<i32>,
+    /// Tuning resolved from the environment once at load time.
+    lang_pin_threshold: f32,
 }
 
 /// Silero VAD via whisper.cpp. Runs on CPU so it never competes with the
@@ -103,6 +114,7 @@ impl WhisperEngine {
         Ok(Self {
             state,
             allowed_lang_ids,
+            lang_pin_threshold: env_parse("LPT_LANG_PIN_THRESHOLD").unwrap_or(LANG_PIN_THRESHOLD),
         })
     }
 }
@@ -113,16 +125,16 @@ impl AsrEngine for WhisperEngine {
 
         // Restricted detection: pick the most probable of the allowed
         // languages, so e.g. a ja/en meeting can never drift into zh/ko.
-        // The scheduler pins the result per window, so only the first decode
-        // of each window pays the detection cost.
-        let detected: Option<String> = match lang {
+        // The scheduler pins a confident result per window; an unconfident
+        // guess still steers this decode but is withheld from the
+        // hypothesis, so detection re-runs as the window grows.
+        let detected: Option<(String, f32)> = match lang {
             Some(_) => None,
             None if !self.allowed_lang_ids.is_empty() => {
                 state.pcm_to_mel(samples, 4)?;
                 let (_, probs) = state.lang_detect(0, 4)?;
                 best_allowed_lang(&probs, &self.allowed_lang_ids)
-                    .and_then(|(id, _)| whisper_rs::get_lang_str(id))
-                    .map(str::to_string)
+                    .and_then(|(id, p)| whisper_rs::get_lang_str(id).map(|l| (l.to_string(), p)))
             }
             None => None,
         };
@@ -130,7 +142,7 @@ impl AsrEngine for WhisperEngine {
         let mut params =
             whisper_rs::FullParams::new(whisper_rs::SamplingStrategy::Greedy { best_of: 1 });
         // None here = whisper's unrestricted auto-detect.
-        params.set_language(detected.as_deref().or(lang));
+        params.set_language(detected.as_ref().map(|(l, _)| l.as_str()).or(lang));
         params.set_print_special(false);
         params.set_print_progress(false);
         params.set_print_realtime(false);
@@ -153,12 +165,15 @@ impl AsrEngine for WhisperEngine {
             }
         }
         let start_ms = start_ms.unwrap_or(0);
-        let detected = whisper_rs::get_lang_str(state.full_lang_id_from_state());
+        let confident = detected.is_none_or(|(_, p)| p >= self.lang_pin_threshold);
+        let reported = confident
+            .then(|| whisper_rs::get_lang_str(state.full_lang_id_from_state()))
+            .flatten();
         Ok(Hypothesis {
             text: text.trim().to_string(),
             start_ms,
             end_ms,
-            lang: detected.map(str::to_string),
+            lang: reported.map(str::to_string),
         })
     }
 }
