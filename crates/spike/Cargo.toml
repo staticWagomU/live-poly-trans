@@ -23,10 +23,23 @@ cpal = { version = "0.18.1", optional = true }
 hound = "3.5.1"
 libc = "0.2.189"
 libloading = "0.8"
+objc2-core-audio = { version = "0.3.2", features = ["AudioHardware", "objc2"] }
+objc2-core-audio-types = "0.3.2"
+objc2 = "0.6.4"
+objc2-foundation = "0.3.2"
+objc2-core-foundation = "0.3.2"
+block2 = "0.6.2"
+dispatch2 = "0.3.1"
 
 [[bin]]
 name = "spike"
 path = "src/main.rs"
+
+# Feature-free on purpose: build with --no-default-features to skip the
+# whisper/llama builds entirely (ADR-153803 Process Tap spike).
+[[bin]]
+name = "tap-check"
+path = "src/bin/tap_check.rs"
 
 [[bin]]
 name = "pipeline-check"
