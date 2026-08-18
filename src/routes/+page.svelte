@@ -3,20 +3,44 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
 
-  type TranscriptPayload = { committedDelta: string; volatile: string };
+  type TranscriptPayload = {
+    committedDelta: string;
+    volatile: string;
+    utteranceFinal: string | null;
+  };
+  type StatusPayload = {
+    state: 'idle' | 'loading' | 'listening' | 'error';
+    message: string | null;
+  };
+
+  // Cap the transcript so an hours-long session doesn't grow the DOM
+  // without bound; the oldest text scrolls away first anyway.
+  const MAX_TRANSCRIPT_CHARS = 50_000;
 
   let committed = $state('');
   let volatileTail = $state('');
-  let status = $state('idle');
-  let running = $state(false);
+  let status = $state<StatusPayload>({ state: 'idle', message: null });
   let busy = $state(false);
+
+  // The backend is the source of truth for running: a capture error flips
+  // it back to idle/error even though the Record invoke itself succeeded.
+  const running = $derived(status.state === 'loading' || status.state === 'listening');
+  const statusText = $derived(
+    status.message ? `${status.state}: ${status.message}` : status.state
+  );
 
   onMount(() => {
     const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
       committed += event.payload.committedDelta;
+      if (event.payload.utteranceFinal) {
+        committed += '\n';
+      }
+      if (committed.length > MAX_TRANSCRIPT_CHARS) {
+        committed = committed.slice(-MAX_TRANSCRIPT_CHARS);
+      }
       volatileTail = event.payload.volatile;
     });
-    const unlistenStatus = listen<string>('status', (event) => {
+    const unlistenStatus = listen<StatusPayload>('status', (event) => {
       status = event.payload;
     });
     return () => {
@@ -25,18 +49,20 @@
     };
   });
 
+  // Follow the live text like a teleprompter: re-runs whenever the
+  // transcript text changes because the attachment reads both states.
+  function followTail(el: HTMLElement) {
+    void committed;
+    void volatileTail;
+    el.scrollTo({ top: el.scrollHeight });
+  }
+
   async function toggle() {
     busy = true;
     try {
-      if (running) {
-        await invoke('stop_capture');
-        running = false;
-      } else {
-        await invoke('start_capture');
-        running = true;
-      }
+      await invoke(running ? 'stop_capture' : 'start_capture');
     } catch (error) {
-      status = `error: ${error}`;
+      status = { state: 'error', message: String(error) };
     } finally {
       busy = false;
     }
@@ -52,14 +78,14 @@
   <header>
     <h1>LivePolyTrans v2</h1>
     <div class="controls">
-      <span class="status">{status}</span>
+      <span class="status">{statusText}</span>
       <button onclick={clear} disabled={busy}>Clear</button>
       <button class="record" class:running onclick={toggle} disabled={busy}>
         {running ? 'Stop' : 'Record'}
       </button>
     </div>
   </header>
-  <section class="transcript">
+  <section class="transcript" {@attach followTail}>
     <p>
       <span class="committed">{committed}</span><span class="volatile">{volatileTail}</span>
     </p>
