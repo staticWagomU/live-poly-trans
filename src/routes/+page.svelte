@@ -3,10 +3,9 @@
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
 
+  type Lane = 'mic' | 'speaker';
   type TranscriptPayload = {
-    // Single mic lane today; the speaker lane arrives in Step 3 and will
-    // get its own display column.
-    lane: 'mic' | 'speaker';
+    lane: Lane;
     committedDelta: string;
     volatile: string;
     utteranceFinal: string | null;
@@ -20,8 +19,17 @@
   // without bound; the oldest text scrolls away first anyway.
   const MAX_TRANSCRIPT_CHARS = 50_000;
 
-  let committed = $state('');
-  let volatileTail = $state('');
+  // Mic and speaker get separate columns: the two lanes are transcribed
+  // independently and interleaving them would misattribute who said what.
+  const LANES: { id: Lane; label: string }[] = [
+    { id: 'mic', label: 'マイク' },
+    { id: 'speaker', label: 'スピーカー' }
+  ];
+
+  let lanes = $state<Record<Lane, { committed: string; volatile: string }>>({
+    mic: { committed: '', volatile: '' },
+    speaker: { committed: '', volatile: '' }
+  });
   let status = $state<StatusPayload>({ state: 'idle', message: null });
   let busy = $state(false);
 
@@ -34,14 +42,15 @@
 
   onMount(() => {
     const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
-      committed += event.payload.committedDelta;
+      const lane = lanes[event.payload.lane];
+      lane.committed += event.payload.committedDelta;
       if (event.payload.utteranceFinal) {
-        committed += '\n';
+        lane.committed += '\n';
       }
-      if (committed.length > MAX_TRANSCRIPT_CHARS) {
-        committed = committed.slice(-MAX_TRANSCRIPT_CHARS);
+      if (lane.committed.length > MAX_TRANSCRIPT_CHARS) {
+        lane.committed = lane.committed.slice(-MAX_TRANSCRIPT_CHARS);
       }
-      volatileTail = event.payload.volatile;
+      lane.volatile = event.payload.volatile;
     });
     const unlistenStatus = listen<StatusPayload>('status', (event) => {
       status = event.payload;
@@ -59,23 +68,28 @@
 
   // Follow the live text like a teleprompter — but only while the reader
   // is at the tail. Scrolling up to reread history pauses the follow;
-  // returning near the bottom resumes it.
-  let follow = true;
+  // returning near the bottom resumes it. Tracked per lane so reading back
+  // one column doesn't freeze the other.
+  const follow: Record<Lane, boolean> = { mic: true, speaker: true };
   const FOLLOW_SLACK_PX = 48;
 
-  function onTranscriptScroll(event: Event) {
-    const el = event.currentTarget as HTMLElement;
-    follow = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+  function onTranscriptScroll(lane: Lane) {
+    return (event: Event) => {
+      const el = event.currentTarget as HTMLElement;
+      follow[lane] = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+    };
   }
 
-  // Re-runs whenever the transcript text changes because the attachment
-  // reads both states.
-  function followTail(el: HTMLElement) {
-    void committed;
-    void volatileTail;
-    if (follow) {
-      el.scrollTo({ top: el.scrollHeight });
-    }
+  // Re-runs whenever this lane's text changes because the attachment reads
+  // both of its states.
+  function followTail(lane: Lane) {
+    return (el: HTMLElement) => {
+      void lanes[lane].committed;
+      void lanes[lane].volatile;
+      if (follow[lane]) {
+        el.scrollTo({ top: el.scrollHeight });
+      }
+    };
   }
 
   async function toggle() {
@@ -96,8 +110,9 @@
   }
 
   function clear() {
-    committed = '';
-    volatileTail = '';
+    for (const { id } of LANES) {
+      lanes[id] = { committed: '', volatile: '' };
+    }
   }
 </script>
 
@@ -112,11 +127,24 @@
       </button>
     </div>
   </header>
-  <section class="transcript" onscroll={onTranscriptScroll} {@attach followTail}>
-    <p>
-      <span class="committed">{committed}</span><span class="volatile">{volatileTail}</span>
-    </p>
-  </section>
+  <div class="lanes">
+    {#each LANES as lane (lane.id)}
+      <section class="lane">
+        <h2>{lane.label}</h2>
+        <div
+          class="transcript"
+          onscroll={onTranscriptScroll(lane.id)}
+          {@attach followTail(lane.id)}
+        >
+          <p>
+            <span class="committed">{lanes[lane.id].committed}</span><span class="volatile"
+              >{lanes[lane.id].volatile}</span
+            >
+          </p>
+        </div>
+      </section>
+    {/each}
+  </div>
 </main>
 
 <style>
@@ -167,6 +195,29 @@
   button.record.running {
     background: #b3261e;
     border-color: #b3261e;
+  }
+  .lanes {
+    flex: 1;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    min-height: 0; /* let the columns scroll instead of growing the page */
+  }
+  .lane {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .lane + .lane {
+    border-left: 1px solid #2a3138;
+  }
+  .lane h2 {
+    margin: 0;
+    padding: 0.5rem 1.25rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #8b98a5;
+    border-bottom: 1px solid #2a3138;
   }
   .transcript {
     flex: 1;

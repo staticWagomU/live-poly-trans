@@ -166,18 +166,49 @@ fn run_session(
 ) -> anyhow::Result<()> {
     let engines = load_engines(ui, engines)?;
     let stop_capture = Arc::new(AtomicBool::new(false));
-    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-    capture::mic::spawn(stop_capture.clone(), ready_tx);
     let result = (|| {
-        let session = match ready_rx.recv() {
-            Ok(session) => session?,
-            Err(_) => anyhow::bail!("capture thread died before reporting"),
-        };
-        let mut lanes = [LaneRuntime::new(Lane::Mic, session)?];
-        run_capture_loop(cmd_rx, ui, engines, &mut lanes)
+        let mic = start_capture(capture::mic::spawn, &stop_capture)?;
+        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic)?];
+        // The speaker lane is best-effort: it needs macOS 14.2+ and the
+        // system-audio permission, and a meeting is still worth
+        // transcribing from the mic alone when it is unavailable.
+        let mut notice = None;
+        match start_speaker(&stop_capture) {
+            Ok(Some(speaker)) => lanes.push(LaneRuntime::new(Lane::Speaker, speaker)?),
+            Ok(None) => {}
+            Err(e) => notice = Some(format!("speaker lane unavailable: {e:#}")),
+        }
+        run_capture_loop(cmd_rx, ui, engines, &mut lanes, notice)
     })();
     stop_capture.store(true, Ordering::SeqCst);
     result
+}
+
+/// Spawn a capture backend and wait for it to report its device config.
+fn start_capture(
+    spawn: fn(Arc<AtomicBool>, std::sync::mpsc::Sender<anyhow::Result<capture::CaptureSession>>),
+    stop: &Arc<AtomicBool>,
+) -> anyhow::Result<capture::CaptureSession> {
+    let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+    spawn(stop.clone(), ready_tx);
+    match ready_rx.recv() {
+        Ok(session) => session,
+        Err(_) => anyhow::bail!("capture thread died before reporting"),
+    }
+}
+
+/// `Ok(None)` on platforms with no loopback backend yet (Windows gets
+/// WASAPI in a later pass).
+#[cfg(target_os = "macos")]
+fn start_speaker(
+    stop: &Arc<AtomicBool>,
+) -> anyhow::Result<Option<capture::CaptureSession>> {
+    start_capture(capture::speaker::spawn, stop).map(Some)
+}
+
+#[cfg(not(target_os = "macos"))]
+fn start_speaker(_stop: &Arc<AtomicBool>) -> anyhow::Result<Option<capture::CaptureSession>> {
+    Ok(None)
 }
 
 /// Per-lane capture-to-scheduler state. Step 3 adds the speaker lane by
@@ -360,11 +391,12 @@ fn run_capture_loop(
     ui: &Ui,
     engines: &mut Engines,
     lanes: &mut [LaneRuntime],
+    notice: Option<String>,
 ) -> anyhow::Result<()> {
     // Unset = auto-detect per utterance window (mixed ja/en meetings);
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
-    emit_status(ui, "listening", None);
+    emit_status(ui, "listening", notice);
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
