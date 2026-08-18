@@ -247,7 +247,15 @@ fn run_capture_loop(
             next_step = started + STEP_INTERVAL;
         }
     }
-    if let Some(fin) = lane.scheduler.finish() {
+    // Stop: recover the audio still in flight (ring buffer → resampler
+    // tail → an undecoded scheduler remainder) before flushing the text.
+    lane.pump(app)?;
+    let tail = lane.resampler.flush()?;
+    lane.scheduler.push_audio(&tail);
+    if let Some(fin) = lane
+        .scheduler
+        .finish(&mut engines.engine, &mut engines.vad, lang.as_deref())?
+    {
         emit_step(app, fin);
     }
     Ok(())

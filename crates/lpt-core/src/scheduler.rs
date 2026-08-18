@@ -77,19 +77,42 @@ impl StreamScheduler {
         (tail, (!full.is_empty()).then(|| full.to_string()))
     }
 
-    /// End the stream (capture stopped): commit whatever text is still
-    /// pending and reset for a fresh session. Returns None if nothing was
-    /// pending.
-    pub fn finish(&mut self) -> Option<StepOutput> {
+    /// End the stream (capture stopped): decode whatever audio the steps
+    /// never reached, commit all pending text, and reset for a fresh
+    /// session. Returns None if nothing was pending.
+    pub fn finish(
+        &mut self,
+        engine: &mut dyn AsrEngine,
+        vad: &mut dyn SpeechDetector,
+        lang: Option<&str>,
+    ) -> anyhow::Result<Option<StepOutput>> {
+        let mut committed_delta = String::new();
+        // Audio pushed after the last step (or below MIN_WINDOW entirely)
+        // was never transcribed; without this decode, Stop would silently
+        // drop the tail of the last utterance.
+        if !self.buffer.is_empty() && !vad.speech_segments(&self.buffer)?.is_empty() {
+            if self.buffer.len() < MIN_WINDOW_SAMPLES {
+                // pad with silence up to a window whisper can decode
+                self.buffer.resize(MIN_WINDOW_SAMPLES, 0.0);
+            }
+            let effective_lang = lang.or(self.window_lang.as_deref());
+            let hypothesis = engine.transcribe(&self.buffer, effective_lang)?;
+            let agreement = self.agreement.feed(&hypothesis.text);
+            self.utterance_acc.push_str(&agreement.committed_delta);
+            committed_delta.push_str(&agreement.committed_delta);
+        }
         let (tail, utterance_final) = self.finalize_utterance();
+        committed_delta.push_str(&tail);
         let all = self.buffer.len();
         self.slide_keeping(all);
-        utterance_final.as_ref()?;
-        Some(StepOutput {
-            committed_delta: tail,
+        if utterance_final.is_none() {
+            return Ok(None);
+        }
+        Ok(Some(StepOutput {
+            committed_delta,
             volatile: String::new(),
             utterance_final,
-        })
+        }))
     }
 
     pub fn step(
@@ -438,19 +461,60 @@ mod tests {
 
     #[test]
     fn finish_flushes_pending_text_as_a_final_utterance() {
-        let mut engine = FakeEngine::scripted(&["こんにちは"]);
+        let mut engine = FakeEngine::scripted(&["こんにちは", "こんにちは"]);
         let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(2));
         let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(out.volatile, "こんにちは");
         // stopping capture must not lose the volatile tail
-        let fin = sched.finish().unwrap();
+        let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(fin.committed_delta, "こんにちは");
         assert_eq!(fin.volatile, "");
         assert_eq!(fin.utterance_final.as_deref(), Some("こんにちは"));
         // and the scheduler is reset for the next session
-        assert_eq!(sched.finish(), None);
+        assert_eq!(sched.finish(&mut engine, &mut vad, None).unwrap(), None);
+    }
+
+    #[test]
+    fn finish_decodes_audio_the_steps_never_reached() {
+        let mut engine = FakeEngine::scripted(&["こんにち", "こんにちは"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        // one more second arrives, then the user hits Stop before the
+        // next step: that audio was never transcribed and must not vanish
+        sched.push_audio(&seconds(1));
+        let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(fin.utterance_final.as_deref(), Some("こんにちは"));
+        assert_eq!(engine.received_samples, vec![2 * 16_000, 3 * 16_000]);
+    }
+
+    #[test]
+    fn finish_pads_a_short_undecoded_tail_to_a_decodable_window() {
+        // Half a second of speech, stopped before it ever reached
+        // MIN_WINDOW: finish pads with silence so whisper can decode it.
+        let mut engine = FakeEngine::scripted(&["はい"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.1; TARGET_RATE as usize / 2]);
+        assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
+        let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(fin.utterance_final.as_deref(), Some("はい"));
+        assert_eq!(engine.received_samples, vec![MIN_WINDOW_SAMPLES]);
+    }
+
+    #[test]
+    fn finish_does_not_decode_a_silent_remainder() {
+        // After a boundary slide only the onset-guard silence remains;
+        // finish must not wake whisper for it.
+        let mut engine = FakeEngine::scripted(&[]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.0; 2 * TARGET_RATE as usize]);
+        assert_eq!(sched.finish(&mut engine, &mut vad, None).unwrap(), None);
+        assert!(engine.received_samples.is_empty());
     }
 
     #[test]
