@@ -1,0 +1,504 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — 話者名 / 検索 / 書き出し モック(スタイリッシュ版)</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --orange: #ff9500;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --pearl: rgba(255, 255, 255, 0.72);
+    --menu-bg: rgba(250, 250, 252, 0.82);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.22);
+    --mark: rgba(255, 214, 10, 0.4);
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+    --menu-bg: rgba(36, 36, 40, 0.78);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.6);
+    --mark: rgba(255, 214, 10, 0.3);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 28px 16px 60px;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+  input { font: inherit; color: inherit; }
+
+  .prop-head { max-width: 1080px; margin: 0 auto 18px; }
+  .prop-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 6px; }
+  .prop-head p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .prop-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .vtabs { display: flex; gap: 4px; background: rgba(120,120,128,0.14); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .vtabs button { padding: 6px 13px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .vtabs button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .theme-btn { margin-left: auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; }
+  .variant { display: none; max-width: 1080px; margin: 0 auto; }
+  .variant.active { display: block; }
+  .note { margin: 14px auto 0; max-width: 1080px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .note b { color: var(--ink); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ===== window ===== */
+  .window {
+    height: 600px;
+    background: var(--canvas);
+    border-radius: 14px;
+    border: 1px solid var(--hairline);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28), inset 0 0 0 0.5px rgba(255,255,255,0.12);
+    display: grid; grid-template-rows: auto 1fr;
+    overflow: hidden; position: relative;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px;
+    background: var(--pearl); backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid var(--divider); z-index: 20;
+  }
+  .traffic { display: flex; gap: 8px; margin-right: 4px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic span:nth-child(1) { background: #ff5f57; }
+  .traffic span:nth-child(2) { background: #febc2e; }
+  .traffic span:nth-child(3) { background: #28c840; }
+  .seg { display: flex; background: rgba(120,120,128,0.14); border-radius: 9px; padding: 2px; }
+  .seg button { padding: 5px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--ink-2); transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1); }
+  .seg button.active { background: var(--canvas); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); font-weight: 600; }
+  .spacer { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--hairline); font-size: 12.5px; font-weight: 500; transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1); }
+  .btn:hover { transform: scale(1.03); }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+
+  .body2 { display: grid; grid-template-columns: 252px minmax(0, 1fr); min-height: 0; }
+  .side { border-right: 1px solid var(--divider); background: color-mix(in srgb, var(--parchment) 62%, var(--canvas)); backdrop-filter: blur(20px); display: grid; grid-template-rows: auto 1fr; min-height: 0; }
+  .searchbox { margin: 12px 12px 6px; position: relative; }
+  .searchbox input {
+    width: 100%; padding: 8px 10px 8px 30px; border-radius: 10px;
+    border: 1px solid transparent; background: rgba(120,120,128,0.12); font-size: 12.5px; outline: none;
+    transition: all 0.2s ease;
+  }
+  .searchbox input:focus { background: var(--canvas); border-color: var(--blue-focus); box-shadow: 0 0 0 3.5px var(--blue-soft); }
+  .searchbox::before { content: '⌕'; position: absolute; left: 10px; top: 6px; font-size: 15px; opacity: 0.5; }
+  .reclist { overflow: auto; padding: 4px 12px 14px; }
+  .grp { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; color: var(--muted); margin: 12px 4px 5px; text-transform: uppercase; }
+  .rec-item { width: 100%; text-align: left; padding: 9px 11px; border-radius: 11px; display: grid; gap: 2px; transition: background 0.15s ease; }
+  .rec-item:hover { background: rgba(120,120,128,0.1); }
+  .rec-item.active { background: var(--blue-soft); box-shadow: inset 0 0 0 1px rgba(0,113,227,0.18); }
+  .rec-item .t { font-size: 13px; font-weight: 600; letter-spacing: -0.1px; }
+  .rec-item .d { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .rec-item mark, .line mark, .pr mark { background: var(--mark); color: inherit; border-radius: 3px; padding: 0 2px; }
+  .rec-item .snip { font-size: 11.5px; color: var(--ink-2); line-height: 1.45; }
+
+  .detail { display: grid; grid-template-rows: auto auto 1fr; min-height: 0; }
+  .det-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 10px; flex-wrap: wrap; }
+  .det-head h2 { font-size: 17px; font-weight: 700; margin: 0; letter-spacing: -0.3px; }
+  .det-head .meta { font-size: 12px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .wave { margin: 0 20px; height: 68px; border-radius: 12px; background: linear-gradient(180deg, var(--blue-soft), transparent); position: relative; overflow: hidden; display: flex; align-items: center; gap: 2.5px; padding: 0 10px; }
+  .wave i { flex: 1; border-radius: 3px; background: linear-gradient(to top, var(--blue), color-mix(in srgb, var(--blue) 45%, transparent)); opacity: 0.65; }
+  .wave::after { content: ''; position: absolute; left: 38%; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--red); box-shadow: 0 0 8px rgba(255,59,48,0.6); }
+  .lines { overflow: auto; padding: 14px 20px 20px; display: grid; gap: 11px; align-content: start; }
+  .line { display: grid; grid-template-columns: 46px auto 1fr; gap: 10px; align-items: baseline; }
+  .line .ts { font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .line .who { display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 600; padding: 2.5px 9px; border-radius: 999px; white-space: nowrap; transition: all 0.15s ease; }
+  .line .who .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .who.s1 { color: var(--blue); background: var(--blue-soft); }
+  .who.s1 .dot { background: var(--blue); }
+  .who.s2 { color: #c25200; background: rgba(255, 149, 0, 0.13); }
+  [data-theme='dark'] .who.s2 { color: #ffb066; }
+  .who.s2 .dot { background: var(--orange); }
+  .who.editable { cursor: pointer; }
+  .who.editable:hover { box-shadow: 0 0 0 1.5px currentColor; }
+  .who.editable::after { content: '✎'; font-size: 10px; opacity: 0.55; margin-left: 2px; }
+  .line .tx { font-size: 14px; line-height: 1.55; letter-spacing: -0.1px; }
+  .line .tx .tr { display: block; font-size: 12px; color: var(--muted); margin-top: 1px; }
+
+  /* ===== glass popover base ===== */
+  .glasspop {
+    position: absolute; z-index: 40;
+    background: var(--menu-bg);
+    backdrop-filter: blur(34px) saturate(190%);
+    border: 1px solid var(--hairline);
+    border-radius: 16px;
+    box-shadow: var(--shadow-menu), inset 0 0 0 0.5px rgba(255,255,255,0.18);
+    animation: fadeUp 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+
+  /* speaker edit popover */
+  .spk-pop { width: 248px; padding: 14px; }
+  .spk-pop .cap { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.07em; text-transform: uppercase; }
+  .spk-pop input[type='text'] { width: 100%; margin: 6px 0 12px; padding: 8px 11px; border-radius: 10px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 14px; font-weight: 600; outline: none; }
+  .spk-pop input[type='text']:focus { border-color: var(--blue-focus); box-shadow: 0 0 0 3.5px var(--blue-soft); }
+  .swatches { display: flex; gap: 8px; margin: 8px 0 14px; }
+  .swatches i { width: 22px; height: 22px; border-radius: 50%; cursor: pointer; transition: transform 0.15s ease; }
+  .swatches i:hover { transform: scale(1.15); }
+  .swatches i.sel { outline: 2px solid var(--blue-focus); outline-offset: 2.5px; }
+  .spk-pop .apply { width: 100%; padding: 8px 0; border-radius: 10px; background: var(--blue); color: #fff; font-size: 12.5px; font-weight: 600; transition: all 0.2s ease; }
+  .spk-pop .apply:hover { filter: brightness(1.08); transform: scale(1.015); }
+  .spk-pop .hint { font-size: 11px; color: var(--muted); margin-top: 9px; line-height: 1.55; }
+
+  /* participants strip */
+  .party { display: flex; align-items: center; gap: 8px; padding: 0 20px 12px; flex-wrap: wrap; }
+  .party .lbl { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.07em; text-transform: uppercase; }
+  .chip { display: inline-flex; align-items: center; gap: 7px; padding: 5px 8px 5px 11px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; font-weight: 500; transition: all 0.2s ease; }
+  .chip:hover { transform: translateY(-1px); box-shadow: 0 3px 10px rgba(0,0,0,0.1); }
+  .chip .dot { width: 8px; height: 8px; border-radius: 50%; }
+  .chip input { border: 0; outline: none; background: transparent; width: 68px; font-size: 12.5px; font-weight: 600; padding: 0; }
+  .chip.editing { border-color: var(--blue-focus); box-shadow: 0 0 0 3.5px var(--blue-soft); }
+  .chip .ct { font-size: 10.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  /* dropdown menu */
+  .menu { width: 256px; padding: 6px; font-size: 13px; border-radius: 14px; }
+  .menu .mi { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 10px; border-radius: 9px; text-align: left; }
+  .menu .mi:hover { background: var(--blue); color: #fff; }
+  .menu .mi:hover .mk { color: rgba(255,255,255,0.75); }
+  .menu .mi .mk { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .menu .sep { height: 1px; background: var(--divider); margin: 5px 6px; }
+  .menu .cap { font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.07em; padding: 7px 10px 4px; text-transform: uppercase; }
+
+  /* export dialog */
+  .scrim { position: absolute; inset: 0; background: rgba(0,0,0,0.3); backdrop-filter: blur(3px); z-index: 50; display: grid; place-items: center; }
+  .dialog { width: 640px; background: var(--menu-bg); backdrop-filter: blur(40px) saturate(190%); border-radius: 18px; border: 1px solid var(--hairline); box-shadow: 0 30px 80px rgba(0,0,0,0.45), inset 0 0 0 0.5px rgba(255,255,255,0.18); overflow: hidden; animation: fadeUp 0.3s cubic-bezier(0.25,0.1,0.25,1); }
+  .dialog .dh { padding: 18px 22px 0; font-size: 16px; font-weight: 700; letter-spacing: -0.2px; }
+  .dialog .ds { padding: 2px 22px 0; font-size: 12px; color: var(--muted); }
+  .dialog .grid2 { display: grid; grid-template-columns: 258px 1fr; gap: 16px; padding: 16px 22px 18px; }
+  .fmt-list { display: grid; gap: 7px; }
+  .fmt { display: grid; grid-template-columns: auto 1fr; gap: 2px 11px; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--hairline); background: var(--canvas); cursor: pointer; align-items: center; transition: all 0.18s cubic-bezier(0.25,0.1,0.25,1); }
+  .fmt:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+  .fmt.sel { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+  .fmt .fi { grid-row: span 2; font-size: 19px; }
+  .fmt .fn { font-size: 13px; font-weight: 600; }
+  .fmt .fd { font-size: 11px; color: var(--muted); }
+  .opts { display: grid; gap: 9px; align-content: start; }
+  .opt { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .opt input { accent-color: var(--blue); width: 15px; height: 15px; }
+  .preview { grid-column: 1 / -1; background: rgba(120,120,128,0.1); border: 1px solid var(--divider); border-radius: 12px; padding: 11px 14px; font-family: ui-monospace, 'SF Mono', monospace; font-size: 11px; line-height: 1.65; color: var(--ink-2); white-space: pre; overflow: auto; max-height: 128px; }
+  .preview .pk { color: var(--blue); font-weight: 700; }
+  .dialog .df { display: flex; justify-content: flex-end; gap: 8px; padding: 0 22px 18px; }
+
+  /* ⌘K palette */
+  .palette { width: 620px; background: var(--menu-bg); backdrop-filter: blur(40px) saturate(190%); border: 1px solid var(--hairline); border-radius: 18px; box-shadow: 0 30px 80px rgba(0,0,0,0.45), inset 0 0 0 0.5px rgba(255,255,255,0.18); overflow: hidden; margin-top: -110px; animation: fadeUp 0.25s cubic-bezier(0.25,0.1,0.25,1); }
+  .palette .pin { display: flex; align-items: center; gap: 11px; padding: 15px 18px; border-bottom: 1px solid var(--divider); }
+  .palette .pin .mag { font-size: 17px; opacity: 0.5; }
+  .palette .pin input { flex: 1; border: 0; outline: none; background: transparent; font-size: 17px; font-weight: 500; letter-spacing: -0.2px; }
+  .palette .esc { font-size: 10.5px; color: var(--muted); border: 1px solid var(--hairline); border-radius: 5px; padding: 2px 6px; }
+  .palette .pres { max-height: 290px; overflow: auto; padding: 7px; }
+  .pr { display: grid; grid-template-columns: auto 1fr auto; gap: 2px 11px; padding: 9px 11px; border-radius: 11px; align-items: center; transition: background 0.12s ease; }
+  .pr:hover, .pr.sel { background: var(--blue-soft); }
+  .pr .ic { grid-row: span 2; width: 30px; height: 30px; border-radius: 8px; background: linear-gradient(145deg, var(--blue), color-mix(in srgb, var(--blue) 60%, #7db8ff)); display: grid; place-items: center; font-size: 14px; color: #fff; }
+  .pr .rt { font-size: 13px; font-weight: 600; letter-spacing: -0.1px; }
+  .pr .rs { font-size: 12px; color: var(--ink-2); grid-column: 2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr .rk { grid-row: span 2; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .palette .pfoot { display: flex; gap: 16px; padding: 9px 18px; border-top: 1px solid var(--divider); font-size: 11px; color: var(--muted); }
+  .palette .pfoot .kk { border: 1px solid var(--hairline); border-radius: 4px; padding: 0 4px; font-size: 10px; }
+</style>
+</head>
+<body>
+<header class="prop-head">
+  <h1>Recordings 拡張 — 話者名 / 全文検索 / 書き出し(スタイリッシュ版)</h1>
+  <p>機能#2・#8・#3。ヴァイブランシー素材のポップオーバー/ダイアログ、System Settings 的なグループ表現、控えめなマイクロインタラクション(ホバー浮き上がり・fadeUp)で再構成。Reduce Motion ではアニメーション停止。</p>
+  <div class="prop-bar">
+    <div class="vtabs" role="tablist">
+      <button class="active" data-v="spk-a">話者A インライン</button>
+      <button data-v="spk-b">話者B 参加者チップ</button>
+      <button data-v="srch-a">検索A サイドバー</button>
+      <button data-v="srch-b">検索B ⌘K</button>
+      <button data-v="exp-a">書き出しA メニュー</button>
+      <button data-v="exp-b">書き出しB ダイアログ</button>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">ライト / ダーク</button>
+  </div>
+</header>
+
+<!-- ===== 話者A ===== -->
+<section class="variant active" id="v-spk-a">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button class="active">Recordings</button><button>Settings</button></div><div class="spacer"></div><button class="btn">書き出し ⌄</button><button class="btn">…</button></div>
+    <div class="body2">
+      <aside class="side">
+        <div class="searchbox"><input placeholder="録音を検索" /></div>
+        <div class="reclist">
+          <div class="grp">今日</div>
+          <button class="rec-item active"><span class="t">定例ミーティング</span><span class="d">14:00 · 42分 · mic+speaker</span></button>
+          <div class="grp">昨日</div>
+          <button class="rec-item"><span class="t">1on1 Sarah</span><span class="d">11:00 · 28分</span></button>
+          <button class="rec-item"><span class="t">外部音声 0803.m4a</span><span class="d">取り込み · 63分</span></button>
+        </div>
+      </aside>
+      <div class="detail">
+        <div class="det-head"><h2>定例ミーティング</h2><span class="meta">2026/08/05 14:00 · 42分 · WhisperX 話者分離済み</span></div>
+        <div class="wave"><i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i></div>
+        <div class="lines" style="position:relative">
+          <div class="line"><span class="ts">00:12</span><span class="who s1 editable"><span class="dot"></span>話者 1</span><span class="tx">それでは定例を始めます。今日はベータ版のスケジュール確認からです。</span></div>
+          <div class="line"><span class="ts">00:31</span><span class="who s2 editable"><span class="dot"></span>Sarah</span><span class="tx">We should probably ship the beta by the end of this month.<span class="tr">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+          <div class="glasspop spk-pop" style="left: 118px; top: 92px;">
+            <div class="cap">この話者の名前</div>
+            <input type="text" value="田中" />
+            <div class="cap">カラー</div>
+            <div class="swatches"><i style="background:#0066cc" class="sel"></i><i style="background:#ff9500"></i><i style="background:#34c759"></i><i style="background:#af52de"></i><i style="background:#ff3b30"></i><i style="background:#86868b"></i></div>
+            <button class="apply">「話者 1」26件すべてに適用</button>
+            <div class="hint">名前は録音メタに保存され、SRT / Markdown の書き出しにも反映されます。</div>
+          </div>
+          <div class="line" style="opacity:.4"><span class="ts">00:58</span><span class="who s1 editable"><span class="dot"></span>話者 1</span><span class="tx">了解です。では残タスクを洗い出しましょう。</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>話者案A「インライン編集」</b> — その行の話者ラベルを直接クリック(Direct Manipulation)。
+    <ul>
+      <li>「この発言は誰？」に対する最短動線。ラベルはホバーでリング+✎表示=編集可能性の事前フィードバック</li>
+      <li>ヴァイブランシーのポップオーバーで名前+カラーを編集、同一話者へ一括適用</li>
+      <li>カラースウォッチはホバーで1.15倍に拡大(選択対象の明確化、44pt相当の実質ターゲット確保)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 話者B ===== -->
+<section class="variant" id="v-spk-b">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button class="active">Recordings</button><button>Settings</button></div><div class="spacer"></div><button class="btn">書き出し ⌄</button><button class="btn">…</button></div>
+    <div class="body2">
+      <aside class="side">
+        <div class="searchbox"><input placeholder="録音を検索" /></div>
+        <div class="reclist">
+          <div class="grp">今日</div>
+          <button class="rec-item active"><span class="t">定例ミーティング</span><span class="d">14:00 · 42分 · mic+speaker</span></button>
+          <div class="grp">昨日</div>
+          <button class="rec-item"><span class="t">1on1 Sarah</span><span class="d">11:00 · 28分</span></button>
+        </div>
+      </aside>
+      <div class="detail" style="grid-template-rows: auto auto auto 1fr">
+        <div class="det-head"><h2>定例ミーティング</h2><span class="meta">2026/08/05 14:00 · 42分</span></div>
+        <div class="party">
+          <span class="lbl">参加者</span>
+          <span class="chip editing"><span class="dot" style="background:#0066cc"></span><input value="田中" /><span class="ct">26</span></span>
+          <span class="chip"><span class="dot" style="background:#ff9500"></span>Sarah<span class="ct">19</span></span>
+          <span class="chip"><span class="dot" style="background:#34c759"></span>話者 3<span class="ct">4</span></span>
+        </div>
+        <div class="wave"><i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i></div>
+        <div class="lines">
+          <div class="line"><span class="ts">00:12</span><span class="who s1"><span class="dot"></span>田中</span><span class="tx">それでは定例を始めます。今日はベータ版のスケジュール確認からです。</span></div>
+          <div class="line"><span class="ts">00:31</span><span class="who s2"><span class="dot"></span>Sarah</span><span class="tx">We should probably ship the beta by the end of this month.<span class="tr">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+          <div class="line"><span class="ts">00:58</span><span class="who s1"><span class="dot"></span>田中</span><span class="tx">了解です。では残タスクを洗い出しましょう。</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>話者案B「参加者チップ」</b> — 詳細ヘッダ下の参加者一覧で編集。会議のメタデータを常設表示。
+    <ul>
+      <li>チップはホバーで浮き上がり(depth による操作可能性の提示)、クリックでその場リネーム</li>
+      <li>発言数バッジで「どれが誰か」を推測しやすく、Markdown書き出しの「参加者:」欄と1:1対応</li>
+      <li>1行ぶん縦空間を消費するのが対価</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 検索A ===== -->
+<section class="variant" id="v-srch-a">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button class="active">Recordings</button><button>Settings</button></div><div class="spacer"></div><button class="btn">1/3 ‹ ›</button></div>
+    <div class="body2">
+      <aside class="side">
+        <div class="searchbox"><input value="ベータ" autofocus /></div>
+        <div class="reclist">
+          <div class="grp">3件の録音 · 7件の発言</div>
+          <button class="rec-item active"><span class="t">定例ミーティング</span><span class="d">今日 14:00 · 3件</span><span class="snip">…<mark>ベータ</mark>版は今月末までにリリースした方が…</span></button>
+          <button class="rec-item"><span class="t">1on1 Sarah</span><span class="d">昨日 11:00 · 2件</span><span class="snip">…<mark>ベータ</mark>のフィードバックはどこに集約…</span></button>
+          <button class="rec-item"><span class="t">プロダクト会議</span><span class="d">7/28 · 2件</span><span class="snip">…クローズド<mark>ベータ</mark>の対象ユーザーを…</span></button>
+        </div>
+      </aside>
+      <div class="detail">
+        <div class="det-head"><h2>定例ミーティング</h2><span class="meta">「ベータ」3件ヒット · ↑↓で移動 · ↩でシーク</span></div>
+        <div class="wave"><i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i></div>
+        <div class="lines">
+          <div class="line" style="opacity:.42"><span class="ts">00:12</span><span class="who s1"><span class="dot"></span>田中</span><span class="tx">それでは定例を始めます。今日はスケジュール確認からです。</span></div>
+          <div class="line"><span class="ts">00:31</span><span class="who s2"><span class="dot"></span>Sarah</span><span class="tx"><mark>ベータ</mark>版は今月末までにリリースした方がよさそうですね。</span></div>
+          <div class="line" style="opacity:.42"><span class="ts">00:58</span><span class="who s1"><span class="dot"></span>田中</span><span class="tx">了解です。では残タスクを洗い出しましょう。</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>検索案A「サイドバー検索」</b> — 既存リストが検索結果ビューへ滑らかに変化。
+    <ul>
+      <li>新規UI部品ゼロ。「Recordingsに来て探す」というメンタルモデルどおり(Consistency)</li>
+      <li>録音単位グルーピング+スニペット→選択で該当行へジャンプ&シーク。非ヒット行は減光</li>
+      <li>ハイライトはシステムのfind風イエロー(ダークでは輝度を落とし4.5:1を維持)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 検索B ===== -->
+<section class="variant" id="v-srch-b">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button class="active">Live</button><button>Recordings</button><button>Settings</button></div><div class="spacer"></div><button class="btn">…</button></div>
+    <div class="body2" style="grid-template-columns: 1fr; filter: blur(2px); opacity: .5">
+      <div class="lines" style="padding: 26px 42px">
+        <div class="line"><span class="ts">14:02</span><span class="who s1"><span class="dot"></span>自分</span><span class="tx">承知しました、では日程を調整します。</span></div>
+        <div class="line"><span class="ts">14:03</span><span class="who s2"><span class="dot"></span>相手</span><span class="tx">We should probably ship the beta by the end of this month.</span></div>
+      </div>
+    </div>
+    <div class="scrim" style="background: rgba(0,0,0,0.18)">
+      <div class="palette">
+        <div class="pin"><span class="mag">⌕</span><input value="ベータ" /><span class="esc">esc</span></div>
+        <div class="pres">
+          <div class="pr sel"><span class="ic">🎙</span><span class="rt">定例ミーティング — Sarah</span><span class="rk">今日 00:31</span><span class="rs"><mark>ベータ</mark>版は今月末までにリリースした方がよさそうですね。</span></div>
+          <div class="pr"><span class="ic">🎙</span><span class="rt">定例ミーティング — 田中</span><span class="rk">今日 18:04</span><span class="rs"><mark>ベータ</mark>の告知文はマーケチームに依頼済みです。</span></div>
+          <div class="pr"><span class="ic">🎙</span><span class="rt">1on1 Sarah — Sarah</span><span class="rk">昨日 07:12</span><span class="rs"><mark>ベータ</mark>のフィードバックはどこに集約しますか？</span></div>
+          <div class="pr"><span class="ic">🎙</span><span class="rt">プロダクト会議 — 話者 2</span><span class="rk">7/28 22:40</span><span class="rs">クローズド<mark>ベータ</mark>の対象ユーザーを決めましょう。</span></div>
+        </div>
+        <div class="pfoot"><span><span class="kk">↑↓</span> 選択</span><span><span class="kk">↩</span> 開いてジャンプ</span><span><span class="kk">⌘K</span> どの画面からでも</span></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>検索案B「⌘K パレット」</b> — Spotlight の文法。背景をブラー+減光してフォーカスを一点に。
+    <ul>
+      <li>Live中でも「さっき誰か言ってたはず」を即検索。発言単位のフラットな結果一覧</li>
+      <li>結果アイコンはグラデーションのスクワークル(System Settings的な识別色)</li>
+      <li>非IT層への発見性が弱点→メニューとツールバーにも検索導線を併記して補う</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 書き出しA ===== -->
+<section class="variant" id="v-exp-a">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button class="active">Recordings</button><button>Settings</button></div><div class="spacer"></div></div>
+    <div class="body2">
+      <aside class="side">
+        <div class="searchbox"><input placeholder="録音を検索" /></div>
+        <div class="reclist">
+          <div class="grp">今日</div>
+          <button class="rec-item active"><span class="t">定例ミーティング</span><span class="d">14:00 · 42分</span></button>
+        </div>
+      </aside>
+      <div class="detail">
+        <div class="det-head" style="position:relative">
+          <h2>定例ミーティング</h2><span class="meta">2026/08/05 14:00 · 42分</span><div class="spacer"></div>
+          <button class="btn primary">書き出し ⌄</button><button class="btn">…</button>
+          <div class="glasspop menu" style="right: 62px; top: 48px;">
+            <div class="cap">音声</div>
+            <button class="mi">マイク音声<span class="mk">.m4a</span></button>
+            <button class="mi">スピーカー音声<span class="mk">.m4a</span></button>
+            <button class="mi">ミックス<span class="mk">.m4a</span></button>
+            <div class="sep"></div>
+            <div class="cap">テキスト</div>
+            <button class="mi">議事録<span class="mk">.md</span></button>
+            <button class="mi">字幕 SubRip<span class="mk">.srt</span></button>
+            <button class="mi">字幕 WebVTT<span class="mk">.vtt</span></button>
+            <button class="mi">従来形式<span class="mk">.json / .txt</span></button>
+            <div class="sep"></div>
+            <button class="mi">書き出しオプション…<span class="mk">⇧⌘E</span></button>
+          </div>
+        </div>
+        <div class="wave"><i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i><i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i><i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i><i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i></div>
+        <div class="lines" style="opacity:.3">
+          <div class="line"><span class="ts">00:12</span><span class="who s1"><span class="dot"></span>田中</span><span class="tx">それでは定例を始めます。</span></div>
+          <div class="line"><span class="ts">00:31</span><span class="who s2"><span class="dot"></span>Sarah</span><span class="tx">We should probably ship the beta by the end of this month.</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>書き出し案A「メニュー拡張」</b> — ネイティブメニューの文法(選択ハイライト=アクセント青)。
+    <ul>
+      <li>1クリックで既定オプションのまま書き出し。拡張子は右端にグレーで(視覚ノイズを抑える)</li>
+      <li>絵文字アイコンを廃してテキスト主体に=NSMenuの読み味(Deference)</li>
+      <li>細かい調整は「書き出しオプション…」から案Bのダイアログへ</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 書き出しB ===== -->
+<section class="variant" id="v-exp-b">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button class="active">Recordings</button><button>Settings</button></div><div class="spacer"></div></div>
+    <div class="body2" style="filter: blur(2px); opacity:.5">
+      <aside class="side"><div class="searchbox"><input placeholder="録音を検索" /></div><div class="reclist"><div class="grp">今日</div><button class="rec-item active"><span class="t">定例ミーティング</span><span class="d">14:00 · 42分</span></button></div></aside>
+      <div class="detail"><div class="det-head"><h2>定例ミーティング</h2></div><div></div><div></div></div>
+    </div>
+    <div class="scrim">
+      <div class="dialog">
+        <div class="dh">書き出し</div>
+        <div class="ds">定例ミーティング · 2026/08/05 · 42分</div>
+        <div class="grid2">
+          <div class="fmt-list">
+            <div class="fmt"><span class="fi">📝</span><span class="fn">Markdown 議事録</span><span class="fd">要約・アクション・全文</span></div>
+            <div class="fmt sel"><span class="fi">🎬</span><span class="fn">SubRip 字幕 (.srt)</span><span class="fd">動画編集ソフト・YouTube</span></div>
+            <div class="fmt"><span class="fi">🎬</span><span class="fn">WebVTT 字幕 (.vtt)</span><span class="fd">Web プレイヤー</span></div>
+            <div class="fmt"><span class="fi">🧾</span><span class="fn">JSON / TXT</span><span class="fd">従来形式(機械処理向け)</span></div>
+          </div>
+          <div class="opts">
+            <label class="opt"><input type="checkbox" checked />話者名を付ける(田中: / Sarah:)</label>
+            <label class="opt"><input type="checkbox" checked />訳文を併記する</label>
+            <label class="opt"><input type="radio" name="lane" checked />両レーン</label>
+            <label class="opt" style="padding-left:22px"><input type="radio" name="lane" />マイクのみ</label>
+            <label class="opt" style="padding-left:22px"><input type="radio" name="lane" />スピーカーのみ</label>
+            <label class="opt"><input type="checkbox" />用語集を適用する</label>
+          </div>
+          <div class="preview"><span class="pk">1</span>
+00:00:31,200 --> 00:00:34,880
+<span class="pk">Sarah:</span> We should probably ship the beta by the end of this month.
+ベータ版は今月末までにリリースした方がよさそうですね。
+
+<span class="pk">2</span>
+00:00:35,400 --> 00:00:37,020
+<span class="pk">田中:</span> 了解です。では残タスクを洗い出しましょう。</div>
+        </div>
+        <div class="df"><button class="btn">キャンセル</button><button class="btn primary">書き出す…</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>書き出し案B「オプション付きダイアログ」</b> — ガラスのシートに形式カード+ライブプレビュー。
+    <ul>
+      <li>形式カードは選択で青リング、ホバーで浮き上がり。結果が変わるたびプレビューが即更新(Feedback)</li>
+      <li>キャンセル/実行はHIGどおり右下・実行が右端。用語集トグルもここに同居</li>
+      <li><b>推奨: 案Aメニューの「書き出しオプション…」から本ダイアログへ、のハイブリッド</b></li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.vtabs button');
+  tabs.forEach((b) => b.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.variant').forEach((v) => v.classList.toggle('active', v.id === 'v-' + b.dataset.v));
+  }));
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? '' : 'dark';
+  }
+</script>
+</body>
+</html>

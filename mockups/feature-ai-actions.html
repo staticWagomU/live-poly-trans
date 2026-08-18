@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — アクションアイテム抽出 モック(スタイリッシュ版)</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --pearl: rgba(255, 255, 255, 0.72);
+    --ai-grad: linear-gradient(120deg, #0894ff, #c959dd 45%, #ff2e54 75%, #ff9004);
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 28px 16px 60px;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+  input { font: inherit; color: inherit; }
+
+  .prop-head { max-width: 1080px; margin: 0 auto 18px; }
+  .prop-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 6px; }
+  .prop-head p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .prop-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .vtabs { display: flex; gap: 4px; background: rgba(120,120,128,0.14); border-radius: 10px; padding: 3px; }
+  .vtabs button { padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .vtabs button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .theme-btn { margin-left: auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; }
+  .variant { display: none; max-width: 1080px; margin: 0 auto; }
+  .variant.active { display: block; }
+  .note { margin: 14px auto 0; max-width: 1080px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .note b { color: var(--ink); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes shimmer { 0% { background-position: 0% 50%; } 100% { background-position: 200% 50%; } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  .window {
+    height: 600px;
+    background: var(--canvas);
+    border-radius: 14px;
+    border: 1px solid var(--hairline);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28), inset 0 0 0 0.5px rgba(255,255,255,0.12);
+    display: grid; grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px;
+    background: var(--pearl); backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid var(--divider);
+  }
+  .traffic { display: flex; gap: 8px; margin-right: 4px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic span:nth-child(1) { background: #ff5f57; }
+  .traffic span:nth-child(2) { background: #febc2e; }
+  .traffic span:nth-child(3) { background: #28c840; }
+  .seg { display: flex; background: rgba(120,120,128,0.14); border-radius: 9px; padding: 2px; }
+  .seg button { padding: 5px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .seg button.active { background: var(--canvas); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); font-weight: 600; }
+  .spacer { flex: 1; }
+  .pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 13px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--hairline); font-size: 13px; font-weight: 500; }
+  .pill.rec { background: var(--red); border-color: var(--red); color: #fff; font-variant-numeric: tabular-nums; }
+  .ai-toggle { position: relative; font-weight: 700; border: 1px solid transparent; background:
+    linear-gradient(var(--canvas), var(--canvas)) padding-box,
+    var(--ai-grad) border-box; }
+  .ai-toggle .g { background: var(--ai-grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+
+  .livegrid { display: grid; grid-template-columns: minmax(0, 1fr) 322px; min-height: 0; }
+  .caps { overflow: auto; padding: 22px 28px; display: grid; gap: 17px; align-content: start; }
+  .cap { display: grid; gap: 3px; }
+  .cap .who { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; }
+  .cap .who .dot { width: 7px; height: 7px; border-radius: 50%; }
+  .cap.me .who { color: var(--blue); }
+  .cap.me .who .dot { background: var(--blue); }
+  .cap.them .who { color: var(--muted); }
+  .cap.them .who .dot { background: var(--muted); }
+  .cap .main { font-size: 19px; font-weight: 600; line-height: 1.5; letter-spacing: -0.015em; }
+  .cap .sub { font-size: 14.5px; color: var(--muted); line-height: 1.5; }
+
+  /* AI panel */
+  .ai-panel {
+    border-left: 1px solid var(--divider);
+    background: color-mix(in srgb, var(--parchment) 55%, var(--canvas));
+    backdrop-filter: blur(20px);
+    display: grid; grid-template-rows: auto 1fr auto; min-height: 0;
+    position: relative;
+  }
+  .ai-panel::before {
+    content: ''; position: absolute; inset: 0 auto 0 0; width: 2px;
+    background: var(--ai-grad); opacity: 0.65;
+  }
+  .ai-tabs { display: flex; gap: 2px; padding: 12px 14px 0; }
+  .ai-tabs button { flex: 1; padding: 7px 0 9px; font-size: 12.5px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; transition: all 0.2s ease; }
+  .ai-tabs button.active { color: var(--ink); border-image: var(--ai-grad) 1; border-bottom: 2px solid; }
+  .badge-new { font-size: 9.5px; font-weight: 800; color: #fff; background: var(--ai-grad); background-size: 200% 100%; animation: shimmer 3s linear infinite; border-radius: 999px; padding: 1.5px 7px; vertical-align: 2px; }
+  .ai-body { overflow: auto; padding: 15px 16px; font-size: 13px; line-height: 1.65; animation: fadeUp 0.3s cubic-bezier(0.25,0.1,0.25,1); }
+  .ai-cap { font-size: 10.5px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); margin: 0 0 9px; display: flex; align-items: center; gap: 6px; }
+  .ai-cap .sp { flex: 1; }
+  .ai-cap button { font-size: 11px; color: var(--blue); font-weight: 600; letter-spacing: 0; text-transform: none; }
+  .todo { display: grid; gap: 8px; }
+  .td {
+    display: grid; grid-template-columns: auto 1fr; gap: 10px; padding: 10px 12px;
+    border-radius: 12px; background: var(--canvas); border: 1px solid var(--hairline);
+    align-items: start; transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1); cursor: pointer;
+  }
+  .td:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.07); }
+  .td input { margin-top: 2px; width: 15px; height: 15px; accent-color: var(--blue); }
+  .td .tt { font-size: 12.5px; line-height: 1.5; font-weight: 500; letter-spacing: -0.1px; }
+  .td .tm { font-size: 11px; color: var(--muted); margin-top: 3px; display: flex; gap: 9px; align-items: center; }
+  .td .tm .who { font-weight: 700; }
+  .td .tm .ts { color: var(--blue); font-variant-numeric: tabular-nums; }
+  .td.done { opacity: 0.6; }
+  .td.done .tt { text-decoration: line-through; color: var(--muted); }
+  .sum { color: var(--ink-2); font-size: 12.5px; }
+  .sum ul { margin: 5px 0 0; padding-left: 16px; }
+  .sum li { margin-bottom: 3px; }
+  .ai-ask { border-top: 1px solid var(--divider); padding: 11px 13px; display: flex; gap: 8px; }
+  .ai-ask input { flex: 1; padding: 8px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; outline: none; transition: all 0.2s ease; }
+  .ai-ask input:focus { border-color: transparent; box-shadow: 0 0 0 2px transparent; background:
+    linear-gradient(var(--canvas), var(--canvas)) padding-box, var(--ai-grad) border-box; border: 1px solid transparent; }
+  .ai-ask .send { width: 32px; height: 32px; border-radius: 50%; background: var(--ai-grad); color: #fff; display: grid; place-items: center; font-size: 14px; transition: transform 0.2s ease; }
+  .ai-ask .send:hover { transform: scale(1.08); }
+  .sec + .sec { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--divider); }
+  .fold { margin-left: 4px; font-size: 10px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="prop-head">
+  <h1>アクションアイテム自動抽出 — モック提案(スタイリッシュ版)</h1>
+  <p>機能#9。Apple Intelligence 系機能の視覚言語(マルチカラーグラデーション)を ✦ ボタン・パネル左端の輝線・アクティブタブの下線に限定して使い、コンテンツ本体はモノクロ基調に保ちます(Deference)。</p>
+  <div class="prop-bar">
+    <div class="vtabs" role="tablist">
+      <button class="active" data-v="a">案A タブ切替</button>
+      <button data-v="b">案B 縦積み</button>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">ライト / ダーク</button>
+  </div>
+</header>
+
+<!-- ===== 案A ===== -->
+<section class="variant active" id="v-a">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button class="active">Live</button><button>Recordings</button><button>Settings</button></div>
+      <div class="seg"><button>Speaker</button><button class="active">Both</button><button>Mic</button></div>
+      <span class="pill">日本語 ⇄ English ⌄</span>
+      <div class="spacer"></div>
+      <button class="pill ai-toggle"><span class="g">✦</span></button><button class="pill">…</button><button class="pill rec">● 12:34</button>
+    </div>
+    <div class="livegrid">
+      <div class="caps">
+        <div class="cap me"><span class="who"><span class="dot"></span>自分</span><span class="main">承知しました、では日程を調整してカレンダーに入れておきます。</span><span class="sub">Got it, I'll arrange the schedule and put it on the calendar.</span></div>
+        <div class="cap them"><span class="who"><span class="dot"></span>相手</span><span class="main">We should probably ship the beta by the end of this month.</span><span class="sub">ベータ版は今月末までにリリースした方がよさそうですね。</span></div>
+        <div class="cap them"><span class="who"><span class="dot"></span>相手</span><span class="main">Can you also draft the announcement post by Friday?</span><span class="sub">金曜までに告知文のドラフトも書いてもらえますか？</span></div>
+      </div>
+      <aside class="ai-panel">
+        <div class="ai-tabs">
+          <button>要約</button>
+          <button class="active">アクション <span class="badge-new">3</span></button>
+          <button>Ask</button>
+        </div>
+        <div class="ai-body">
+          <div class="ai-cap">自動抽出 · 14:03 更新<span class="sp"></span><button>コピー</button></div>
+          <div class="todo">
+            <label class="td"><input type="checkbox" /><span><span class="tt">日程を調整してカレンダーに登録する</span><span class="tm"><span class="who">自分</span><span class="ts">14:01 ↗</span></span></span></label>
+            <label class="td"><input type="checkbox" /><span><span class="tt">ベータ版を今月末までにリリースする</span><span class="tm"><span class="who">チーム</span><span class="ts">14:02 ↗</span></span></span></label>
+            <label class="td"><input type="checkbox" /><span><span class="tt">金曜までに告知文のドラフトを書く</span><span class="tm"><span class="who">自分</span><span class="ts">14:03 ↗</span></span></span></label>
+            <label class="td done"><input type="checkbox" checked /><span><span class="tt">議事メモを共有する(前回分)</span><span class="tm"><span class="who">自分</span><span class="ts">13:47 ↗</span></span></span></label>
+          </div>
+        </div>
+        <div class="ai-ask"><input placeholder="この会議について質問…" /><button class="send">↑</button></div>
+      </aside>
+    </div>
+  </div>
+  <div class="note"><b>案A「タブ切替」</b> — AIパネルを「要約 / アクション / Ask」の3タブに再構成。
+    <ul>
+      <li>グラデーションは ✦・輝線・アクティブタブ下線・新着バッジのみ。カード本体はモノクロで内容が主役</li>
+      <li>新着バッジはシマー(ゆっくり流れる)で気づきを促し、Reduce Motion では静止</li>
+      <li>アクションカードはホバーで浮き上がり、↗ で発言元へジャンプ。チェック状態は録音メタに保存されMarkdownにも反映</li>
+      <li>弱点: 要約とアクションを同時に見られない</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案B ===== -->
+<section class="variant" id="v-b">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button class="active">Live</button><button>Recordings</button><button>Settings</button></div>
+      <div class="seg"><button>Speaker</button><button class="active">Both</button><button>Mic</button></div>
+      <span class="pill">日本語 ⇄ English ⌄</span>
+      <div class="spacer"></div>
+      <button class="pill ai-toggle"><span class="g">✦</span></button><button class="pill">…</button><button class="pill rec">● 12:34</button>
+    </div>
+    <div class="livegrid">
+      <div class="caps">
+        <div class="cap me"><span class="who"><span class="dot"></span>自分</span><span class="main">承知しました、では日程を調整してカレンダーに入れておきます。</span><span class="sub">Got it, I'll arrange the schedule and put it on the calendar.</span></div>
+        <div class="cap them"><span class="who"><span class="dot"></span>相手</span><span class="main">We should probably ship the beta by the end of this month.</span><span class="sub">ベータ版は今月末までにリリースした方がよさそうですね。</span></div>
+        <div class="cap them"><span class="who"><span class="dot"></span>相手</span><span class="main">Can you also draft the announcement post by Friday?</span><span class="sub">金曜までに告知文のドラフトも書いてもらえますか？</span></div>
+      </div>
+      <aside class="ai-panel" style="grid-template-rows: 1fr auto">
+        <div class="ai-body">
+          <div class="sec">
+            <div class="ai-cap">要約 · 14:03 更新 <span class="fold">▾</span><span class="sp"></span><button>コピー</button></div>
+            <div class="sum">ベータ版のリリース時期を協議。今月末リリースの方針で合意し、関連タスクの担当を確認した。<ul><li>リリース目標: 今月末</li><li>告知文ドラフト: 金曜締切</li></ul></div>
+          </div>
+          <div class="sec">
+            <div class="ai-cap">アクションアイテム · 3件 <span class="fold">▾</span><span class="sp"></span><button>コピー</button></div>
+            <div class="todo">
+              <label class="td"><input type="checkbox" /><span><span class="tt">日程を調整してカレンダーに登録する</span><span class="tm"><span class="who">自分</span><span class="ts">14:01 ↗</span></span></span></label>
+              <label class="td"><input type="checkbox" /><span><span class="tt">金曜までに告知文のドラフトを書く</span><span class="tm"><span class="who">自分</span><span class="ts">14:03 ↗</span></span></span></label>
+            </div>
+          </div>
+        </div>
+        <div class="ai-ask"><input placeholder="この会議について質問…" /><button class="send">↑</button></div>
+      </aside>
+    </div>
+  </div>
+  <div class="note"><b>案B「縦積み」</b> — 現行構成のまま要約の下に「アクションアイテム」セクションを追加。
+    <ul>
+      <li>要約とアクションを同時に俯瞰できる=会議終盤の「まとめ確認」に強い</li>
+      <li>各セクションは ▾ で折りたたみ可能(長い会議でのスクロール対策)</li>
+      <li>Ask 入力欄は従来どおり最下部に常駐。現行UIからの変化が最小</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.vtabs button');
+  tabs.forEach((b) => b.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.variant').forEach((v) => v.classList.toggle('active', v.id === 'v-' + b.dataset.v));
+  }));
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? '' : 'dark';
+  }
+</script>
+</body>
+</html>

@@ -1,0 +1,605 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — 設定拡張 モック(スタイリッシュ版)</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --pearl: rgba(255, 255, 255, 0.72);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.22);
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.6);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 28px 16px 60px;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+  input, select { font: inherit; color: inherit; }
+
+  .prop-head { max-width: 1080px; margin: 0 auto 18px; }
+  .prop-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 6px; }
+  .prop-head p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .prop-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .vtabs { display: flex; gap: 4px; background: rgba(120,120,128,0.14); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .vtabs button { padding: 6px 13px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .vtabs button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .theme-btn { margin-left: auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; }
+  .variant { display: none; max-width: 1080px; margin: 0 auto; }
+  .variant.active { display: block; }
+  .note { margin: 14px auto 0; max-width: 1080px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .note b { color: var(--ink); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
+
+  /* ===== window / settings chrome ===== */
+  .window {
+    height: 600px;
+    background: var(--canvas);
+    border-radius: 14px;
+    border: 1px solid var(--hairline);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28), inset 0 0 0 0.5px rgba(255,255,255,0.12);
+    display: grid; grid-template-rows: auto 1fr;
+    overflow: hidden;
+  }
+  .toolbar {
+    display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 14px;
+    background: var(--pearl); backdrop-filter: blur(24px) saturate(180%);
+    border-bottom: 1px solid var(--divider);
+  }
+  .traffic { display: flex; gap: 8px; margin-right: 4px; }
+  .traffic span { width: 12px; height: 12px; border-radius: 50%; }
+  .traffic span:nth-child(1) { background: #ff5f57; }
+  .traffic span:nth-child(2) { background: #febc2e; }
+  .traffic span:nth-child(3) { background: #28c840; }
+  .seg { display: flex; background: rgba(120,120,128,0.14); border-radius: 9px; padding: 2px; }
+  .seg button { padding: 5px 14px; border-radius: 7px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .seg button.active { background: var(--canvas); color: var(--ink); box-shadow: 0 1px 3px rgba(0,0,0,0.12); font-weight: 600; }
+  .spacer { flex: 1; }
+
+  .setgrid { display: grid; grid-template-columns: 212px minmax(0, 1fr); min-height: 0; }
+  .setnav { border-right: 1px solid var(--divider); background: color-mix(in srgb, var(--parchment) 62%, var(--canvas)); padding: 14px 10px; display: grid; gap: 2px; align-content: start; }
+  .setnav button { display: flex; align-items: center; gap: 9px; padding: 6px 10px; border-radius: 9px; font-size: 13px; text-align: left; color: var(--ink); transition: background 0.15s ease; }
+  .setnav button:hover { background: rgba(120,120,128,0.1); }
+  .setnav button.active { background: var(--blue); color: #fff; }
+  .setnav button.active .sq { box-shadow: inset 0 0 0 1px rgba(255,255,255,0.35); }
+  .sq { width: 23px; height: 23px; border-radius: 7px; display: grid; place-items: center; font-size: 12px; color: #fff; flex: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.28), 0 1px 2px rgba(0,0,0,0.18); }
+  .sq.gray { background: linear-gradient(160deg, #9a9aa0, #7c7c82); }
+  .sq.purple { background: linear-gradient(160deg, #bf7af0, #8944ab); }
+  .sq.orange { background: linear-gradient(160deg, #ffb340, #f09000); }
+  .sq.blue { background: linear-gradient(160deg, #4aa3ff, #0066cc); }
+  .sq.green { background: linear-gradient(160deg, #4cd964, #24a83c); }
+  .sq.teal { background: linear-gradient(160deg, #5ac8fa, #2894c4); }
+  .sq.indigo { background: linear-gradient(160deg, #7d7aff, #4b44c9); }
+  .sq.redsq { background: linear-gradient(160deg, #ff6a5f, #d92c20); }
+
+  .pane { overflow: auto; padding: 24px 28px; animation: fadeUp 0.3s cubic-bezier(0.25,0.1,0.25,1); }
+  .pane h3 { margin: 0 0 4px; font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
+  .pane .lead { margin: 0 0 18px; font-size: 12.5px; color: var(--muted); line-height: 1.6; max-width: 560px; }
+  .card { border: 1px solid var(--hairline); border-radius: 14px; background: var(--canvas); margin-bottom: 14px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
+  .row { display: flex; align-items: center; gap: 10px; padding: 13px 16px; font-size: 13.5px; }
+  .row + .row { border-top: 1px solid var(--divider); }
+  .row .d { font-size: 11.5px; color: var(--muted); margin-top: 2px; line-height: 1.5; }
+  .row .grow { flex: 1; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 999px; background: var(--canvas); border: 1px solid var(--hairline); font-size: 12.5px; font-weight: 500; transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1); }
+  .btn:hover { transform: scale(1.03); }
+  .btn.primary { background: var(--blue); border-color: var(--blue); color: #fff; }
+  .sw { width: 40px; height: 24px; border-radius: 999px; background: rgba(120,120,128,0.3); position: relative; flex: none; cursor: pointer; transition: background 0.2s ease; }
+  .sw.on { background: var(--green); }
+  .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 0.18s cubic-bezier(0.25,0.1,0.25,1); }
+  .sw.on::after { left: 18px; }
+  .miniseg { display: flex; background: rgba(120,120,128,0.14); border-radius: 8px; padding: 2px; }
+  .miniseg button { padding: 4px 13px; border-radius: 6px; font-size: 12px; color: var(--ink-2); transition: all 0.18s ease; }
+  .miniseg button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .txt { padding: 7px 11px; border-radius: 9px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 13px; outline: none; transition: all 0.2s ease; }
+  .txt:focus { border-color: var(--blue-focus); box-shadow: 0 0 0 3.5px var(--blue-soft); }
+  code.k { font-family: ui-monospace, 'SF Mono', monospace; font-size: 11.5px; background: rgba(120,120,128,0.12); border-radius: 5px; padding: 2px 6px; }
+
+  /* glossary */
+  table.gloss { width: 100%; border-collapse: collapse; font-size: 13px; }
+  .gloss th { text-align: left; font-size: 10.5px; font-weight: 700; color: var(--muted); letter-spacing: 0.07em; text-transform: uppercase; padding: 10px 16px 8px; border-bottom: 1px solid var(--divider); }
+  .gloss td { padding: 9px 16px; border-bottom: 1px solid var(--divider); }
+  .gloss tr:last-child td { border-bottom: 0; }
+  .gloss tbody tr { transition: background 0.12s ease; }
+  .gloss tbody tr:hover { background: rgba(120,120,128,0.05); }
+  .gloss .from { color: var(--muted); text-decoration: line-through; text-decoration-thickness: 1px; }
+  .gloss .arrow { color: var(--muted); font-size: 11px; }
+  .gloss .to { font-weight: 600; }
+  .gloss .x { color: var(--muted); opacity: 0; transition: opacity 0.12s ease; }
+  .gloss tbody tr:hover .x { opacity: 1; }
+  .tag { font-size: 10.5px; font-weight: 600; padding: 2.5px 9px; border-radius: 999px; background: rgba(120,120,128,0.14); color: var(--ink-2); }
+  .tag.re { background: rgba(175, 82, 222, 0.14); color: #af52de; }
+  [data-theme='dark'] .tag.re { color: #d69bf5; }
+
+  /* backend cards */
+  .be-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 14px; }
+  .be { border: 1px solid var(--hairline); border-radius: 14px; padding: 14px 15px; cursor: pointer; display: grid; gap: 4px; position: relative; background: var(--canvas); transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1); }
+  .be:hover { transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0,0,0,0.1); }
+  .be.sel { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+  .be .bi { width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; font-size: 16px; color: #fff; box-shadow: inset 0 1px 0 rgba(255,255,255,0.28); }
+  .be .bn { font-size: 13.5px; font-weight: 700; letter-spacing: -0.1px; }
+  .be .bd { font-size: 11px; color: var(--muted); line-height: 1.55; }
+  .be .badge { position: absolute; top: 12px; right: 12px; font-size: 10px; font-weight: 700; color: var(--blue); background: var(--blue-soft); border-radius: 999px; padding: 2px 8px; }
+  .ok { color: var(--green); font-size: 12px; font-weight: 600; }
+
+  /* translation variants */
+  .popup { display: inline-flex; align-items: center; gap: 8px; padding: 5px 8px 5px 12px; border-radius: 7px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 13px; font-weight: 500; box-shadow: 0 1px 2px rgba(0,0,0,0.06); }
+  .popup .chev { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 5px; background: var(--blue); color: #fff; font-size: 8.5px; line-height: 1; }
+  .ddwrap { position: relative; }
+  .ddmenu {
+    position: absolute; right: 0; top: 34px; z-index: 30; width: 250px;
+    background: rgba(250, 250, 252, 0.88); backdrop-filter: blur(30px) saturate(190%);
+    border: 1px solid var(--hairline); border-radius: 12px; padding: 5px;
+    box-shadow: var(--shadow-menu), inset 0 0 0 0.5px rgba(255,255,255,0.18);
+    animation: fadeUp 0.22s cubic-bezier(0.25,0.1,0.25,1);
+  }
+  [data-theme='dark'] .ddmenu { background: rgba(36, 36, 40, 0.88); }
+  .dd-i { display: grid; grid-template-columns: 16px 1fr; gap: 1px 8px; width: 100%; padding: 7px 9px; border-radius: 8px; text-align: left; font-size: 13px; align-items: center; }
+  .dd-i:hover { background: var(--blue); color: #fff; }
+  .dd-i:hover .dd-d { color: rgba(255,255,255,0.75); }
+  .dd-i .chk { font-size: 11px; grid-row: span 2; }
+  .dd-i .dd-d { font-size: 10.5px; color: var(--muted); grid-column: 2; }
+  .cmp { display: grid; gap: 8px; }
+  .cmp-src { padding: 11px 14px; border-radius: 12px; background: rgba(120,120,128,0.09); font-size: 13px; font-weight: 600; }
+  .cmp-src .lbl2 { display: block; font-size: 10px; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted); margin-bottom: 3px; }
+  .cmp-row { display: grid; grid-template-columns: auto 1fr auto; gap: 4px 12px; padding: 11px 13px; border-radius: 12px; border: 1px solid var(--hairline); background: var(--canvas); cursor: pointer; align-items: baseline; transition: all 0.18s cubic-bezier(0.25,0.1,0.25,1); }
+  .cmp-row:hover { transform: translateY(-1px); box-shadow: 0 4px 14px rgba(0,0,0,0.08); }
+  .cmp-row.sel { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+  .cmp-row .en { font-size: 12.5px; font-weight: 700; }
+  .cmp-row .lat { font-size: 10.5px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cmp-row .tx2 { grid-column: 1 / -1; font-size: 13.5px; line-height: 1.55; }
+  .cmp-row .setup { grid-column: 1 / -1; font-size: 12px; color: var(--muted); }
+  .cmp-row .setup a { color: var(--blue); font-weight: 600; text-decoration: none; }
+  .tag2 { font-size: 9.5px; font-weight: 700; padding: 2px 7px; border-radius: 999px; background: rgba(120,120,128,0.13); color: var(--ink-2); justify-self: start; }
+  .twopane { display: grid; grid-template-columns: 168px 1fr; gap: 14px; }
+  .eng-list { display: grid; gap: 3px; align-content: start; border: 1px solid var(--hairline); border-radius: 12px; padding: 5px; background: var(--canvas); }
+  .eng-list button { display: grid; grid-template-columns: auto 1fr; gap: 0 8px; padding: 8px 9px; border-radius: 8px; text-align: left; font-size: 12.5px; font-weight: 600; align-items: center; }
+  .eng-list button .es { grid-column: 2; font-size: 10px; font-weight: 500; color: var(--muted); }
+  .eng-list button.active { background: var(--blue); color: #fff; }
+  .eng-list button.active .es { color: rgba(255,255,255,0.75); }
+  .eng-list .edot { width: 7px; height: 7px; border-radius: 50%; background: var(--green); grid-row: span 2; }
+  .eng-list .edot.off { background: var(--muted); opacity: 0.5; }
+
+  /* appearance */
+  .theme-pick { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; padding: 15px 16px; }
+  .tp { display: grid; gap: 7px; justify-items: center; cursor: pointer; font-size: 12px; font-weight: 500; }
+  .tp .thumb { width: 100%; height: 66px; border-radius: 11px; border: 2px solid var(--hairline); overflow: hidden; position: relative; transition: all 0.2s ease; }
+  .tp:hover .thumb { transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+  .tp.sel .thumb { border-color: var(--blue); box-shadow: 0 0 0 3px var(--blue-soft); }
+  .thumb.light { background: #f5f5f7; }
+  .thumb.dark { background: #131315; }
+  .thumb.auto { background: linear-gradient(105deg, #f5f5f7 50%, #131315 50%); }
+  .thumb i { position: absolute; left: 10px; top: 11px; right: 10px; height: 7px; border-radius: 4px; background: rgba(120,120,128,0.45); }
+  .thumb i + i { top: 26px; width: 58%; }
+  .prevline { font-size: 19px; line-height: 1.5; letter-spacing: -0.1px; font-weight: 600; }
+  .prevline .d { font-size: 13px; font-weight: 400; }
+</style>
+</head>
+<body>
+<header class="prop-head">
+  <h1>設定拡張 — 用語集 / 翻訳 / 保存 / 外観(スタイリッシュ版)</h1>
+  <p>機能#4・#6・#5・#10。サイドバーは System Settings の文法(カラースクワークルアイコン+選択でアクセント塗り)。カードはグループ化された設定行、ホバーで行の操作が現れる控えめな段階的開示。</p>
+  <div class="prop-bar">
+    <div class="vtabs" role="tablist">
+      <button class="active" data-v="gl-a">用語集A シンプル</button>
+      <button data-v="gl-b">用語集B ルール型</button>
+      <button data-v="tr">翻訳A カード</button>
+      <button data-v="trb">翻訳B ネイティブ行</button>
+      <button data-v="trc">翻訳C 比較</button>
+      <button data-v="trd">翻訳D 2ペイン</button>
+      <button data-v="sv">保存</button>
+      <button data-v="ap">外観</button>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">ライト / ダーク</button>
+  </div>
+</header>
+
+<!-- shared nav template rendered per variant -->
+<!-- ===== 用語集A ===== -->
+<section class="variant active" id="v-gl-a">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button class="active"><span class="sq orange">📖</span>用語集</button>
+        <button><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>用語集</h3>
+        <p class="lead">よく誤認識される固有名詞を正しい表記に自動で置き換えます。表示と書き出しに適用され、元の認識結果は変更されません。</p>
+        <div class="card">
+          <table class="gloss">
+            <thead><tr><th>誤認識される表記</th><th></th><th>正しい表記</th><th></th></tr></thead>
+            <tbody>
+            <tr><td class="from">クロード コード</td><td class="arrow">→</td><td class="to">Claude Code</td><td class="x">✕</td></tr>
+            <tr><td class="from">タウリ</td><td class="arrow">→</td><td class="to">Tauri</td><td class="x">✕</td></tr>
+            <tr><td class="from">和込</td><td class="arrow">→</td><td class="to">Wagomu</td><td class="x">✕</td></tr>
+            <tr><td><input class="txt" placeholder="例: すべると" style="width:100%" /></td><td class="arrow">→</td><td><input class="txt" placeholder="例: Svelte" style="width:100%" /></td><td><button class="btn primary" style="padding:5px 13px">追加</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <button class="btn">読み込む…</button>
+          <button class="btn">書き出す…</button>
+          <span class="spacer"></span>
+          <span style="font-size:12px;color:var(--muted)">3件 · ライブ字幕と書き出しに適用中</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>用語集案A「シンプル対応表」</b> — 「誤 → 正」の1行1ルール。矢印で置換の方向を明示。
+    <ul>
+      <li>削除✕はホバー時のみ表示(段階的開示でリストを静かに保つ)</li>
+      <li>単純一致・全件有効。説明が1文で済み、非IT層でも迷わない</li>
+      <li>JSON入出力でチーム共有。<b>内部データ構造は案B互換にしておき、後から列を足せるようにする</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 用語集B ===== -->
+<section class="variant" id="v-gl-b">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button class="active"><span class="sq orange">📖</span>用語集</button>
+        <button><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>用語集</h3>
+        <p class="lead">ルールごとに一致方法と有効/無効を制御できます。上から順に適用されます。</p>
+        <div class="card">
+          <table class="gloss">
+            <thead><tr><th></th><th>パターン</th><th>置換後</th><th>一致</th><th></th></tr></thead>
+            <tbody>
+            <tr><td><span class="sw on" style="transform:scale(.78)"></span></td><td class="from">クロード ?コード</td><td class="to">Claude Code</td><td><span class="tag re">正規表現</span></td><td class="x">✕</td></tr>
+            <tr><td><span class="sw on" style="transform:scale(.78)"></span></td><td class="from">タウリ</td><td class="to">Tauri</td><td><span class="tag">完全一致</span></td><td class="x">✕</td></tr>
+            <tr><td><span class="sw" style="transform:scale(.78)"></span></td><td class="from">(株)|株式会社</td><td class="to">株式会社</td><td><span class="tag re">正規表現</span></td><td class="x">✕</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex; gap:8px; align-items:center">
+          <button class="btn primary">＋ ルールを追加</button>
+          <button class="btn">読み込む…</button><button class="btn">書き出す…</button>
+          <span class="spacer"></span>
+          <span style="font-size:12px;color:var(--muted)">無効なパターンは自動でスキップ</span>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>用語集案B「ルール型」</b> — 一致方法(完全一致/正規表現)と有効トグル付き。
+    <ul>
+      <li>表記ゆれ統一(「(株)→株式会社」)まで守備範囲が広がる。会議の種類でルールを一時オフも可能</li>
+      <li>正規表現バッジは紫で種別を色分け(視覚的スキャンの高速化)</li>
+      <li>UIが重くなるぶん学習コスト増。<b>推奨: 出荷は案A、データ構造のみB互換</b></li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 翻訳 ===== -->
+<section class="variant" id="v-tr">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button class="active"><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>翻訳</h3>
+        <p class="lead">字幕の翻訳に使うエンジンを選びます。接続に失敗したときは Apple 翻訳に自動で切り替わります。</p>
+        <div class="be-grid">
+          <div class="be sel"><span class="bi" style="background:linear-gradient(160deg,#9a9aa0,#5c5c62)"></span><span class="bn">Apple 翻訳</span><span class="bd">オフライン・無料。macOS 内蔵の翻訳エンジン。</span><span class="badge">推奨</span></div>
+          <div class="be"><span class="bi" style="background:linear-gradient(160deg,#4aa3ff,#0f2b46)">🌊</span><span class="bn">DeepL API</span><span class="bd">高品質。APIキーが必要(無料枠あり)。ネットワーク必須。</span></div>
+          <div class="be"><span class="bi" style="background:linear-gradient(160deg,#8a8a92,#3c3c42)">🦙</span><span class="bn">Ollama</span><span class="bd">ローカルLLM。Apple Intelligence 非対応機でも動作。</span></div>
+        </div>
+        <div class="card">
+          <div class="row"><div><div>ステータス</div><div class="d">Apple 翻訳 · 日本語 ⇄ English</div></div><span class="grow"></span><span class="ok">● 利用可能</span></div>
+          <div class="row"><div><div>フォールバック</div><div class="d">選択中のエンジンが失敗したとき Apple 翻訳に切り替える</div></div><span class="grow"></span><span class="sw on"></span></div>
+        </div>
+        <div class="card" style="opacity:.55">
+          <div class="row"><div><div>DeepL API キー</div><div class="d">キーは Keychain に保存され、平文では書き込まれません</div></div><span class="grow"></span><input class="txt" type="password" value="••••••••••••" style="width:170px" /><button class="btn">接続テスト</button></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>翻訳ペイン</b> — エンジンをカードで選択(ホバーで浮き、選択で青リング)。
+    <ul>
+      <li>既定は Apple 翻訳=設定不要。DeepL/Ollama は上級者向けの追加肢として下段に詳細設定</li>
+      <li>未選択エンジンの設定カードは減光(現在の状態を一目で。Clarity)</li>
+      <li>Ollama 対応で Apple Intelligence 非対応 Mac でも全機能が動く=OSSの間口拡大</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 翻訳B: ネイティブ行 ===== -->
+<section class="variant" id="v-trb">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button class="active"><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>翻訳</h3>
+        <p class="lead">字幕の翻訳に使うエンジンを選びます。</p>
+        <div class="card" style="overflow: visible">
+          <div class="row" style="position: relative"><div><div>翻訳エンジン</div><div class="d">失敗時は Apple 翻訳に自動で切り替わります</div></div><span class="grow"></span>
+            <span class="ddwrap">
+              <span class="popup">Apple 翻訳<span class="chev">⌃⌄</span></span>
+              <span class="ddmenu">
+                <button class="dd-i"><span class="chk">✓</span>Apple 翻訳<span class="dd-d">オフライン・無料・macOS 内蔵</span></button>
+                <button class="dd-i"><span class="chk"></span>DeepL API<span class="dd-d">高品質 · APIキーが必要</span></button>
+                <button class="dd-i"><span class="chk"></span>Ollama<span class="dd-d">ローカルLLM · Apple Intelligence 不要</span></button>
+              </span>
+            </span>
+          </div>
+        </div>
+        <div class="card" style="margin-top: 96px">
+          <div class="row"><div><div>ステータス</div><div class="d">Apple 翻訳 · 日本語 ⇄ English</div></div><span class="grow"></span><span class="ok">● 利用可能</span></div>
+          <div class="row"><div><div>フォールバック</div><div class="d">選択中のエンジンが失敗したとき Apple 翻訳に切り替える</div></div><span class="grow"></span><span class="sw on"></span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>翻訳案B「ネイティブ行」</b> — System Settings の1行+ポップアップメニュー。もっとも純正らしい形。
+    <ul>
+      <li>設定は「翻訳エンジン」1行に集約。エンジンの説明はメニュー項目のサブテキストで補足</li>
+      <li>DeepL選択時のみ下にAPIキー行が現れる(段階的開示で初期状態が最小)</li>
+      <li>視覚的な魅力より「設定は道具」という割り切り。実装コストは4案中最小</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 翻訳C: 比較 ===== -->
+<section class="variant" id="v-trc">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button class="active"><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>翻訳</h3>
+        <p class="lead">同じ例文を各エンジンで翻訳して比較し、気に入ったものをクリックして選びます。</p>
+        <div class="cmp">
+          <div class="cmp-src"><span class="lbl2">例文</span>We should probably ship the beta by the end of this month.</div>
+          <div class="cmp-row sel"><span class="en"> Apple 翻訳</span><span class="tag2">オフライン</span><span class="lat">0.1秒</span><span class="tx2">ベータ版は今月末までに出荷すべきでしょう。</span></div>
+          <div class="cmp-row"><span class="en">🌊 DeepL API</span><span class="tag2">要APIキー</span><span class="lat">0.4秒</span><span class="tx2">ベータ版は今月末までにリリースした方がよさそうですね。</span></div>
+          <div class="cmp-row"><span class="en">🦙 Ollama</span><span class="tag2">ローカルLLM</span><span class="lat">—</span><span class="setup">未セットアップ · <a href="#">セットアップして試す…</a></span></div>
+          <div style="display:flex; gap:8px; margin-top: 4px">
+            <button class="btn">↻ 別の例文で試す</button>
+            <span class="spacer"></span>
+            <span style="font-size:12px;color:var(--muted);align-self:center">直近の字幕から例文を自動で選びます</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>翻訳案C「比較ピッカー」</b> — 翻訳品質そのものを見て選ぶ。試聴して選ぶ音源ピッカーの文法。
+    <ul>
+      <li>「どのエンジンがいいの？」に説明文ではなく実物で答える。例文は直近の字幕から自動採用(自分の会話ドメインで比較できる)</li>
+      <li>レイテンシ併記で品質とスピードのトレードオフも見える</li>
+      <li>未セットアップのエンジンは結果の代わりに導線を表示。比較には一度の実行が必要=初回だけ数秒待つのが弱点</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 翻訳D: 2ペイン ===== -->
+<section class="variant" id="v-trd">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button class="active"><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>翻訳</h3>
+        <p class="lead">左でエンジンを選び、右で詳細を設定します。</p>
+        <div class="twopane">
+          <div class="eng-list">
+            <button class="active"><span class="edot"></span> Apple 翻訳<span class="es">使用中 · オフライン</span></button>
+            <button><span class="edot"></span>🌊 DeepL API<span class="es">設定済み</span></button>
+            <button><span class="edot off"></span>🦙 Ollama<span class="es">未セットアップ</span></button>
+          </div>
+          <div>
+            <div class="card">
+              <div class="row"><div><div>ステータス</div><div class="d">日本語 ⇄ English · macOS 内蔵翻訳</div></div><span class="grow"></span><span class="ok">● 利用可能</span></div>
+              <div class="row"><div><div>言語パック</div><div class="d">ja ⇄ en はダウンロード済み</div></div><span class="grow"></span><button class="btn">管理…</button></div>
+            </div>
+            <div class="card">
+              <div class="row"><div><div>このエンジンを使用</div><div class="d">字幕翻訳をこのエンジンで行います</div></div><span class="grow"></span><span class="sw on"></span></div>
+              <div class="row"><div><div>フォールバック先に設定</div><div class="d">他エンジン失敗時にここへ切り替え</div></div><span class="grow"></span><span class="sw on"></span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>翻訳案D「2ペイン」</b> — メールのアカウント設定の文法。左リスト+右詳細。
+    <ul>
+      <li>各エンジンの状態ドット(緑=使用可/グレー=未設定)がリストで一望できる</li>
+      <li>エンジンごとに詳細設定の粒度が違っても破綻しない(Apple=言語パック、DeepL=キー、Ollama=モデル選択)</li>
+      <li>将来エンジンが増える(Google/GPT系など)前提の拡張性重視。3択のうちは少し大げさなのが弱点</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 保存 ===== -->
+<section class="variant" id="v-sv">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button><span class="sq blue">🌐</span>翻訳</button>
+        <button class="active"><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>保存</h3>
+        <p class="lead">書き出し先とファイル名の形式を設定します。録音データ本体の保存場所は変わりません。</p>
+        <div class="card">
+          <div class="row"><div><div>書き出し先フォルダ</div><div class="d">~/Documents/Obsidian Vault/Meetings</div></div><span class="grow"></span><button class="btn">変更…</button></div>
+          <div class="row"><div><div>ファイル名テンプレート</div><div class="d">結果: <code class="k">2026-08-05 1400 定例ミーティング.md</code></div></div><span class="grow"></span><input class="txt" value="{date} {time} {title}" style="width:190px; font-family: ui-monospace, 'SF Mono', monospace; font-size:12px" /></div>
+        </div>
+        <div class="card">
+          <div class="row"><div><div>録音停止時に Markdown 議事録を自動書き出し</div><div class="d">要約・アクションアイテム・全文を含む</div></div><span class="grow"></span><span class="sw on"></span></div>
+          <div class="row"><div><div>15分ごとのセグメント保存も複製する</div><div class="d">長時間会議の途中経過も同じフォルダに残す</div></div><span class="grow"></span><span class="sw"></span></div>
+        </div>
+        <div class="card">
+          <div class="row"><div><div>プレースホルダ</div><div class="d"><code class="k">{date}</code> 2026-08-05 · <code class="k">{time}</code> 1400 · <code class="k">{title}</code> 録音名 · <code class="k">{lang}</code> ja-en</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>保存ペイン</b> — 書き出し先+テンプレート+自動書き出し。
+    <ul>
+      <li>Obsidian vault を書き出し先にすれば「会議ノートが勝手に溜まる」。専用連携を作らないので他のメモアプリでも成立</li>
+      <li>テンプレートは monospace 入力+直下に実例プレビュー(入力→結果のFeedbackを即時に)</li>
+      <li>録音本体の置き場所は動かさない(移行・破損リスク回避)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 外観 ===== -->
+<section class="variant" id="v-ap">
+  <div class="window">
+    <div class="toolbar"><div class="traffic"><span></span><span></span><span></span></div>
+      <div class="seg"><button>Live</button><button>Recordings</button><button class="active">Settings</button></div><div class="spacer"></div></div>
+    <div class="setgrid">
+      <nav class="setnav">
+        <button><span class="sq gray">⚙︎</span>一般</button>
+        <button class="active"><span class="sq purple">🎨</span>外観</button>
+        <button><span class="sq orange">📖</span>用語集</button>
+        <button><span class="sq blue">🌐</span>翻訳</button>
+        <button><span class="sq green">💾</span>保存</button>
+        <button><span class="sq indigo">🧠</span>認識モデル</button>
+        <button><span class="sq teal">🗣</span>言語</button>
+        <button><span class="sq redsq">🔒</span>プライバシー</button>
+      </nav>
+      <div class="pane">
+        <h3>外観</h3>
+        <p class="lead">テーマと字幕の見た目を設定します。Live・オーバーレイ・対面モードに共通で適用されます。</p>
+        <div class="card">
+          <div class="theme-pick">
+            <div class="tp sel"><span class="thumb auto"><i></i><i></i></span>自動</div>
+            <div class="tp"><span class="thumb light"><i></i><i></i></span>ライト</div>
+            <div class="tp"><span class="thumb dark"><i></i><i></i></span>ダーク</div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="row"><div>字幕フォント</div><span class="grow"></span><div class="miniseg"><button class="active">システム</button><button>丸ゴシック</button><button>明朝</button></div></div>
+          <div class="row"><div><div>字幕の文字サイズ</div><div class="d">⌘+ / ⌘− でも変更できます</div></div><span class="grow"></span><div class="miniseg"><button>A−</button><button class="active">100%</button><button>A＋</button></div></div>
+          <div class="row"><div>行間</div><span class="grow"></span><div class="miniseg"><button>詰める</button><button class="active">標準</button><button>広げる</button></div></div>
+        </div>
+        <div class="card">
+          <div class="row"><div class="prevline">こんにちは、これは字幕のプレビューです。<div class="d" style="color:var(--muted)">Hello, this is a preview of the caption style.</div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>外観ペイン</b> — テーマ上書き+字幕タイポグラフィ。
+    <ul>
+      <li>テーマはサムネイルカードで選択(自動はライト/ダークの斜め分割で意味を図示)</li>
+      <li>フォント・サイズ・行間は Live/オーバーレイ/対面モードの3表示に一貫適用</li>
+      <li>最下部に常時プレビュー行=設定変更の Feedback が即時</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.vtabs button');
+  tabs.forEach((b) => b.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.variant').forEach((v) => v.classList.toggle('active', v.id === 'v-' + b.dataset.v));
+  }));
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? '' : 'dark';
+  }
+</script>
+</body>
+</html>

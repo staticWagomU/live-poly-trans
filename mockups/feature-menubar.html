@@ -1,0 +1,684 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — メニューバー常駐 追加モック(スタイリッシュ案)</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --menu-bg: rgba(250, 250, 252, 0.78);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.22);
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --menu-bg: rgba(36, 36, 40, 0.72);
+    --shadow-menu: 0 18px 50px rgba(0, 0, 0, 0.6);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 28px 16px 60px;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+
+  .prop-head { max-width: 1080px; margin: 0 auto 18px; }
+  .prop-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 6px; }
+  .prop-head p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .prop-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .vtabs { display: flex; gap: 4px; background: rgba(120,120,128,0.14); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .vtabs button { padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .vtabs button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .theme-btn { margin-left: auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; }
+  .variant { display: none; max-width: 1080px; margin: 0 auto; }
+  .variant.active { display: block; }
+  .note { margin: 14px auto 0; max-width: 1080px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .note b { color: var(--ink); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+
+  /* ===== desktop ===== */
+  .desktop {
+    position: relative;
+    height: 560px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+    background:
+      radial-gradient(1100px 480px at 78% -8%, #6f8fd0 0%, transparent 58%),
+      radial-gradient(900px 560px at 8% 112%, #a86e93 0%, transparent 55%),
+      linear-gradient(158deg, #26355f 0%, #43355c 55%, #1a2040 100%);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+  }
+  .osbar {
+    position: absolute; inset: 0 0 auto 0; height: 28px;
+    display: flex; align-items: center; gap: 16px;
+    padding: 0 14px; font-size: 12px; color: rgba(255,255,255,0.92);
+    background: rgba(18, 18, 24, 0.38); backdrop-filter: blur(20px) saturate(160%);
+  }
+  .osbar .l { font-weight: 700; }
+  .osbar .sp { flex: 1; }
+
+  /* template-style menu bar glyph (monochrome waveform) */
+  .glyph { display: inline-flex; align-items: flex-end; gap: 1.5px; height: 12px; padding: 0 2px; }
+  .glyph i { width: 2.5px; border-radius: 2px; background: currentColor; }
+  .glyph i:nth-child(1) { height: 45%; }
+  .glyph i:nth-child(2) { height: 100%; }
+  .glyph i:nth-child(3) { height: 68%; }
+  .glyph i:nth-child(4) { height: 88%; }
+  .glyph i:nth-child(5) { height: 40%; }
+  .tray { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 5px; position: relative; }
+  .tray.open { background: rgba(255, 255, 255, 0.26); }
+  .tray .rd { width: 5px; height: 5px; border-radius: 50%; background: var(--red); box-shadow: 0 0 5px var(--red); animation: pulse 1.6s ease infinite; }
+  @keyframes pulse { 50% { opacity: 0.4; } }
+
+  @keyframes eq { 0%, 100% { transform: scaleY(0.35); } 50% { transform: scaleY(1); } }
+  @keyframes ringPulse { 0% { transform: scale(1); opacity: 0.55; } 100% { transform: scale(1.5); opacity: 0; } }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+  @media (prefers-reduced-motion: reduce) {
+    .glyph i, .tray .rd, .eq i, .ring::after { animation: none !important; }
+  }
+
+  /* ===== shared popover base: vibrancy material ===== */
+  .pop {
+    position: absolute; top: 34px; right: 96px;
+    background: var(--menu-bg);
+    backdrop-filter: blur(34px) saturate(190%);
+    border: 1px solid var(--hairline);
+    border-radius: 18px;
+    box-shadow: var(--shadow-menu), inset 0 0 0 0.5px rgba(255, 255, 255, 0.18);
+    color: var(--ink);
+    animation: fadeUp 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+    overflow: hidden;
+  }
+
+  /* ===== 案c: グラス ===== */
+  .pop.glass { width: 264px; padding: 20px 18px 14px; text-align: center; }
+  .glass .st { font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; color: var(--muted); text-transform: uppercase; }
+  .glass .langs { font-size: 13.5px; font-weight: 600; margin-top: 2px; }
+  .glass .ring { position: relative; width: 84px; height: 84px; margin: 18px auto 10px; }
+  .glass .ring::after { content: ''; position: absolute; inset: 0; border-radius: 50%; border: 2px solid var(--red); animation: ringPulse 1.8s ease-out infinite; }
+  .glass .recbtn {
+    position: relative; z-index: 1; width: 84px; height: 84px; border-radius: 50%;
+    background: radial-gradient(circle at 32% 28%, #ff6a5f, var(--red) 70%);
+    box-shadow: 0 8px 26px rgba(255, 59, 48, 0.45), inset 0 1px 0 rgba(255,255,255,0.35);
+    display: grid; place-items: center; transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+  .glass .recbtn:hover { transform: scale(1.04); }
+  .glass .recbtn i { width: 22px; height: 22px; border-radius: 5px; background: #fff; }
+  .glass .tm { font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; margin-bottom: 14px; }
+  .glass .tm em { font-style: normal; color: var(--red); font-size: 12px; vertical-align: 6px; margin-right: 4px; }
+  .glass .acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .glass .act {
+    display: grid; gap: 3px; justify-items: center; padding: 10px 6px 8px;
+    border-radius: 12px; background: rgba(120,120,128,0.1); font-size: 11px; font-weight: 600; color: var(--ink-2);
+    transition: background 0.2s ease;
+  }
+  .glass .act:hover { background: rgba(120,120,128,0.2); }
+  .glass .act.on { background: var(--blue-soft); color: var(--blue); }
+  .glass .act .ic { font-size: 17px; }
+  .glass .foot { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--divider); display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); }
+
+  /* ===== 案d: アンビエント ===== */
+  .pop.amb { width: 300px; background: rgba(16, 16, 20, 0.66); border-color: rgba(255,255,255,0.14); color: #f5f5f7; }
+  [data-theme='dark'] .pop.amb { background: rgba(10, 10, 14, 0.7); }
+  .amb .wavebox { position: relative; height: 92px; padding: 16px 18px 0; display: flex; align-items: flex-end; gap: 3px; }
+  .amb .eq { display: contents; }
+  .amb .eq i { flex: 1; height: 100%; border-radius: 3px; background: linear-gradient(to top, rgba(41, 151, 255, 0.9), rgba(140, 200, 255, 0.5)); transform-origin: bottom; animation: eq 1.3s ease-in-out infinite; }
+  .amb .eq i:nth-child(2n) { animation-duration: 0.9s; animation-delay: 0.12s; }
+  .amb .eq i:nth-child(3n) { animation-duration: 1.6s; animation-delay: 0.28s; }
+  .amb .eq i:nth-child(5n) { animation-duration: 0.7s; animation-delay: 0.05s; }
+  .amb .overlayinfo {
+    position: absolute; inset: 12px 18px auto; display: flex; justify-content: space-between; align-items: baseline;
+    font-size: 11px; letter-spacing: 0.06em; color: rgba(255,255,255,0.65); font-weight: 600;
+  }
+  .amb .overlayinfo b { font-size: 20px; font-weight: 700; color: #fff; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+  .amb .overlayinfo b::before { content: '●'; color: var(--red); font-size: 10px; margin-right: 6px; vertical-align: 3px; }
+  .amb .capline { padding: 10px 18px 4px; font-size: 12.5px; line-height: 1.55; color: rgba(255,255,255,0.85); }
+  .amb .capline .who { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; color: #7db8ff; margin-right: 6px; text-transform: uppercase; }
+  .amb .caplinesub { padding: 0 18px 12px; font-size: 11px; color: rgba(255,255,255,0.45); }
+  .amb .ctl { display: flex; justify-content: space-evenly; align-items: center; padding: 10px 14px 14px; border-top: 1px solid rgba(255,255,255,0.1); }
+  .amb .cbtn { width: 42px; height: 42px; border-radius: 50%; display: grid; place-items: center; font-size: 16px; background: rgba(255,255,255,0.1); transition: all 0.2s ease; color: #eee; }
+  .amb .cbtn:hover { background: rgba(255,255,255,0.2); transform: scale(1.05); }
+  .amb .cbtn.stop { background: var(--red); box-shadow: 0 6px 20px rgba(255,59,48,0.4); }
+  .amb .cbtn.stop i { width: 13px; height: 13px; border-radius: 3px; background: #fff; }
+  .amb .cbtn.on { background: rgba(64, 156, 255, 0.32); color: #9ecbff; }
+
+  /* ===== 案e: アイランド ===== */
+  .island {
+    position: absolute; top: 34px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 14px;
+    padding: 10px 14px 10px 18px;
+    background: rgba(12, 12, 16, 0.82);
+    backdrop-filter: blur(30px) saturate(180%);
+    border: 1px solid rgba(255,255,255,0.12);
+    border-radius: 999px;
+    color: #f5f5f7;
+    box-shadow: 0 16px 44px rgba(0,0,0,0.5), inset 0 0 0 0.5px rgba(255,255,255,0.14);
+    animation: fadeUp 0.28s cubic-bezier(0.25, 0.1, 0.25, 1);
+  }
+  .island .eqmini { display: inline-flex; align-items: flex-end; gap: 2px; height: 18px; }
+  .island .eqmini i { width: 3px; border-radius: 2px; background: #409cff; transform-origin: bottom; animation: eq 1.1s ease-in-out infinite; height: 100%; }
+  .island .eqmini i:nth-child(2) { animation-delay: 0.15s; }
+  .island .eqmini i:nth-child(3) { animation-delay: 0.3s; }
+  .island .eqmini i:nth-child(4) { animation-delay: 0.08s; }
+  .island .cap { max-width: 300px; font-size: 12.5px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: rgba(255,255,255,0.92); }
+  .island .cap .who { color: #7db8ff; font-size: 10px; font-weight: 700; margin-right: 5px; }
+  .island .tm { font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--red); }
+  .island .div { width: 1px; height: 18px; background: rgba(255,255,255,0.16); }
+  .island .ib { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; background: rgba(255,255,255,0.1); transition: background 0.2s ease; }
+  .island .ib:hover { background: rgba(255,255,255,0.22); }
+  .island .ib.stop { background: var(--red); }
+  .island .ib.stop i { width: 10px; height: 10px; border-radius: 2px; background: #fff; }
+
+  /* ===== 案a-1: リスト+大ボタン ===== */
+  .pop.ctl1 { width: 276px; padding: 8px; }
+  .ctl1 .st { display: flex; align-items: center; gap: 8px; padding: 8px 10px 10px; font-size: 12.5px; color: var(--ink-2); }
+  .ctl1 .st .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .ctl1 .st .tm { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 700; color: var(--red); }
+  .ctl1 .bigrec {
+    width: 100%; display: flex; align-items: center; justify-content: center; gap: 9px;
+    padding: 12px 0; border-radius: 12px; margin-bottom: 8px;
+    background: linear-gradient(160deg, #ff6a5f, var(--red));
+    color: #fff; font-size: 14px; font-weight: 700;
+    box-shadow: 0 6px 20px rgba(255, 59, 48, 0.35), inset 0 1px 0 rgba(255,255,255,0.3);
+    transition: all 0.2s cubic-bezier(0.25,0.1,0.25,1);
+  }
+  .ctl1 .bigrec:hover { transform: scale(1.015); filter: brightness(1.06); }
+  .ctl1 .bigrec i { width: 12px; height: 12px; border-radius: 3px; background: #fff; }
+  .ctl1 .srcseg { display: flex; background: rgba(120,120,128,0.16); border-radius: 9px; padding: 2px; margin-bottom: 6px; }
+  .ctl1 .srcseg button { flex: 1; padding: 5px 0; border-radius: 7px; font-size: 12px; color: var(--ink-2); }
+  .ctl1 .srcseg button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .ctl1 .li { display: flex; align-items: center; gap: 9px; width: 100%; padding: 8px 10px; border-radius: 9px; font-size: 13px; }
+  .ctl1 .li:hover { background: rgba(120,120,128,0.12); }
+  .ctl1 .li .k { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .ctl1 .sw { margin-left: auto; width: 36px; height: 21px; border-radius: 999px; background: rgba(120,120,128,0.3); position: relative; flex: none; }
+  .ctl1 .sw.on { background: var(--green); }
+  .ctl1 .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 17px; height: 17px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 0.15s; }
+  .ctl1 .sw.on::after { left: 17px; }
+  .ctl1 .sep { height: 1px; background: var(--divider); margin: 6px 6px; }
+
+  /* ===== 案a-2: コントロールセンター ===== */
+  .pop.cc { width: 288px; padding: 10px; background: transparent; border: 0; box-shadow: none; backdrop-filter: none; display: grid; gap: 9px; }
+  .cc .mod {
+    background: var(--menu-bg); backdrop-filter: blur(34px) saturate(190%);
+    border: 1px solid var(--hairline); border-radius: 16px;
+    box-shadow: var(--shadow-menu), inset 0 0 0 0.5px rgba(255,255,255,0.18);
+    padding: 12px 14px; transition: transform 0.18s cubic-bezier(0.25,0.1,0.25,1);
+  }
+  .cc .mod:hover { transform: scale(1.015); }
+  .cc .modrec { display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .cc .modrec .knob { width: 44px; height: 44px; border-radius: 50%; background: linear-gradient(160deg, #ff6a5f, var(--red)); display: grid; place-items: center; box-shadow: 0 5px 16px rgba(255,59,48,0.4), inset 0 1px 0 rgba(255,255,255,0.32); flex: none; }
+  .cc .modrec .knob i { width: 13px; height: 13px; border-radius: 3px; background: #fff; }
+  .cc .modrec .t { font-size: 13.5px; font-weight: 700; }
+  .cc .modrec .s { font-size: 11.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cc .duo { display: grid; grid-template-columns: 1fr 1fr; gap: 9px; }
+  .cc .modsq { display: grid; gap: 6px; justify-items: start; cursor: pointer; }
+  .cc .modsq .ic { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 14px; background: rgba(120,120,128,0.2); }
+  .cc .modsq.on .ic { background: var(--blue); color: #fff; }
+  .cc .modsq .t { font-size: 12px; font-weight: 600; }
+  .cc .modsq .s { font-size: 10.5px; color: var(--muted); }
+  .cc .modrow { display: flex; align-items: center; gap: 10px; font-size: 12.5px; font-weight: 500; cursor: pointer; padding: 10px 14px; }
+  .cc .modrow .k { margin-left: auto; font-size: 11px; color: var(--muted); }
+
+  /* ===== 案a-3: ストリップ ===== */
+  .pop.strip {
+    display: flex; align-items: center; gap: 12px;
+    padding: 9px 14px; border-radius: 999px; width: max-content; right: 62px;
+  }
+  .strip .rb { width: 34px; height: 34px; border-radius: 50%; background: linear-gradient(160deg, #ff6a5f, var(--red)); display: grid; place-items: center; box-shadow: 0 4px 14px rgba(255,59,48,0.4); flex: none; transition: transform 0.18s ease; }
+  .strip .rb:hover { transform: scale(1.08); }
+  .strip .rb i { width: 11px; height: 11px; border-radius: 2.5px; background: #fff; }
+  .strip .tm { font-size: 13px; font-weight: 700; font-variant-numeric: tabular-nums; color: var(--red); }
+  .strip .dv { width: 1px; height: 20px; background: var(--divider); }
+  .strip .sseg { display: flex; background: rgba(120,120,128,0.16); border-radius: 8px; padding: 2px; }
+  .strip .sseg button { padding: 4px 10px; border-radius: 6px; font-size: 11.5px; color: var(--ink-2); }
+  .strip .sseg button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .strip .ib { width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center; font-size: 13px; background: rgba(120,120,128,0.14); transition: background 0.15s ease; }
+  .strip .ib:hover { background: rgba(120,120,128,0.26); }
+  .strip .ib.on { background: var(--blue); color: #fff; }
+
+  /* ===== 案a-4: ヒーロータイマー ===== */
+  .pop.hero { width: 252px; padding: 18px 16px 10px; text-align: center; }
+  .hero .st { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; color: var(--muted); text-transform: uppercase; }
+  .hero .tm { font-size: 38px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15; margin: 4px 0 2px; }
+  .hero .tm::before { content: '●'; color: var(--red); font-size: 12px; margin-right: 8px; vertical-align: 8px; }
+  .hero .langs { font-size: 12px; color: var(--ink-2); margin-bottom: 14px; }
+  .hero .btns { display: flex; justify-content: center; gap: 14px; margin-bottom: 14px; }
+  .hero .cb { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 16px; background: rgba(120,120,128,0.14); transition: all 0.18s ease; }
+  .hero .cb:hover { transform: scale(1.07); }
+  .hero .cb.stop { background: linear-gradient(160deg, #ff6a5f, var(--red)); box-shadow: 0 5px 16px rgba(255,59,48,0.4); }
+  .hero .cb.stop i { width: 13px; height: 13px; border-radius: 3px; background: #fff; }
+  .hero .rows { border-top: 1px solid var(--divider); padding-top: 4px; text-align: left; }
+  .hero .li { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px; border-radius: 8px; font-size: 12.5px; }
+  .hero .li:hover { background: rgba(120,120,128,0.12); }
+  .hero .li .v { margin-left: auto; font-size: 11.5px; color: var(--muted); }
+  .hero .li .v.on { color: var(--blue); font-weight: 600; }
+
+  /* ===== 案a-5: タイマー×波形ハイブリッド ===== */
+  .pop.hyb { width: 292px; padding: 18px 16px 10px; text-align: center; background: rgba(16, 16, 20, 0.72); border-color: rgba(255,255,255,0.14); color: #f5f5f7; }
+  [data-theme='dark'] .pop.hyb { background: rgba(10, 10, 14, 0.76); }
+  .hyb .st { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; color: rgba(255,255,255,0.5); text-transform: uppercase; }
+  .hyb .tm { font-size: 38px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.15; margin: 4px 0 2px; color: #fff; }
+  .hyb .tm::before { content: '●'; color: var(--red); font-size: 12px; margin-right: 8px; vertical-align: 8px; }
+  .hyb .langs { font-size: 12px; color: rgba(255,255,255,0.6); margin-bottom: 14px; }
+  .hyb .lane {
+    display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: 12px; background: rgba(255,255,255,0.07);
+    margin-bottom: 8px; text-align: left;
+  }
+  .hyb .lane .lb { font-size: 11px; font-weight: 700; letter-spacing: 0.05em; color: rgba(255,255,255,0.75); display: grid; gap: 1px; }
+  .hyb .lane .lb .sub2 { font-size: 9.5px; font-weight: 500; color: rgba(255,255,255,0.4); letter-spacing: 0.02em; }
+  .hyb .eqlane { display: flex; align-items: center; gap: 2.5px; height: 26px; }
+  .hyb .eqlane i { flex: 1; min-width: 3px; height: 100%; border-radius: 2px; transform-origin: center; animation: eq 1.2s ease-in-out infinite; }
+  .hyb .lane.mic .eqlane i { background: linear-gradient(to top, #409cff, #8cc8ff); }
+  .hyb .lane.spk .eqlane i { background: linear-gradient(to top, #34c759, #86e8a0); }
+  .hyb .eqlane i:nth-child(2n) { animation-duration: 0.85s; animation-delay: 0.1s; }
+  .hyb .eqlane i:nth-child(3n) { animation-duration: 1.5s; animation-delay: 0.25s; }
+  .hyb .eqlane i:nth-child(5n) { animation-duration: 0.65s; animation-delay: 0.04s; }
+  .hyb .lane.dead .eqlane i { animation: none; transform: scaleY(0.12); background: rgba(255,255,255,0.28); }
+  .hyb .lane.dead { background: rgba(255, 159, 10, 0.1); box-shadow: inset 0 0 0 1px rgba(255, 159, 10, 0.35); }
+  .hyb .ok2 { font-size: 10px; font-weight: 700; color: #6fe08a; }
+  .hyb .warn { font-size: 10px; font-weight: 700; color: #ffb340; }
+  .hyb .btns { display: flex; justify-content: center; gap: 14px; margin: 14px 0; }
+  .hyb .cb { width: 46px; height: 46px; border-radius: 50%; display: grid; place-items: center; font-size: 16px; background: rgba(255,255,255,0.1); color: #eee; transition: all 0.18s ease; }
+  .hyb .cb:hover { transform: scale(1.07); background: rgba(255,255,255,0.2); }
+  .hyb .cb.stop { background: linear-gradient(160deg, #ff6a5f, var(--red)); box-shadow: 0 5px 16px rgba(255,59,48,0.45); }
+  .hyb .cb.stop i { width: 13px; height: 13px; border-radius: 3px; background: #fff; }
+  .hyb .cb.on { background: rgba(64, 156, 255, 0.32); color: #9ecbff; }
+  .hyb .rows { border-top: 1px solid rgba(255,255,255,0.1); padding-top: 4px; text-align: left; }
+  .hyb .li { display: flex; align-items: center; gap: 9px; width: 100%; padding: 7px 8px; border-radius: 8px; font-size: 12.5px; color: #eee; }
+  .hyb .li:hover { background: rgba(255,255,255,0.1); }
+  .hyb .li .v { margin-left: auto; font-size: 11.5px; color: rgba(255,255,255,0.45); }
+
+  /* ===== 案a-6: 波形ネイティブ ===== */
+  .pop.hyb2 { width: 280px; padding: 8px; }
+  .hyb2 .head { text-align: center; padding: 10px 0 4px; }
+  .hyb2 .st { font-size: 10.5px; font-weight: 700; letter-spacing: 0.09em; color: var(--muted); text-transform: uppercase; }
+  .hyb2 .tm { font-size: 30px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; line-height: 1.2; color: var(--ink); }
+  .hyb2 .tm::before { content: '●'; color: var(--red); font-size: 10px; margin-right: 7px; vertical-align: 6px; }
+  .hyb2 .langs { font-size: 11.5px; color: var(--muted); margin-bottom: 10px; }
+  .hyb2 .lanes { background: rgba(120,120,128,0.09); border-radius: 11px; padding: 3px; margin: 0 2px 6px; }
+  .hyb2 .lane { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 9px; text-align: left; }
+  .hyb2 .lane + .lane { border-top: 1px solid var(--divider); }
+  .hyb2 .lane .lb { font-size: 11.5px; font-weight: 600; color: var(--ink); display: grid; gap: 1px; }
+  .hyb2 .lane .lb .sub2 { font-size: 9.5px; font-weight: 500; color: var(--muted); }
+  .hyb2 .eqlane { display: flex; align-items: center; gap: 2.5px; height: 22px; }
+  .hyb2 .eqlane i { flex: 1; min-width: 3px; height: 100%; border-radius: 2px; transform-origin: center; animation: eq 1.2s ease-in-out infinite; }
+  .hyb2 .lane.mic .eqlane i { background: var(--blue); opacity: 0.85; }
+  .hyb2 .lane.spk .eqlane i { background: var(--green); opacity: 0.85; }
+  .hyb2 .eqlane i:nth-child(2n) { animation-duration: 0.85s; animation-delay: 0.1s; }
+  .hyb2 .eqlane i:nth-child(3n) { animation-duration: 1.5s; animation-delay: 0.25s; }
+  .hyb2 .eqlane i:nth-child(5n) { animation-duration: 0.65s; animation-delay: 0.04s; }
+  .hyb2 .lane.dead .eqlane i { animation: none; transform: scaleY(0.14); background: var(--muted); opacity: 0.6; }
+  .hyb2 .lane.dead { background: rgba(255, 149, 0, 0.09); }
+  .hyb2 .ok2 { font-size: 10px; font-weight: 700; color: var(--green); }
+  .hyb2 .warn { font-size: 10px; font-weight: 700; color: #c77700; }
+  [data-theme='dark'] .hyb2 .warn { color: #ffb340; }
+  .hyb2 .sep { height: 1px; background: var(--divider); margin: 5px 10px; }
+
+  /* ===== 案f: ネイティブメニュー ===== */
+  .pop.nativemenu { width: 252px; border-radius: 12px; padding: 5px; top: 32px; }
+  .nm-head { display: flex; align-items: center; gap: 8px; padding: 8px 10px 7px; }
+  .nm-head .lamp { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); }
+  .nm-head .t { font-size: 12.5px; font-weight: 700; }
+  .nm-head .s { font-size: 11px; color: var(--muted); margin-left: auto; font-variant-numeric: tabular-nums; }
+  .nm-sep { height: 1px; background: var(--divider); margin: 4px 10px; }
+  .nm-i { display: flex; align-items: center; gap: 9px; width: 100%; padding: 6px 10px; border-radius: 7px; font-size: 13px; }
+  .nm-i:hover { background: var(--blue); color: #fff; }
+  .nm-i:hover .k, .nm-i:hover .sub { color: rgba(255,255,255,0.75); }
+  .nm-i .k { margin-left: auto; font-size: 11.5px; color: var(--muted); letter-spacing: 0.04em; }
+  .nm-i .chk { width: 12px; font-size: 11px; }
+  .nm-i .sub { font-size: 11px; color: var(--muted); margin-left: auto; }
+  .nm-cap { padding: 3px 10px 6px; font-size: 10.5px; color: var(--muted); }
+</style>
+</head>
+<body>
+<header class="prop-head">
+  <h1>メニューバー常駐 — 追加モック(スタイリッシュ案)</h1>
+  <p>機能#7の追加提案4案。HIGのメニューバーエクストラ慣習(モノクロのテンプレートアイコン)・素材(ヴァイブランシー)・Reduce Motion配慮を踏まえつつ、「UIは一歩引き、進行中の音声というコンテンツを主役にする」方向でスタイルを振っています。メニューバーのアイコンは全案共通で波形グリフ(録音中のみ赤ドット)。</p>
+  <div class="prop-bar">
+    <div class="vtabs" role="tablist">
+      <button class="active" data-v="a1">a-1 リスト</button>
+      <button data-v="a2">a-2 コントロールセンター</button>
+      <button data-v="a3">a-3 ストリップ</button>
+      <button data-v="a4">a-4 タイマー</button>
+      <button data-v="a5">a-5 タイマー×波形</button>
+      <button data-v="a6">a-6 波形ネイティブ</button>
+      <button data-v="c">案c グラス</button>
+      <button data-v="d">案d アンビエント</button>
+      <button data-v="e">案e アイランド</button>
+      <button data-v="f">案f ネイティブ</button>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">ライト / ダーク</button>
+  </div>
+</header>
+
+<!-- ===== 案a-1: リスト+大ボタン ===== -->
+<section class="variant active" id="v-a1">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop ctl1">
+      <div class="st"><span class="lamp"></span>文字起こし中 · 日本語 ⇄ English<span class="tm">● 12:34</span></div>
+      <button class="bigrec"><i></i>録音を停止</button>
+      <div class="srcseg"><button>Speaker</button><button class="active">Both</button><button>Mic</button></div>
+      <button class="li">字幕オーバーレイ<span class="sw on"></span></button>
+      <div class="sep"></div>
+      <button class="li">メインウィンドウを開く<span class="k">⌥⌘L</span></button>
+      <button class="li">設定…<span class="k">⌘,</span></button>
+      <div class="sep"></div>
+      <button class="li">LivePolyTrans を終了<span class="k">⌘Q</span></button>
+    </div>
+  </div>
+  <div class="note"><b>案a-1「リスト+大ボタン」</b> — 元の常駐案aをガラス素材で磨いた正統進化。
+    <ul>
+      <li>録音ボタンは赤グラデーション+ホバーで僅かに拡大。全操作が1カラムの読み順で並ぶ</li>
+      <li>オーバーレイはスイッチ(状態が読める)、遷移系はショートカット併記(学習の導線)</li>
+      <li>迷いのない構成で、4案の中では実装コストと分かりやすさのバランスが最良</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案a-2: コントロールセンター ===== -->
+<section class="variant" id="v-a2">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop cc">
+      <div class="mod modrec">
+        <span class="knob"><i></i></span>
+        <span><span class="t">録音中</span><br /><span class="s">12:34 · 日本語 ⇄ English</span></span>
+      </div>
+      <div class="duo">
+        <div class="mod modsq on"><span class="ic">🪟</span><span class="t">オーバーレイ</span><span class="s">表示中</span></div>
+        <div class="mod modsq"><span class="ic">🎚</span><span class="t">音源</span><span class="s">Both</span></div>
+      </div>
+      <div class="mod modrow">LivePolyTrans を開く<span class="k">⌥⌘L</span></div>
+    </div>
+  </div>
+  <div class="note"><b>案a-2「コントロールセンター」</b> — macOS コントロールセンターのモジュール文法。
+    <ul>
+      <li>独立したガラスタイルが浮かぶ構成。macOSユーザーには「触れば何が起きるか」が既知(Consistency+Metaphor)</li>
+      <li>トグル系(オーバーレイ)はタイル全体が青く点灯=状態が最も読みやすい</li>
+      <li>音源タイルはクリックで Speaker→Both→Mic を巡回(または長押しで展開)</li>
+      <li>4案中もっとも「macOSらしくスタイリッシュ」。タイルが増えると再レイアウトが必要になるのが将来コスト</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案a-3: ストリップ ===== -->
+<section class="variant" id="v-a3">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop strip">
+      <button class="rb" aria-label="録音を停止"><i></i></button>
+      <span class="tm">12:34</span>
+      <span class="dv"></span>
+      <div class="sseg"><button>Spk</button><button class="active">Both</button><button>Mic</button></div>
+      <span class="dv"></span>
+      <button class="ib on" title="オーバーレイ">🪟</button>
+      <button class="ib" title="メインウィンドウ">⤢</button>
+      <button class="ib" title="設定">⚙︎</button>
+    </div>
+  </div>
+  <div class="note"><b>案a-3「ストリップ」</b> — 横一列のカプセル。開いた瞬間に全操作が視界に収まる。
+    <ul>
+      <li>縦の視線移動ゼロ。「停止したいだけ」の最頻ユースケースに最速(赤ボタンが左端=Fittsの法則)</li>
+      <li>画面占有が最小で、メニューバー直下に「道具」として現れて消える(Deference)</li>
+      <li>終了・設定など低頻度操作は⚙︎の中へ逃がす前提。ラベルがなくアイコン学習が必要なのが弱点</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案a-4: ヒーロータイマー ===== -->
+<section class="variant" id="v-a4">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop hero">
+      <div class="st">Recording</div>
+      <div class="tm">12:34</div>
+      <div class="langs">日本語 ⇄ English · Both</div>
+      <div class="btns">
+        <button class="cb" title="一時停止">⏸</button>
+        <button class="cb stop" aria-label="録音を停止"><i></i></button>
+        <button class="cb" title="オーバーレイ">🪟</button>
+      </div>
+      <div class="rows">
+        <button class="li">音源<span class="v">Both ›</span></button>
+        <button class="li">字幕オーバーレイ<span class="v on">表示中</span></button>
+        <button class="li">メインウィンドウを開く<span class="v">⌥⌘L</span></button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>案a-4「ヒーロータイマー」</b> — ボイスメモ/ストップウォッチの文法。経過時間が主役。
+    <ul>
+      <li>38pxの等幅数字タイマー=「録れている・何分経った」を最大情報として扱う会議向け設計</li>
+      <li>停止(赤・中央・最大)を挟んで一時停止とオーバーレイを対称配置。詳細操作は下のリストへ</li>
+      <li>「録音していない待機時」はタイマー部が大きな録音開始ボタンに変わる</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案a-5: タイマー×波形ハイブリッド ===== -->
+<section class="variant" id="v-a5">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop hyb">
+      <div class="st">Recording</div>
+      <div class="tm">12:34</div>
+      <div class="langs">日本語 ⇄ English · Both</div>
+      <div class="lane mic">
+        <span class="lb">🎙 マイク<span class="sub2">MacBook Pro のマイク</span></span>
+        <span class="eqlane"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="ok2">良好</span>
+      </div>
+      <div class="lane spk dead">
+        <span class="lb">🔊 スピーカー<span class="sub2">システム音声</span></span>
+        <span class="eqlane"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+        <span class="warn">無音 18秒</span>
+      </div>
+      <div class="btns">
+        <button class="cb" title="一時停止">⏸</button>
+        <button class="cb stop" aria-label="録音を停止"><i></i></button>
+        <button class="cb on" title="オーバーレイ">🪟</button>
+      </div>
+      <div class="rows">
+        <button class="li">音源<span class="v">Both ›</span></button>
+        <button class="li">メインウィンドウを開く<span class="v">⌥⌘L</span></button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>案a-5「タイマー×波形ハイブリッド」</b> — a-4のヒーロータイマー+案dのライブ波形を、<b>マイク/スピーカー別レーン</b>で合体。
+    <ul>
+      <li>各レーンに入力デバイス名+リアルタイム波形+状態ラベル。「両方ちゃんと録れているか」が開いた瞬間に分かる(この案の存在理由)</li>
+      <li>無音が続いたレーンは波形が平坦化+アンバーの枠と「無音 N秒」警告。会議中の「実は録れてなかった」事故を防ぐ</li>
+      <li>マイク=青/スピーカー=緑で色分け(Live画面の話者色とは独立した「入力の色」)</li>
+      <li>波形は helper の PCM から RMS を約10Hzで送る想定。Reduce Motion 時は波形をレベルバー(静的な棒)に落とす</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案a-6: 波形ネイティブ ===== -->
+<section class="variant" id="v-a6">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop hyb2">
+      <div class="head">
+        <div class="st">Recording</div>
+        <div class="tm">12:34</div>
+        <div class="langs">日本語 ⇄ English · Both</div>
+      </div>
+      <div class="lanes">
+        <div class="lane mic">
+          <span class="lb">🎙 マイク<span class="sub2">MacBook Pro のマイク</span></span>
+          <span class="eqlane"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="ok2">良好</span>
+        </div>
+        <div class="lane spk dead">
+          <span class="lb">🔊 スピーカー<span class="sub2">システム音声</span></span>
+          <span class="eqlane"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="warn">無音 18秒</span>
+        </div>
+      </div>
+      <button class="nm-i"><span class="chk"></span>録音を停止<span class="k">⌥⌘R</span></button>
+      <button class="nm-i"><span class="chk"></span>一時停止</button>
+      <div class="sep"></div>
+      <button class="nm-i"><span class="chk">✓</span>字幕オーバーレイ<span class="k">⌥⌘L</span></button>
+      <button class="nm-i"><span class="chk"></span>音源: Both<span class="sub">変更 ›</span></button>
+      <div class="sep"></div>
+      <button class="nm-i"><span class="chk"></span>LivePolyTrans を開く</button>
+      <button class="nm-i"><span class="chk"></span>設定…<span class="k">⌘,</span></button>
+    </div>
+  </div>
+  <div class="note"><b>案a-6「波形ネイティブ」</b> — a-5の中身(タイマー+レーン別波形)を案fのネイティブ文法に載せ替え。
+    <ul>
+      <li>常時ダークのガラスをやめ、システムのライト/ダークに自動追従するヴァイブランシー。Wi-Fiメニューの隣にあって違和感のない読み味</li>
+      <li>波形レーンは「グループ化されたインセットリスト」(システム設定の行の文法)に収め、色はシステムカラー(青/緑)の単色フラット。無音警告はシステムオレンジの淡い塗り+テキスト</li>
+      <li>操作は大ボタンではなく NSMenu 風の行+ショートカット併記。ホバーはアクセント青の塗り(ネイティブメニューと同じ)</li>
+      <li>a-5との違いは「見せるための画面」か「道具の画面」か。配信画面に映り込んでも様になるのは a-5、macOSに溶け込むのは a-6</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案c: グラス ===== -->
+<section class="variant" id="v-c">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop glass">
+      <div class="st">Transcribing</div>
+      <div class="langs">日本語 ⇄ English</div>
+      <div class="ring"><button class="recbtn" aria-label="録音を停止"><i></i></button></div>
+      <div class="tm"><em>REC</em>12:34</div>
+      <div class="acts">
+        <button class="act on"><span class="ic">🪟</span>オーバーレイ</button>
+        <button class="act"><span class="ic">⤢</span>ウィンドウ</button>
+        <button class="act"><span class="ic">⏸</span>一時停止</button>
+        <button class="act"><span class="ic">⚙︎</span>設定</button>
+      </div>
+      <div class="foot"><span>⌥⌘R 録音</span><span>⌥⌘L オーバーレイ</span></div>
+    </div>
+  </div>
+  <div class="note"><b>案c「グラス」</b> — 大きな録音ボタンを主役にした、時計アプリ的な1アクションUI。
+    <ul>
+      <li>中央84pxの録音ボタン(録音中はパルスリング)。「録れているか」が0.2秒で分かる</li>
+      <li>2×2のアクションタイルはトグル状態を色で表現(オーバーレイON=青)</li>
+      <li>フッターにショートカットを常時教育。HIGのFeedback原則(状態の保証)重視の案</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案d: アンビエント ===== -->
+<section class="variant" id="v-d">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop amb">
+      <div class="wavebox">
+        <div class="overlayinfo"><span>日本語 ⇄ ENGLISH</span><b>12:34</b></div>
+        <div class="eq"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      </div>
+      <div class="capline"><span class="who">相手</span>We should probably ship the beta by the end of this month.</div>
+      <div class="caplinesub">ベータ版は今月末までにリリースした方がよさそうですね。</div>
+      <div class="ctl">
+        <button class="cbtn stop" aria-label="録音を停止"><i></i></button>
+        <button class="cbtn on" title="オーバーレイ">🪟</button>
+        <button class="cbtn" title="メインウィンドウ">⤢</button>
+        <button class="cbtn" title="設定">⚙︎</button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>案d「アンビエント」</b> — 「ミュージックの再生中ウィジェット」の文法。ライブ波形+最新字幕1行。
+    <ul>
+      <li>波形が動いている=マイクが生きている、の直感的フィードバック(トラブル時に一番効く)</li>
+      <li>字幕プレビューは原文+訳文を各1行だけ。常にダークガラス(壁紙に紛れる)</li>
+      <li>4案中もっとも「見せたくなる」外観。Reduce Motion時は波形を静止バーに落とす</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案e: アイランド ===== -->
+<section class="variant" id="v-e">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="island">
+      <span class="eqmini"><i></i><i></i><i></i><i></i></span>
+      <span class="cap"><span class="who">相手</span>We should probably ship the beta by the end of…</span>
+      <span class="tm">12:34</span>
+      <span class="div"></span>
+      <button class="ib stop" aria-label="録音を停止"><i></i></button>
+      <button class="ib" title="オーバーレイ">🪟</button>
+      <button class="ib" title="メインウィンドウ">⤢</button>
+    </div>
+  </div>
+  <div class="note"><b>案e「アイランド」</b> — Dynamic Island の文法をメニューバー直下に持ち込むカプセル型。
+    <ul>
+      <li>ポップオーバーではなく画面上端中央に横長カプセルが出る。字幕ティッカー+タイマー+停止が1列</li>
+      <li>「ポップオーバーを開いて確認」ではなく「視線を上げるだけ」。常時表示モード(ピン留め)にすればミニ字幕オーバーレイを兼ねる</li>
+      <li>4案中もっとも野心的だが、慣習から外れるぶん初見の学習コストあり。案Cオーバーレイとの機能重複に注意</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案f: ネイティブ ===== -->
+<section class="variant" id="v-f">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray open"><span class="glyph"><i></i><i></i><i></i><i></i><i></i></span><span class="rd"></span></span><span>🔋</span><span>水 14:02</span></div>
+    <div class="pop nativemenu" style="right: 92px">
+      <div class="nm-head"><span class="lamp"></span><span class="t">録音中</span><span class="s">12:34 · ja ⇄ en</span></div>
+      <div class="nm-sep"></div>
+      <button class="nm-i"><span class="chk"></span>録音を停止<span class="k">⌥⌘R</span></button>
+      <button class="nm-i"><span class="chk"></span>一時停止</button>
+      <div class="nm-sep"></div>
+      <button class="nm-i"><span class="chk">✓</span>字幕オーバーレイ<span class="k">⌥⌘L</span></button>
+      <button class="nm-i"><span class="chk"></span>音源: Both<span class="sub">変更 ›</span></button>
+      <div class="nm-sep"></div>
+      <button class="nm-i"><span class="chk"></span>LivePolyTrans を開く</button>
+      <button class="nm-i"><span class="chk"></span>設定…<span class="k">⌘,</span></button>
+      <div class="nm-sep"></div>
+      <button class="nm-i"><span class="chk"></span>終了<span class="k">⌘Q</span></button>
+      <div class="nm-cap">録音中に終了すると、ここまでの内容は保存されます</div>
+    </div>
+  </div>
+  <div class="note"><b>案f「ネイティブ」</b> — NSMenu そのものの文法。Wi-Fi/Bluetooth メニューと同じ読み味。
+    <ul>
+      <li>HIGのConsistency原則に最も忠実=説明ゼロで誰でも使える。実装も最速(Tauriのトレイメニュー標準機能でほぼ完結)</li>
+      <li>トグルは✓、ショートカットは右端、破壊的操作(終了)は最下部+注記</li>
+      <li>「スタイリッシュさ」は素材と余白で出す(ヴァイブランシー+角丸12px)。派手さでは c/d/e に譲る</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.vtabs button');
+  tabs.forEach((b) => b.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.variant').forEach((v) => v.classList.toggle('active', v.id === 'v-' + b.dataset.v));
+  }));
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? '' : 'dark';
+  }
+</script>
+</body>
+</html>

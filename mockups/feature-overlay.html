@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — 字幕オーバーレイ / メニューバー常駐 モック</title>
+<style>
+  :root {
+    --blue: #0066cc;
+    --blue-focus: #0071e3;
+    --blue-soft: rgba(0, 102, 204, 0.1);
+    --red: #ff3b30;
+    --green: #34c759;
+    --ink: #1d1d1f;
+    --ink-2: #515154;
+    --muted: #86868b;
+    --hairline: rgba(0, 0, 0, 0.09);
+    --divider: rgba(0, 0, 0, 0.05);
+    --canvas: #ffffff;
+    --parchment: #f5f5f7;
+    --pearl: rgba(255, 255, 255, 0.72);
+    --menu-bg: rgba(252, 252, 253, 0.92);
+    --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.16);
+  }
+  [data-theme='dark'] {
+    --blue: #2997ff;
+    --blue-focus: #409cff;
+    --blue-soft: rgba(41, 151, 255, 0.16);
+    --ink: #f5f5f7;
+    --ink-2: #c7c7cc;
+    --muted: #98989d;
+    --hairline: rgba(255, 255, 255, 0.14);
+    --divider: rgba(255, 255, 255, 0.08);
+    --canvas: #1c1c1e;
+    --parchment: #000000;
+    --pearl: rgba(44, 44, 46, 0.72);
+    --menu-bg: rgba(40, 40, 42, 0.94);
+    --shadow-menu: 0 10px 34px rgba(0, 0, 0, 0.55);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Hiragino Sans', sans-serif;
+    background: var(--parchment);
+    color: var(--ink);
+    min-height: 100vh;
+    padding: 28px 16px 60px;
+  }
+  button { font: inherit; cursor: pointer; color: inherit; background: none; border: 0; }
+  button:focus-visible { outline: 2px solid var(--blue-focus); outline-offset: 2px; border-radius: 8px; }
+
+  /* ===== proposal chrome ===== */
+  .prop-head { max-width: 1080px; margin: 0 auto 18px; }
+  .prop-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.3px; margin: 0 0 6px; }
+  .prop-head p { margin: 0 0 14px; color: var(--ink-2); font-size: 13.5px; line-height: 1.6; }
+  .prop-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .vtabs { display: flex; gap: 4px; background: rgba(120,120,128,0.14); border-radius: 10px; padding: 3px; flex-wrap: wrap; }
+  .vtabs button { padding: 6px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; color: var(--ink-2); }
+  .vtabs button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .theme-btn { margin-left: auto; padding: 6px 13px; border-radius: 999px; border: 1px solid var(--hairline); background: var(--canvas); font-size: 12.5px; }
+  .variant { display: none; max-width: 1080px; margin: 0 auto; }
+  .variant.active { display: block; }
+  .note { margin: 14px auto 0; max-width: 1080px; background: var(--canvas); border: 1px solid var(--hairline); border-radius: 12px; padding: 14px 18px; font-size: 13px; line-height: 1.7; color: var(--ink-2); }
+  .note b { color: var(--ink); }
+  .note ul { margin: 6px 0 0; padding-left: 18px; }
+
+  /* ===== fake desktop ===== */
+  .desktop {
+    position: relative;
+    height: 620px;
+    border-radius: 14px;
+    overflow: hidden;
+    border: 1px solid var(--hairline);
+    background:
+      radial-gradient(1200px 500px at 80% -10%, #7a9bd8 0%, transparent 60%),
+      radial-gradient(900px 600px at 10% 110%, #b8789b 0%, transparent 55%),
+      linear-gradient(160deg, #2c3e6b 0%, #4a3a63 55%, #1f2547 100%);
+    box-shadow: 0 22px 70px rgba(0, 0, 0, 0.28);
+  }
+  .osbar {
+    position: absolute; inset: 0 0 auto 0; height: 26px;
+    display: flex; align-items: center; gap: 14px;
+    padding: 0 12px; font-size: 11.5px; color: #fff;
+    background: rgba(20, 20, 24, 0.42); backdrop-filter: blur(18px);
+  }
+  .osbar .l { font-weight: 700; }
+  .osbar .sp { flex: 1; }
+  .osbar .tray-ico { display: inline-flex; align-items: center; gap: 4px; padding: 2px 6px; border-radius: 5px; }
+  .osbar .tray-ico.on { background: rgba(255,255,255,0.22); }
+  .rec-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--red); box-shadow: 0 0 6px var(--red); animation: pulse 1.6s ease infinite; }
+  @keyframes pulse { 50% { opacity: 0.45; } }
+
+  /* fake zoom window behind */
+  .callwin {
+    position: absolute; left: 8%; right: 8%; top: 60px; bottom: 90px;
+    background: #17171a; border-radius: 12px; border: 1px solid rgba(255,255,255,0.1);
+    box-shadow: 0 18px 50px rgba(0,0,0,0.45);
+    display: grid; grid-template-rows: 30px 1fr; overflow: hidden;
+  }
+  .callwin .cap { display: flex; align-items: center; gap: 8px; padding: 0 12px; background: #232327; color: #9a9aa2; font-size: 11px; }
+  .callwin .cap i { width: 10px; height: 10px; border-radius: 50%; background: #454549; }
+  .callwin .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 10px; }
+  .tile { border-radius: 10px; background: linear-gradient(150deg, #2b2b31, #202024); display: grid; place-items: center; color: #6c6c74; font-size: 13px; position: relative; }
+  .tile .nm { position: absolute; left: 10px; bottom: 8px; font-size: 11px; color: #c9c9cf; background: rgba(0,0,0,0.4); padding: 2px 8px; border-radius: 6px; }
+  .avatar { width: 64px; height: 64px; border-radius: 50%; background: #3a3a41; display: grid; place-items: center; font-size: 24px; color: #8f8f98; }
+
+  /* ===== 案A: バータイプ ===== */
+  .ov-bar {
+    position: absolute; left: 50%; bottom: 24px; transform: translateX(-50%);
+    width: min(760px, 84%);
+    background: rgba(18, 18, 22, 0.82);
+    backdrop-filter: blur(22px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 16px;
+    padding: 14px 20px 12px;
+    color: #fff;
+    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+  }
+  .ov-bar .spk { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: #b9c6ff; font-weight: 600; letter-spacing: 0.04em; margin-bottom: 4px; }
+  .spk-dot { width: 8px; height: 8px; border-radius: 50%; }
+  .spk-dot.me { background: #409cff; }
+  .spk-dot.them { background: #98989d; }
+  .ov-bar .main { font-size: 22px; font-weight: 600; line-height: 1.4; letter-spacing: -0.01em; }
+  .ov-bar .sub { font-size: 14px; color: rgba(255, 255, 255, 0.62); margin-top: 4px; line-height: 1.45; }
+  .caret { display: inline-block; width: 2px; height: 1em; background: #409cff; vertical-align: -0.15em; margin-left: 2px; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  .ov-ctl {
+    position: absolute; top: -14px; right: 14px;
+    display: flex; gap: 4px;
+    background: rgba(30, 30, 34, 0.95); border: 1px solid rgba(255,255,255,0.16);
+    border-radius: 999px; padding: 3px 6px;
+    opacity: 0.92;
+  }
+  .ov-ctl button { font-size: 11px; color: #d5d5da; padding: 3px 7px; border-radius: 999px; }
+  .ov-ctl button.on { background: rgba(64, 156, 255, 0.3); color: #9ecbff; }
+  .ghost-hint { position: absolute; top: -46px; left: 0; font-size: 11px; color: rgba(255,255,255,0.55); }
+
+  /* ===== 案B: カードタイプ ===== */
+  .ov-card {
+    position: absolute; right: 26px; bottom: 26px;
+    width: 372px;
+    background: rgba(22, 22, 26, 0.86);
+    backdrop-filter: blur(22px) saturate(160%);
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 16px;
+    color: #fff;
+    box-shadow: 0 14px 44px rgba(0, 0, 0, 0.5);
+    overflow: hidden;
+  }
+  .ov-card .head {
+    display: flex; align-items: center; gap: 8px;
+    padding: 8px 12px; font-size: 11px; color: #9a9aa2;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    cursor: grab;
+  }
+  .ov-card .head .sp { flex: 1; }
+  .ov-card .head button { font-size: 11px; color: #b9b9c0; padding: 2px 7px; border-radius: 6px; }
+  .ov-card .head button:hover { background: rgba(255,255,255,0.1); }
+  .ov-card .rows { padding: 10px 14px 12px; display: grid; gap: 10px; }
+  .ov-row { display: grid; grid-template-columns: 14px 1fr; gap: 8px; }
+  .ov-row .spk-dot { margin-top: 6px; }
+  .ov-row .t { font-size: 15px; line-height: 1.45; font-weight: 500; }
+  .ov-row .tr { font-size: 12px; color: rgba(255,255,255,0.55); margin-top: 2px; }
+  .ov-row.old { opacity: 0.55; }
+  .ov-row.old .t { font-size: 13.5px; }
+
+  /* ===== 案C: ミニマル ===== */
+  .ov-min {
+    position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%);
+    width: min(820px, 88%); text-align: center; color: #fff;
+  }
+  .ov-min .main {
+    font-size: 26px; font-weight: 700; line-height: 1.45; letter-spacing: -0.01em;
+    text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 2px 10px rgba(0,0,0,0.85), 0 0 1px #000;
+    paint-order: stroke fill; -webkit-text-stroke: 3.5px rgba(0,0,0,0.55);
+  }
+  .ov-min .main span { -webkit-text-stroke: 0; }
+  .ov-min .sub {
+    margin-top: 6px; font-size: 16px; font-weight: 500; color: rgba(255,255,255,0.85);
+    text-shadow: 0 0 4px rgba(0,0,0,0.9), 0 2px 8px rgba(0,0,0,0.85);
+  }
+
+  /* ===== メニューバーポップオーバー ===== */
+  .popover {
+    position: absolute; top: 32px; right: 118px; width: 300px;
+    background: var(--menu-bg);
+    backdrop-filter: blur(26px) saturate(180%);
+    border: 1px solid var(--hairline);
+    border-radius: 14px;
+    box-shadow: var(--shadow-menu);
+    color: var(--ink);
+    overflow: hidden;
+  }
+  .popover::before {
+    content: ''; position: absolute; top: -6px; right: 24px;
+    width: 12px; height: 12px; transform: rotate(45deg);
+    background: var(--menu-bg); border-left: 1px solid var(--hairline); border-top: 1px solid var(--hairline);
+  }
+  .pop-status { display: flex; align-items: center; gap: 8px; padding: 12px 14px 10px; font-size: 12.5px; color: var(--ink-2); }
+  .pop-status .lamp { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+  .pop-status .tm { margin-left: auto; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--red); }
+  .pop-rec {
+    margin: 0 14px 10px; width: calc(100% - 28px);
+    display: flex; align-items: center; justify-content: center; gap: 8px;
+    padding: 10px 0; border-radius: 10px;
+    background: var(--red); color: #fff; font-size: 14px; font-weight: 600;
+  }
+  .pop-rec.idle { background: var(--blue); }
+  .pop-seg { display: flex; margin: 0 14px 10px; background: rgba(120,120,128,0.14); border-radius: 8px; padding: 2px; }
+  .pop-seg button { flex: 1; padding: 4px 0; border-radius: 6px; font-size: 12px; color: var(--ink-2); }
+  .pop-seg button.active { background: var(--canvas); color: var(--ink); font-weight: 600; box-shadow: 0 1px 3px rgba(0,0,0,0.12); }
+  .pop-list { border-top: 1px solid var(--divider); padding: 6px; }
+  .pop-list button {
+    display: flex; align-items: center; gap: 8px; width: 100%;
+    padding: 7px 9px; border-radius: 8px; font-size: 13px; text-align: left;
+  }
+  .pop-list button:hover { background: rgba(120,120,128,0.12); }
+  .pop-list .k { margin-left: auto; font-size: 11px; color: var(--muted); }
+  .pop-list .sw { margin-left: auto; width: 34px; height: 20px; border-radius: 999px; background: rgba(120,120,128,0.3); position: relative; }
+  .pop-list .sw.on { background: var(--green); }
+  .pop-list .sw::after { content: ''; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.25); transition: left 0.15s; }
+  .pop-list .sw.on::after { left: 16px; }
+  .pop-cap {
+    margin: 0 14px 10px; padding: 9px 11px; border-radius: 10px;
+    background: rgba(120,120,128,0.1); font-size: 12px; line-height: 1.5;
+  }
+  .pop-cap .who { font-size: 10.5px; font-weight: 700; color: var(--blue); }
+  .pop-cap .row + .row { margin-top: 6px; }
+  .pop-cap .row.dim { opacity: 0.6; }
+</style>
+</head>
+<body>
+<header class="prop-head">
+  <h1>字幕オーバーレイ ＆ メニューバー常駐 — モック提案</h1>
+  <p>機能#1(常に最前面の字幕ウィンドウ)と機能#7(メニューバー常駐)。オーバーレイは3案、メニューバーポップオーバーは2案。背景はZoom会議中のデスクトップを想定しています。</p>
+  <div class="prop-bar">
+    <div class="vtabs" role="tablist">
+      <button class="active" data-v="a">案A バー</button>
+      <button data-v="b">案B カード</button>
+      <button data-v="c">案C ミニマル</button>
+      <button data-v="ma">常駐a コントロール</button>
+      <button data-v="mb">常駐b ミニ字幕</button>
+    </div>
+    <button class="theme-btn" onclick="toggleTheme()">ライト / ダーク</button>
+  </div>
+</header>
+
+<!-- ===== 案A: バータイプ ===== -->
+<section class="variant active" id="v-a">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Zoom</span><span class="sp"></span><span class="tray-ico"><span class="rec-dot"></span> LPT</span><span>🔋</span><span>水 14:02</span></div>
+    <div class="callwin">
+      <div class="cap"><i></i>Zoom ミーティング</div>
+      <div class="grid">
+        <div class="tile"><div class="avatar">👤</div><span class="nm">Sarah Chen</span></div>
+        <div class="tile"><div class="avatar">👤</div><span class="nm">自分</span></div>
+      </div>
+    </div>
+    <div class="ov-bar">
+      <div class="ov-ctl"><button title="固定">📌</button><button class="on" title="クリックスルー">👆</button><button title="設定">⚙︎</button><button title="閉じる">✕</button></div>
+      <div class="spk"><span class="spk-dot them"></span>相手</div>
+      <div class="main">We should probably ship the beta by the end of this month.<span class="caret"></span></div>
+      <div class="sub">ベータ版は今月末までにリリースした方がよさそうですね。</div>
+    </div>
+  </div>
+  <div class="note"><b>案A「バータイプ」</b> — TV字幕型。画面下部中央の横長帯に最新1発話(原文＋訳文)。
+    <ul>
+      <li>視線移動が最小。会議・動画視聴の「ながら見」に最適</li>
+      <li>ホバー時のみ右上にコントロール(固定/クリックスルー/設定/閉じる)を表示</li>
+      <li>発話者は色ドット＋ラベルで表示。interim はカーソル点滅(Live画面と同じ文法)</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案B: カードタイプ ===== -->
+<section class="variant" id="v-b">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Zoom</span><span class="sp"></span><span class="tray-ico"><span class="rec-dot"></span> LPT</span><span>🔋</span><span>水 14:02</span></div>
+    <div class="callwin">
+      <div class="cap"><i></i>Zoom ミーティング</div>
+      <div class="grid">
+        <div class="tile"><div class="avatar">👤</div><span class="nm">Sarah Chen</span></div>
+        <div class="tile"><div class="avatar">👤</div><span class="nm">自分</span></div>
+      </div>
+    </div>
+    <div class="ov-card">
+      <div class="head">⠿ LivePolyTrans<span class="sp"></span><button>👆</button><button>⚙︎</button><button>✕</button></div>
+      <div class="rows">
+        <div class="ov-row old"><span class="spk-dot me"></span><div><div class="t">承知しました、では日程を調整します。</div></div></div>
+        <div class="ov-row old"><span class="spk-dot them"></span><div><div class="t">Can you also invite the design team?</div><div class="tr">デザインチームも招待してもらえますか？</div></div></div>
+        <div class="ov-row"><span class="spk-dot them"></span><div><div class="t">We should probably ship the beta by the end of this month.<span class="caret"></span></div><div class="tr">ベータ版は今月末までにリリースした方がよさそうですね。</div></div></div>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>案B「カードタイプ」</b> — チャットティッカー型。画面隅の小窓に直近3発話が流れる。
+    <ul>
+      <li>少し前の発話も文脈として残る。聞き返し場面に強い</li>
+      <li>ヘッダの ⠿ をドラッグして四隅どこへでも移動可(位置は記憶)</li>
+      <li>過去2発話は縮小・減光。行数(1〜3)は設定で変更</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 案C: ミニマル ===== -->
+<section class="variant" id="v-c">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Zoom</span><span class="sp"></span><span class="tray-ico"><span class="rec-dot"></span> LPT</span><span>🔋</span><span>水 14:02</span></div>
+    <div class="callwin">
+      <div class="cap"><i></i>Zoom ミーティング</div>
+      <div class="grid">
+        <div class="tile"><div class="avatar">👤</div><span class="nm">Sarah Chen</span></div>
+        <div class="tile"><div class="avatar">👤</div><span class="nm">自分</span></div>
+      </div>
+    </div>
+    <div class="ov-min">
+      <div class="main"><span>We should probably ship the beta by the end of this month.</span></div>
+      <div class="sub">ベータ版は今月末までにリリースした方がよさそうですね。</div>
+    </div>
+  </div>
+  <div class="note"><b>案C「ミニマル」</b> — 背景なし、縁取り文字のみ。配信・スクリーン録画向け。
+    <ul>
+      <li>ウィンドウ矩形が視界に入らず、映像に「焼き込んだ字幕」のように見える</li>
+      <li>常時クリックスルー前提。操作はメニューバー/メインウィンドウから行う</li>
+      <li>OBSのウィンドウキャプチャで拾えば配信字幕としてそのまま使える</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 常駐a: コントロール型 ===== -->
+<section class="variant" id="v-ma">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray-ico on"><span class="rec-dot"></span> LPT</span><span>🔋</span><span>水 14:02</span></div>
+    <div class="popover">
+      <div class="pop-status"><span class="lamp"></span>文字起こし中 · 日本語 ⇄ English<span class="tm">● 12:34</span></div>
+      <button class="pop-rec">■ 録音を停止</button>
+      <div class="pop-seg"><button>Speaker</button><button class="active">Both</button><button>Mic</button></div>
+      <div class="pop-list">
+        <button>🪟 字幕オーバーレイ<span class="sw on"></span></button>
+        <button>⤢ メインウィンドウを開く<span class="k">⌥⌘L</span></button>
+        <button>⚙︎ 設定…</button>
+        <button>⏻ LivePolyTrans を終了</button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>常駐案a「コントロール型」</b> — メニューバーから録音・オーバーレイを最速操作。
+    <ul>
+      <li>メニューバーアイコンは状態表示を兼ねる(録音中は赤ドット点滅)</li>
+      <li>録音開始/停止はグローバルショートカット(既定 ⌥⌘R)でも可能</li>
+      <li>「ウィンドウを閉じても常駐」設定ONなら、メインを閉じてもここから復帰</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===== 常駐b: ミニ字幕型 ===== -->
+<section class="variant" id="v-mb">
+  <div class="desktop">
+    <div class="osbar"><span class="l"></span><span>Finder</span><span class="sp"></span><span class="tray-ico on"><span class="rec-dot"></span> LPT</span><span>🔋</span><span>水 14:02</span></div>
+    <div class="popover">
+      <div class="pop-status"><span class="lamp"></span>文字起こし中 · 日本語 ⇄ English<span class="tm">● 12:34</span></div>
+      <div class="pop-cap">
+        <div class="row dim"><span class="who">自分</span> 承知しました、では日程を調整します。</div>
+        <div class="row"><span class="who" style="color: var(--muted)">相手</span> We should probably ship the beta by the end of this month.</div>
+      </div>
+      <button class="pop-rec">■ 録音を停止</button>
+      <div class="pop-list">
+        <button>🪟 字幕オーバーレイ<span class="sw"></span></button>
+        <button>⤢ メインウィンドウを開く<span class="k">⌥⌘L</span></button>
+        <button>⚙︎ 設定…</button>
+        <button>⏻ LivePolyTrans を終了</button>
+      </div>
+    </div>
+  </div>
+  <div class="note"><b>常駐案b「ミニ字幕型」</b> — ポップオーバー内に直近字幕のプレビューを表示。
+    <ul>
+      <li>オーバーレイを出すまでもない時に「今なんて言った？」をここで確認</li>
+      <li>音源セグメントは省略し、字幕プレビューにスペースを譲る(音源はメイン側で)</li>
+      <li>案aと排他ではなく「プレビュー表示」設定トグルで両立も可能</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.vtabs button');
+  tabs.forEach((b) => b.addEventListener('click', () => {
+    tabs.forEach((x) => x.classList.toggle('active', x === b));
+    document.querySelectorAll('.variant').forEach((v) => v.classList.toggle('active', v.id === 'v-' + b.dataset.v));
+  }));
+  function toggleTheme() {
+    const r = document.documentElement;
+    r.dataset.theme = r.dataset.theme === 'dark' ? '' : 'dark';
+  }
+</script>
+</body>
+</html>
