@@ -3,6 +3,13 @@
 //!
 //! Char-level agreement so it works for Japanese (no word boundaries) and
 //! English alike.
+//!
+//! Known limitation: when a hypothesis contradicts text that is already
+//! committed (the engine re-read earlier audio), no alignment of its tail
+//! against the committed text exists. The volatile tail is hidden for such
+//! feeds, but if the new reading persists, later commits splice at a
+//! char-count offset and can leave one garbled seam. Retraction would be
+//! the only real fix and is ruled out by design.
 
 /// Result of feeding one hypothesis.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -47,12 +54,20 @@ impl LocalAgreement {
             Some(prev) => common_prefix_chars(prev, hypothesis),
             None => 0,
         };
+        // Disagreement inside the committed region means this hypothesis is a
+        // different reading of audio we already committed; its tail would
+        // garble the display if spliced after the committed text.
+        let diverged = self.prev.is_some() && agreed_chars < self.committed_chars;
         let commit_to = agreed_chars.max(self.committed_chars);
         let chars: Vec<char> = hypothesis.chars().collect();
         let delta_from = self.committed_chars.min(chars.len());
         let delta_to = commit_to.min(chars.len());
         let committed_delta: String = chars[delta_from..delta_to].iter().collect();
-        let volatile: String = chars[delta_to..].iter().collect();
+        let volatile: String = if diverged {
+            String::new()
+        } else {
+            chars[delta_to..].iter().collect()
+        };
         self.committed_chars = commit_to;
         self.prev = Some(hypothesis.to_string());
         Agreement {
@@ -110,6 +125,18 @@ mod tests {
         assert_eq!(la.flush(), "世界");
         // the flushed tail is now committed: a second flush has nothing left
         assert_eq!(la.flush(), "");
+    }
+
+    #[test]
+    fn hypothesis_diverging_before_committed_point_suppresses_volatile() {
+        let mut la = LocalAgreement::new();
+        la.feed("こんにちは、せ");
+        la.feed("こんにちは、世界"); // committed: こんにちは、
+        // Longer hypothesis that contradicts the committed prefix: splicing
+        // its tail after the committed text would garble the display.
+        let out = la.feed("今日は天気が良いですね");
+        assert_eq!(out.committed_delta, "");
+        assert_eq!(out.volatile, "");
     }
 
     #[test]
