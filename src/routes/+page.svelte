@@ -43,6 +43,11 @@
     const unlistenStatus = listen<StatusPayload>('status', (event) => {
       status = event.payload;
     });
+    // Status events only fire on change; ask for the current snapshot so a
+    // (re)loaded webview doesn't show "idle" while the backend is listening.
+    invoke<StatusPayload>('get_status').then((s) => {
+      status = s;
+    });
     return () => {
       unlistenTranscript.then((fn) => fn());
       unlistenStatus.then((fn) => fn());
@@ -59,8 +64,14 @@
 
   async function toggle() {
     busy = true;
+    const wasRunning = running;
     try {
-      await invoke(running ? 'stop_capture' : 'start_capture');
+      await invoke(wasRunning ? 'stop_capture' : 'start_capture');
+      if (!wasRunning && !running) {
+        // The backend's status event may lag the accepted Start; reflect it
+        // now so a quick second click means Stop, not another Start.
+        status = { state: 'loading', message: null };
+      }
     } catch (error) {
       status = { state: 'error', message: String(error) };
     } finally {

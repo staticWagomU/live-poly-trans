@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Emitter};
@@ -38,9 +38,28 @@ struct TranscriptPayload {
 /// human-readable detail, e.g. a non-fatal decode error while listening.
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
-struct StatusPayload {
+pub struct StatusPayload {
     state: &'static str,
     message: Option<String>,
+}
+
+/// Latest status snapshot for the `get_status` command. Status events only
+/// fire on change, so a webview that (re)loads mid-session would otherwise
+/// show "idle" until the next transition.
+pub type StatusStore = Arc<Mutex<StatusPayload>>;
+
+pub fn new_status_store() -> StatusStore {
+    Arc::new(Mutex::new(StatusPayload {
+        state: "idle",
+        message: None,
+    }))
+}
+
+/// The worker's channel back to the frontend: events plus the shared
+/// status snapshot, updated together.
+pub struct Ui {
+    pub app: AppHandle,
+    pub status: StatusStore,
 }
 
 struct Engines {
@@ -81,13 +100,15 @@ fn vad_model_path() -> String {
     })
 }
 
-fn emit_status(app: &AppHandle, state: &'static str, message: Option<String>) {
-    let _ = app.emit("status", StatusPayload { state, message });
+fn emit_status(ui: &Ui, state: &'static str, message: Option<String>) {
+    let payload = StatusPayload { state, message };
+    *ui.status.lock().unwrap() = payload.clone();
+    let _ = ui.app.emit("status", payload);
 }
 
 /// Unconditional emit: pass outputs through an [`EmitGate`] first.
-fn emit_step(app: &AppHandle, out: lpt_core::scheduler::StepOutput) {
-    let _ = app.emit(
+fn emit_step(ui: &Ui, out: lpt_core::scheduler::StepOutput) {
+    let _ = ui.app.emit(
         "transcript",
         TranscriptPayload {
             committed_delta: out.committed_delta,
@@ -97,26 +118,26 @@ fn emit_step(app: &AppHandle, out: lpt_core::scheduler::StepOutput) {
     );
 }
 
-pub fn run(cmd_rx: Receiver<Cmd>, app: AppHandle) {
+pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui) {
     let mut engines: Option<Engines> = None;
-    emit_status(&app, "idle", None);
+    emit_status(&ui, "idle", None);
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             Cmd::Stop => {} // Stop while idle
-            Cmd::Start => match run_session(&cmd_rx, &app, &mut engines) {
-                Ok(()) => emit_status(&app, "idle", None),
-                Err(e) => emit_status(&app, "error", Some(format!("{e:#}"))),
+            Cmd::Start => match run_session(&cmd_rx, &ui, &mut engines) {
+                Ok(()) => emit_status(&ui, "idle", None),
+                Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
             },
         }
     }
 }
 
 fn load_engines<'a>(
-    app: &AppHandle,
+    ui: &Ui,
     engines: &'a mut Option<Engines>,
 ) -> anyhow::Result<&'a mut Engines> {
     if engines.is_none() {
-        emit_status(app, "loading", None);
+        emit_status(ui, "loading", None);
         let engine = lpt_whisper::WhisperEngine::load(&model_path(), &allowed_langs())?;
         let vad = lpt_whisper::SileroVad::load(&vad_model_path())?;
         *engines = Some(Engines { engine, vad });
@@ -126,10 +147,10 @@ fn load_engines<'a>(
 
 fn run_session(
     cmd_rx: &Receiver<Cmd>,
-    app: &AppHandle,
+    ui: &Ui,
     engines: &mut Option<Engines>,
 ) -> anyhow::Result<()> {
-    let engines = load_engines(app, engines)?;
+    let engines = load_engines(ui, engines)?;
     let stop_capture = Arc::new(AtomicBool::new(false));
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     capture::spawn(stop_capture.clone(), ready_tx);
@@ -138,7 +159,7 @@ fn run_session(
             Ok(session) => session?,
             Err(_) => anyhow::bail!("capture thread died before reporting"),
         };
-        run_capture_loop(cmd_rx, app, engines, LaneRuntime::new(session)?)
+        run_capture_loop(cmd_rx, ui, engines, LaneRuntime::new(session)?)
     })();
     stop_capture.store(true, Ordering::SeqCst);
     result
@@ -170,7 +191,7 @@ impl LaneRuntime {
     /// Move captured audio into the scheduler and report overruns. Fails
     /// when the stream itself failed (device unplugged): without that the
     /// session would keep "listening" to silence forever.
-    fn pump(&mut self, app: &AppHandle) -> anyhow::Result<()> {
+    fn pump(&mut self, ui: &Ui) -> anyhow::Result<()> {
         if let Some(msg) = self.session.error.lock().unwrap().take() {
             anyhow::bail!("input stream failed: {msg}");
         }
@@ -183,7 +204,7 @@ impl LaneRuntime {
         let drops = self.session.dropped.load(Ordering::Relaxed);
         if drops > self.reported_drops {
             emit_status(
-                app,
+                ui,
                 "listening",
                 Some(format!("audio overrun: {drops} samples dropped")),
             );
@@ -242,14 +263,14 @@ impl EmitGate {
 
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
-    app: &AppHandle,
+    ui: &Ui,
     engines: &mut Engines,
     mut lane: LaneRuntime,
 ) -> anyhow::Result<()> {
     // Unset = auto-detect per utterance window (mixed ja/en meetings);
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
-    emit_status(app, "listening", None);
+    emit_status(ui, "listening", None);
     let mut gate = EmitGate::default();
     let mut next_step = Instant::now() + STEP_INTERVAL;
     loop {
@@ -259,7 +280,7 @@ fn run_capture_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
         }
-        lane.pump(app)?;
+        lane.pump(ui)?;
         if Instant::now() >= next_step {
             let started = Instant::now();
             match lane
@@ -268,19 +289,19 @@ fn run_capture_loop(
             {
                 Ok(Some(out)) => {
                     if gate.should_emit(&out) {
-                        emit_step(app, out);
+                        emit_step(ui, out);
                     }
                 }
                 Ok(None) => {}
                 // Non-fatal: keep listening, surface the message.
-                Err(e) => emit_status(app, "listening", Some(format!("decode error: {e:#}"))),
+                Err(e) => emit_status(ui, "listening", Some(format!("decode error: {e:#}"))),
             }
             next_step = started + STEP_INTERVAL;
         }
     }
     // Stop: recover the audio still in flight (ring buffer → resampler
     // tail → an undecoded scheduler remainder) before flushing the text.
-    lane.pump(app)?;
+    lane.pump(ui)?;
     let tail = lane.resampler.flush()?;
     lane.scheduler.push_audio(&tail);
     if let Some(fin) = lane
@@ -288,13 +309,13 @@ fn run_capture_loop(
         .finish(&mut engines.engine, &mut engines.vad, lang.as_deref())?
     {
         if gate.should_emit(&fin) {
-            emit_step(app, fin);
+            emit_step(ui, fin);
         }
     }
     // A tail can still be on screen when finish had nothing to flush (the
     // scheduler discarded that hypothesis with a no-speech window drop).
     if gate.volatile_on_screen {
-        emit_step(app, lpt_core::scheduler::StepOutput::default());
+        emit_step(ui, lpt_core::scheduler::StepOutput::default());
     }
     Ok(())
 }
