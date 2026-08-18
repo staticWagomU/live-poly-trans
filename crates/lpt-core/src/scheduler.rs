@@ -14,6 +14,11 @@ const MAX_WINDOW_SAMPLES: usize = 15 * TARGET_RATE as usize;
 /// boundary: the hypothesis is stable there, so the volatile tail can be
 /// flushed to committed and the window can slide without losing text.
 const TRAILING_NON_SPEECH_SAMPLES: usize = TARGET_RATE as usize;
+/// Upper bound on audio carried across a max-window slide. The decode
+/// normally reaches within a second or two of the window end; a hypothesis
+/// claiming otherwise has garbage timestamps, and carrying it all would
+/// keep the window pinned at max size forever.
+const MAX_CARRY_SAMPLES: usize = 5 * TARGET_RATE as usize;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -51,7 +56,13 @@ impl StreamScheduler {
 
     /// Advance past all buffered audio and start a fresh agreement context.
     fn slide(&mut self) {
-        self.buffer.clear();
+        let all = self.buffer.len();
+        self.slide_keeping(all);
+    }
+
+    /// Slide, but keep `buffer[from..]` as the start of the next window.
+    fn slide_keeping(&mut self, from: usize) {
+        self.buffer.drain(..from);
         self.agreement.reset();
         self.window_lang = None;
         self.utterance_acc.clear();
@@ -99,7 +110,18 @@ impl StreamScheduler {
             let full = std::mem::take(&mut self.utterance_acc);
             let full = full.trim();
             utterance_final = (!full.is_empty()).then(|| full.to_string());
-            self.slide();
+            if at_utterance_boundary {
+                // Everything after the last speech is silence; drop it all.
+                self.slide();
+            } else {
+                // Forced slide mid-speech: the decode may not have reached
+                // the window end, and audio past `end_ms` has no text yet.
+                let end_sample = (hypothesis.end_ms as usize) * (TARGET_RATE as usize) / 1000;
+                let keep_from = end_sample
+                    .max(window_len.saturating_sub(MAX_CARRY_SAMPLES))
+                    .min(window_len);
+                self.slide_keeping(keep_from);
+            }
         }
         Ok(Some(StepOutput {
             committed_delta,
@@ -114,10 +136,11 @@ mod tests {
     use super::*;
     use crate::Hypothesis;
 
-    /// Scripted engine: returns queued (text, detected lang) in order and
-    /// records call sizes and the lang argument it was given.
+    /// Scripted engine: returns queued (text, detected lang, end_ms) in order
+    /// and records call sizes and the lang argument it was given. An `end_ms`
+    /// of None means "decoded the whole window".
     struct FakeEngine {
-        script: Vec<(String, Option<String>)>,
+        script: Vec<(String, Option<String>, Option<u64>)>,
         received_samples: Vec<usize>,
         received_langs: Vec<Option<String>>,
     }
@@ -128,11 +151,19 @@ mod tests {
         }
 
         fn scripted_with_langs(entries: &[(&str, Option<&str>)]) -> Self {
+            Self::new(entries.iter().map(|(t, l)| (*t, *l, None)).collect())
+        }
+
+        fn scripted_with_end_ms(entries: &[(&str, Option<u64>)]) -> Self {
+            Self::new(entries.iter().map(|(t, e)| (*t, None, *e)).collect())
+        }
+
+        fn new(entries: Vec<(&str, Option<&str>, Option<u64>)>) -> Self {
             Self {
                 script: entries
                     .iter()
                     .rev()
-                    .map(|(t, l)| (t.to_string(), l.map(str::to_string)))
+                    .map(|(t, l, e)| (t.to_string(), l.map(str::to_string), *e))
                     .collect(),
                 received_samples: Vec::new(),
                 received_langs: Vec::new(),
@@ -144,11 +175,12 @@ mod tests {
         fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis> {
             self.received_samples.push(samples.len());
             self.received_langs.push(lang.map(str::to_string));
-            let (text, detected) = self.script.pop().expect("script exhausted");
+            let (text, detected, end_ms) = self.script.pop().expect("script exhausted");
             Ok(Hypothesis {
                 text,
                 start_ms: 0,
-                end_ms: (samples.len() * 1000 / TARGET_RATE as usize) as u64,
+                end_ms: end_ms
+                    .unwrap_or((samples.len() * 1000 / TARGET_RATE as usize) as u64),
                 lang: detected,
             })
         }
@@ -297,6 +329,23 @@ mod tests {
         assert_eq!(out.committed_delta, ""); // fresh agreement context
         assert_eq!(out.volatile, "次");
         // the post-slide decode saw only audio pushed after the slide
+        assert_eq!(engine.received_samples, vec![16 * 16_000, 2 * 16_000]);
+    }
+
+    #[test]
+    fn max_window_slide_carries_audio_the_decode_did_not_reach() {
+        // 16s of speech, but the hypothesis says the decode only reached
+        // 14s: the last 2s were never transcribed and must survive the slide.
+        let mut engine =
+            FakeEngine::scripted_with_end_ms(&[("長い発話", Some(14_000)), ("続き", None)]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(16));
+        let flushed = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(flushed.committed_delta, "長い発話");
+        // the carried 2s alone is a decodable window: no audio was lost
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(out.volatile, "続き");
         assert_eq!(engine.received_samples, vec![16 * 16_000, 2 * 16_000]);
     }
 
