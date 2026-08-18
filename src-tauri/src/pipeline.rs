@@ -228,6 +228,9 @@ struct LaneRuntime {
     /// When this lane is next due to decode. Per-lane so one lane's slow
     /// decode delays only itself.
     next_step: Instant,
+    /// Only the speaker lane: a mic that hears nothing is normal, a tap that
+    /// receives digital silence means the permission was withheld.
+    silence: Option<SilenceWatch>,
 }
 
 impl LaneRuntime {
@@ -243,6 +246,7 @@ impl LaneRuntime {
             overrun_until: None,
             gate: EmitGate::default(),
             next_step: Instant::now() + STEP_INTERVAL,
+            silence: matches!(lane, Lane::Speaker).then(SilenceWatch::default),
         })
     }
 
@@ -313,6 +317,11 @@ impl LaneRuntime {
             anyhow::bail!("input stream failed: {msg}");
         }
         self.drain();
+        if let Some(watch) = self.silence.as_mut() {
+            if let Some(notice) = watch.observe(&self.mono, Instant::now()) {
+                emit_status(ui, "listening", Some(notice.to_string()));
+            }
+        }
         if !self.mono.is_empty() {
             let resampled = self.resampler.process(&self.mono)?;
             self.scheduler.push_audio(&resampled);
@@ -360,6 +369,46 @@ impl LaneRuntime {
             self.mono.push(frame / channels as f32);
         }
         chunk.commit_all();
+    }
+}
+
+/// How long a lane may deliver nothing but digital silence before we call
+/// it broken. Long enough that a quiet stretch in a meeting doesn't trip it.
+const SILENCE_GRACE: Duration = Duration::from_secs(20);
+
+const SILENT_LANE_NOTICE: &str = "speaker lane is receiving only silence — grant \
+    System Settings > Privacy & Security > Screen & System Audio Recording";
+
+/// Watches a lane for the one failure this pipeline cannot see as an error:
+/// macOS withholds the system-audio permission by zero-filling the buffers
+/// (docs/step0-tap-results.md), so every call succeeds and the transcript
+/// just stays empty forever.
+///
+/// The tell is *samples that arrive and are all zero*. An output device with
+/// nothing playing runs no IO cycle and so delivers no samples at all, which
+/// is why an empty slice must not count as silence.
+#[derive(Default)]
+struct SilenceWatch {
+    silent_since: Option<Instant>,
+    reported: bool,
+}
+
+impl SilenceWatch {
+    fn observe(&mut self, samples: &[f32], now: Instant) -> Option<&'static str> {
+        if samples.is_empty() {
+            return None;
+        }
+        if samples.iter().any(|s| *s != 0.0) {
+            self.silent_since = None;
+            self.reported = false;
+            return None;
+        }
+        let since = *self.silent_since.get_or_insert(now);
+        if !self.reported && now.duration_since(since) >= SILENCE_GRACE {
+            self.reported = true;
+            return Some(SILENT_LANE_NOTICE);
+        }
+        None
     }
 }
 
@@ -445,6 +494,38 @@ mod tests {
         // a boundary flush ends with an empty tail; nothing stays on screen
         assert!(gate.should_emit(&out("世界", "")));
         assert!(!gate.should_emit(&out("", "")));
+    }
+
+    #[test]
+    fn digital_silence_for_long_enough_reports_a_withheld_permission() {
+        let mut watch = SilenceWatch::default();
+        let t0 = Instant::now();
+        // Callbacks arriving full of zeros: the lane is running, so this is
+        // not an idle device — it is the permission being withheld.
+        assert_eq!(watch.observe(&[0.0; 16], t0), None);
+        assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE), Some(SILENT_LANE_NOTICE));
+        // Said once: repeating it every poll would bury the real status.
+        assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE * 2), None);
+    }
+
+    #[test]
+    fn an_idle_device_delivering_no_samples_is_not_silence() {
+        // Nothing playing means no IO cycle and no samples — a working lane
+        // waiting for audio, which must not be reported as broken.
+        let mut watch = SilenceWatch::default();
+        let t0 = Instant::now();
+        assert_eq!(watch.observe(&[], t0), None);
+        assert_eq!(watch.observe(&[], t0 + SILENCE_GRACE * 10), None);
+    }
+
+    #[test]
+    fn audible_samples_clear_a_pending_silence_run() {
+        let mut watch = SilenceWatch::default();
+        let t0 = Instant::now();
+        assert_eq!(watch.observe(&[0.0; 16], t0), None);
+        assert_eq!(watch.observe(&[0.0, 0.2], t0 + SILENCE_GRACE / 2), None);
+        // the clock restarts from the audible sample, not from t0
+        assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE), None);
     }
 
     #[test]
