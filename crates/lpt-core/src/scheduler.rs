@@ -24,8 +24,8 @@ pub struct StepOutput {
 
 #[derive(Debug, Default)]
 pub struct StreamScheduler {
+    /// The current window: audio since the last slide.
     buffer: Vec<f32>,
-    window_start: usize,
     agreement: LocalAgreement,
     /// Language detected for the current window (auto mode only). Pinning it
     /// keeps hypotheses stable within a window while letting each new window
@@ -45,7 +45,6 @@ impl StreamScheduler {
     /// Advance past all buffered audio and start a fresh agreement context.
     fn slide(&mut self) {
         self.buffer.clear();
-        self.window_start = 0;
         self.agreement.reset();
         self.window_lang = None;
     }
@@ -56,10 +55,10 @@ impl StreamScheduler {
         vad: &mut dyn SpeechDetector,
         lang: Option<&str>,
     ) -> anyhow::Result<Option<StepOutput>> {
-        if self.buffer.len() - self.window_start < MIN_WINDOW_SAMPLES {
+        if self.buffer.len() < MIN_WINDOW_SAMPLES {
             return Ok(None);
         }
-        let window = &self.buffer[self.window_start..];
+        let window = self.buffer.as_slice();
         let speech = vad.speech_segments(window)?;
         let Some(&(_, last_speech_end)) = speech.last() else {
             // No speech at all: drop the audio so silence and non-speech
