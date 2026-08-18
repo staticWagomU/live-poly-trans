@@ -14,7 +14,9 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 anyhow = "1"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cpal = "0.18.1"
+hound = "3.5"
 lpt-core = { path = "../crates/lpt-core" }
 lpt-whisper = { path = "../crates/lpt-whisper" }
 rtrb = "0.4.0"
@@ -24,6 +26,7 @@ tauri = { version = "2", features = [] }
 
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6.2"
+mach2 = "0.4"
 dispatch2 = "0.3.1"
 objc2 = "0.6.4"
 objc2-core-audio = { version = "0.3.2", features = ["AudioHardware", "objc2"] }

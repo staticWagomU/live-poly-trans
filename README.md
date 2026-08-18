@@ -20,6 +20,23 @@ v1の実装は `v1` ブランチに保存されている。
 
 起動: `npm run tauri dev`
 
+## 録音
+
+Recordを押すとセッションごとに `~/Music/live-poly-trans/<yyyyMMddHHmmss>/` が作られ、以下が書き出される（48kHz / モノラル / 16bit PCM）:
+
+- `mic.wav` — マイクレーン
+- `speaker.wav` — スピーカーレーン（取得できなかった場合は無音）
+- `mix.wav` — 両レーンのミックス
+- `transcript.jsonl` — 確定した発話（1行1発話）
+
+VADや無音ゲートより手前の音をそのまま書くので、文字起こしが拾わなかった部分もファイルには残る。3つのwavは同じ時間軸・同じ長さで、レーンが音を出していない区間は無音で埋められる。`transcript.jsonl` の `startMs`/`endMs` はこの録音上の位置なので、そのまま音声にシークできる:
+
+```json
+{"endMs":3400,"lane":"mic","startMs":1200,"text":"こんにちは"}
+```
+
+スピーカーレーンはmacOSのシステム音声権限が要るため、`.app`として起動しないと無音になる（[docs/step0-tap-results.md](docs/step0-tap-results.md)）。
+
 ## 環境変数
 
 すべて任意。未設定時は括弧内の既定値で動く。
@@ -34,3 +51,4 @@ v1の実装は `v1` ブランチに保存されている。
 | `LPT_VAD_MIN_SPEECH_MS` | whisper.cpp既定 | これより短い発話は無視 |
 | `LPT_VAD_MIN_SILENCE_MS` | whisper.cpp既定 | 発話区切りとみなす最短無音 |
 | `LPT_VAD_PAD_MS` | whisper.cpp既定 | 検出区間の前後パディング |
+| `LPT_RECORD_DIR` | `~/Music/live-poly-trans` | 録音セッションフォルダを作る親ディレクトリ |

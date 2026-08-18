@@ -1,9 +1,11 @@
 //! Tauri shell: UI commands feed the pipeline worker (pipeline.rs), which
-//! owns the capture session (capture.rs), the ASR engines, and the
-//! scheduler, and emits `transcript`/`status` events back to the UI.
+//! owns the capture sessions (capture/), the ASR engines, the scheduler, and
+//! the session recording (record.rs), and emits `transcript`/`status` events
+//! back to the UI.
 
 mod capture;
 mod pipeline;
+mod record;
 
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;

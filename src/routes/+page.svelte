@@ -4,20 +4,25 @@
   import { listen } from '@tauri-apps/api/event';
 
   type Lane = 'mic' | 'speaker';
+  /// A finished utterance, positioned in this session's recording.
+  type Utterance = { text: string; startMs: number; endMs: number };
   type TranscriptPayload = {
     lane: Lane;
     committedDelta: string;
     volatile: string;
-    utteranceFinal: string | null;
+    utteranceFinal: Utterance | null;
   };
   type StatusPayload = {
     state: 'idle' | 'loading' | 'listening' | 'error';
     message: string | null;
+    /// Directory this session's WAV files are being written to; stays put
+    /// after a stop so the files can still be found.
+    recordingDir: string | null;
   };
 
   // Cap the transcript so an hours-long session doesn't grow the DOM
-  // without bound; the oldest text scrolls away first anyway.
-  const MAX_TRANSCRIPT_CHARS = 50_000;
+  // without bound; the oldest lines scroll away first anyway.
+  const MAX_LINES = 500;
 
   // Mic and speaker get separate columns: the two lanes are transcribed
   // independently and interleaving them would misattribute who said what.
@@ -26,11 +31,17 @@
     { id: 'speaker', label: 'スピーカー' }
   ];
 
-  let lanes = $state<Record<Lane, { committed: string; volatile: string }>>({
-    mic: { committed: '', volatile: '' },
-    speaker: { committed: '', volatile: '' }
-  });
-  let status = $state<StatusPayload>({ state: 'idle', message: null });
+  /// A settled utterance. `id` only keeps Svelte's keyed each honest as old
+  /// lines drop off the front.
+  type Line = { id: number; startMs: number; text: string };
+  /// `pending` is the text committed for the utterance still being spoken;
+  /// it becomes a line once the utterance ends and gets its timestamp.
+  type LaneState = { lines: Line[]; pending: string; volatile: string };
+
+  let nextLineId = 0;
+  const emptyLane = (): LaneState => ({ lines: [], pending: '', volatile: '' });
+  let lanes = $state<Record<Lane, LaneState>>({ mic: emptyLane(), speaker: emptyLane() });
+  let status = $state<StatusPayload>({ state: 'idle', message: null, recordingDir: null });
   let busy = $state(false);
 
   // The backend is the source of truth for running: a capture error flips
@@ -39,16 +50,21 @@
   const statusText = $derived(
     status.message ? `${status.state}: ${status.message}` : status.state
   );
+  // The folder name alone: it is the session's timestamp, and the full path
+  // is a tooltip away.
+  const recordingName = $derived(status.recordingDir?.split(/[\\/]/).pop() ?? null);
 
   onMount(() => {
     const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
       const lane = lanes[event.payload.lane];
-      lane.committed += event.payload.committedDelta;
-      if (event.payload.utteranceFinal) {
-        lane.committed += '\n';
-      }
-      if (lane.committed.length > MAX_TRANSCRIPT_CHARS) {
-        lane.committed = lane.committed.slice(-MAX_TRANSCRIPT_CHARS);
+      lane.pending += event.payload.committedDelta;
+      const finished = event.payload.utteranceFinal;
+      if (finished) {
+        // The final text is the authoritative version of the same words —
+        // and the only one that comes with a position in the recording.
+        lane.lines.push({ id: nextLineId++, startMs: finished.startMs, text: finished.text });
+        lane.lines.splice(0, lane.lines.length - MAX_LINES);
+        lane.pending = '';
       }
       lane.volatile = event.payload.volatile;
     });
@@ -84,7 +100,8 @@
   // both of its states.
   function followTail(lane: Lane) {
     return (el: HTMLElement) => {
-      void lanes[lane].committed;
+      void lanes[lane].lines.length;
+      void lanes[lane].pending;
       void lanes[lane].volatile;
       if (follow[lane]) {
         el.scrollTo({ top: el.scrollHeight });
@@ -100,10 +117,10 @@
       if (!wasRunning && !running) {
         // The backend's status event may lag the accepted Start; reflect it
         // now so a quick second click means Stop, not another Start.
-        status = { state: 'loading', message: null };
+        status = { ...status, state: 'loading', message: null };
       }
     } catch (error) {
-      status = { state: 'error', message: String(error) };
+      status = { ...status, state: 'error', message: String(error) };
     } finally {
       busy = false;
     }
@@ -111,8 +128,17 @@
 
   function clear() {
     for (const { id } of LANES) {
-      lanes[id] = { committed: '', volatile: '' };
+      lanes[id] = emptyLane();
     }
+  }
+
+  /// Position in the recording, as the audio player would show it.
+  function clock(ms: number) {
+    const total = Math.floor(ms / 1000);
+    const mm = String(Math.floor(total / 60) % 60).padStart(2, '0');
+    const ss = String(total % 60).padStart(2, '0');
+    const hours = Math.floor(total / 3600);
+    return hours ? `${hours}:${mm}:${ss}` : `${mm}:${ss}`;
   }
 </script>
 
@@ -120,6 +146,9 @@
   <header>
     <h1>LivePolyTrans v2</h1>
     <div class="controls">
+      {#if recordingName}
+        <span class="rec-dir" title={status.recordingDir}>録音 {recordingName}</span>
+      {/if}
       <span class="status" role="status">{statusText}</span>
       <button onclick={clear} disabled={busy}>Clear</button>
       <button class="record" class:running onclick={toggle} disabled={busy}>
@@ -136,11 +165,16 @@
           onscroll={onTranscriptScroll(lane.id)}
           {@attach followTail(lane.id)}
         >
-          <p>
-            <span class="committed">{lanes[lane.id].committed}</span><span class="volatile"
-              >{lanes[lane.id].volatile}</span
-            >
-          </p>
+          {#each lanes[lane.id].lines as line (line.id)}
+            <p><span class="at">{clock(line.startMs)}</span>{line.text}</p>
+          {/each}
+          {#if lanes[lane.id].pending || lanes[lane.id].volatile}
+            <p>
+              <span class="at pending">··:··</span><span class="committed"
+                >{lanes[lane.id].pending}</span
+              ><span class="volatile">{lanes[lane.id].volatile}</span>
+            </p>
+          {/if}
         </div>
       </section>
     {/each}
@@ -183,6 +217,11 @@
   .status {
     font-size: 0.8rem;
     color: #8b98a5;
+  }
+  .rec-dir {
+    font-size: 0.8rem;
+    color: #8b98a5;
+    font-variant-numeric: tabular-nums;
   }
   button {
     border: 1px solid #3a434c;
@@ -227,8 +266,24 @@
     line-height: 1.9;
   }
   .transcript p {
-    margin: 0;
+    margin: 0 0 0.35rem;
     white-space: pre-wrap;
+    /* hang the timestamp in its own gutter so the text lines up */
+    padding-left: 3.6rem;
+    text-indent: -3.6rem;
+  }
+  .at {
+    display: inline-block;
+    width: 3.6rem;
+    text-indent: 0;
+    font-size: 0.75rem;
+    font-variant-numeric: tabular-nums;
+    color: #5d6a76;
+    user-select: none;
+  }
+  /* the line still being spoken has no settled position yet */
+  .at.pending {
+    color: #3a434c;
   }
   .volatile {
     color: #8b98a5;

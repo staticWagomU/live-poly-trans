@@ -73,8 +73,11 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 4: 録音
 
-- [ ] ゲート等の加工前の生音声をレーン別ファイルに保存（v1の設計を踏襲）
-- [ ] タイムスタンプとトランスクリプトの整合
+- [x] ゲート等の加工前の生音声をレーン別ファイルに保存（v1の設計を踏襲）— `~/Music/live-poly-trans/<yyyyMMddHHmmss>/{mic,speaker,mix}.wav`（48kHz/mono/16bit）。`record.rs`＋`lpt-core::mix`
+- [x] 実録音での確認（2026-08-19, `.app`起動で58秒）— mic peak 0.157・全区間連続、speaker peak 0.909・先頭10秒無音、mixは両者の和（10秒毎RMSで確認）
+- [x] タイムスタンプとトランスクリプトの整合 — schedulerがストリーム絶対位置で`Utterance{text,start_ms,end_ms}`を返し、`LaneTimeline`が録音時間へ変換。`transcript.jsonl`に追記＋UIは各行を`mm:ss`付きで表示
+- [x] レーン間の厳密な同期 — cpalの`capture`タイムスタンプとProcess Tapの`mHostTime`（どちらもmach host time）でバッファごとの録音位置を決定。`capture::Anchor`＋`SessionClock`。overrunで落ちた分も時間の穴として正しく残る（設計: plans/lane-sync.md）
+- [x] 同期の実測（2026-08-19）— スピーカーから鳴らしたクリックが両レーンで **+15〜16ms**（空気の伝搬＋入力レイテンシ）に収まり、18.5秒離れた点で1ms以内。再測は `python3 scripts/check-recording.py --sync`（ヘッドホン再生だと測定不能）
 
 ### Step 5: 話者分離（SHOULD）
 

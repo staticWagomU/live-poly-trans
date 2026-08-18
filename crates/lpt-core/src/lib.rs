@@ -4,6 +4,7 @@
 //! nothing platform-specific so it stays testable headless (ADR-153800).
 
 pub mod local_agreement;
+pub mod mix;
 pub mod resample;
 pub mod scheduler;
 

@@ -24,21 +24,43 @@ const MAX_CARRY_SAMPLES: usize = 5 * TARGET_RATE as usize;
 /// only just began, so dropping the whole window would clip its onset.
 const ONSET_GUARD_SAMPLES: usize = 3 * TARGET_RATE as usize / 10;
 
+fn samples_to_ms(samples: usize) -> u64 {
+    samples as u64 * 1000 / TARGET_RATE as u64
+}
+
+/// An utterance that has ended, with where it sits in the audio.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Utterance {
+    pub text: String,
+    /// Milliseconds from the start of this scheduler's stream — all the audio
+    /// ever pushed into it, not the current window. Callers that record the
+    /// same audio can line the two up (`pipeline::LaneTimeline`).
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
 /// One decode step's outcome.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StepOutput {
     pub committed_delta: String,
     pub volatile: String,
-    /// Full text of the utterance that just ended; present only on the step
-    /// that crossed an utterance boundary (trailing silence or max window).
-    /// This is the unit the translation lane consumes.
-    pub utterance_final: Option<String>,
+    /// The utterance that just ended; present only on the step that crossed
+    /// an utterance boundary (trailing silence or max window). This is the
+    /// unit the translation lane consumes.
+    pub utterance_final: Option<Utterance>,
 }
 
 #[derive(Debug, Default)]
 pub struct StreamScheduler {
     /// The current window: audio since the last slide.
     buffer: Vec<f32>,
+    /// Where `buffer[0]` sits in the stream, in samples since the first
+    /// `push_audio`. Windows come and go; this is what makes a timestamp
+    /// mean something outside the window it was measured in.
+    window_start: usize,
+    /// Stream position where the current utterance's speech began, fixed by
+    /// the first hypothesis that produced text for it.
+    utterance_start_ms: Option<u64>,
     agreement: LocalAgreement,
     /// Language detected for the current window (auto mode only). Pinning it
     /// keeps hypotheses stable within a window while letting each new window
@@ -58,23 +80,52 @@ impl StreamScheduler {
         self.buffer.extend_from_slice(samples);
     }
 
+    /// Fix where the current utterance began, from the first hypothesis that
+    /// found speech in it. Whisper reports the offset of its first segment,
+    /// so an utterance that starts late in a window is stamped where the
+    /// speech is, not where the window opened.
+    fn note_utterance_start(&mut self, hypothesis: &crate::Hypothesis) {
+        if hypothesis.text.is_empty() {
+            return;
+        }
+        let start = self.window_start_ms() + hypothesis.start_ms;
+        self.utterance_start_ms.get_or_insert(start);
+    }
+
     /// Slide the window: discard `buffer[..from]`, keep the rest, and start
     /// a fresh agreement context.
     fn slide_keeping(&mut self, from: usize) {
         self.buffer.drain(..from);
+        self.window_start += from;
         self.agreement.reset();
         self.window_lang = None;
         self.utterance_acc.clear();
+        self.utterance_start_ms = None;
     }
 
-    /// Commit the agreement's pending tail and take the finished utterance.
-    /// Returns (newly committed tail, whole utterance if any).
-    fn finalize_utterance(&mut self) -> (String, Option<String>) {
+    /// Where the current window begins, in stream milliseconds.
+    fn window_start_ms(&self) -> u64 {
+        samples_to_ms(self.window_start)
+    }
+
+    /// Commit the agreement's pending tail and take the finished utterance,
+    /// which ended at `end_ms` (stream time). Returns (newly committed tail,
+    /// whole utterance if any).
+    fn finalize_utterance(&mut self, end_ms: u64) -> (String, Option<Utterance>) {
         let tail = self.agreement.flush();
         self.utterance_acc.push_str(&tail);
         let full = std::mem::take(&mut self.utterance_acc);
         let full = full.trim();
-        (tail, (!full.is_empty()).then(|| full.to_string()))
+        // Fallback for text no hypothesis ever pinned a start to: the window
+        // it was decoded in is as much as is known.
+        let window_start_ms = self.window_start_ms();
+        let start_ms = self.utterance_start_ms.take().unwrap_or(window_start_ms);
+        let utterance = (!full.is_empty()).then(|| Utterance {
+            text: full.to_string(),
+            start_ms,
+            end_ms,
+        });
+        (tail, utterance)
     }
 
     /// End the stream (capture stopped): decode whatever audio the steps
@@ -87,6 +138,9 @@ impl StreamScheduler {
         lang: Option<&str>,
     ) -> anyhow::Result<Option<StepOutput>> {
         let mut committed_delta = String::new();
+        // The audio ends where it ends: measured before any padding, which
+        // would otherwise stretch the last utterance to a decodable length.
+        let mut end_ms = self.window_start_ms() + samples_to_ms(self.buffer.len());
         // Audio pushed after the last step (or below MIN_WINDOW entirely)
         // was never transcribed; without this decode, Stop would silently
         // drop the tail of the last utterance.
@@ -97,11 +151,13 @@ impl StreamScheduler {
             }
             let effective_lang = lang.or(self.window_lang.as_deref());
             let hypothesis = engine.transcribe(&self.buffer, effective_lang)?;
+            self.note_utterance_start(&hypothesis);
+            end_ms = self.window_start_ms() + hypothesis.end_ms;
             let agreement = self.agreement.feed(&hypothesis.text);
             self.utterance_acc.push_str(&agreement.committed_delta);
             committed_delta.push_str(&agreement.committed_delta);
         }
-        let (tail, utterance_final) = self.finalize_utterance();
+        let (tail, utterance_final) = self.finalize_utterance(end_ms);
         committed_delta.push_str(&tail);
         let all = self.buffer.len();
         self.slide_keeping(all);
@@ -137,6 +193,7 @@ impl StreamScheduler {
 
         let effective_lang = lang.or(self.window_lang.as_deref());
         let hypothesis = engine.transcribe(window, effective_lang)?;
+        self.note_utterance_start(&hypothesis);
         // Pin only from a hypothesis that produced text: a decode whose
         // segments were all no-speech still reports a (meaningless) language.
         // The engine withholds `lang` when its detection was unconfident,
@@ -155,7 +212,7 @@ impl StreamScheduler {
         if at_utterance_boundary || window_len >= MAX_WINDOW_SAMPLES {
             // The hypothesis is as stable as it will get: commit its tail
             // and hand the whole utterance downstream.
-            let (tail, full) = self.finalize_utterance();
+            let (tail, full) = self.finalize_utterance(self.window_start_ms() + hypothesis.end_ms);
             committed_delta.push_str(&tail);
             volatile.clear();
             utterance_final = full;
@@ -192,11 +249,19 @@ mod tests {
     use super::*;
     use crate::Hypothesis;
 
-    /// Scripted engine: returns queued (text, detected lang, end_ms) in order
-    /// and records call sizes and the lang argument it was given. An `end_ms`
-    /// of None means "decoded the whole window".
+    /// One queued hypothesis. `end_ms` of None means "decoded the whole
+    /// window".
+    struct Line {
+        text: String,
+        lang: Option<String>,
+        start_ms: u64,
+        end_ms: Option<u64>,
+    }
+
+    /// Scripted engine: returns its queued hypotheses in order and records
+    /// call sizes and the lang argument it was given.
     struct FakeEngine {
-        script: Vec<(String, Option<String>, Option<u64>)>,
+        script: Vec<Line>,
         received_samples: Vec<usize>,
         received_langs: Vec<Option<String>>,
     }
@@ -214,12 +279,31 @@ mod tests {
             Self::new(entries.iter().map(|(t, e)| (*t, None, *e)).collect())
         }
 
+        /// Hypotheses that claim a stretch of the window rather than all of it.
+        fn scripted_with_span(entries: &[(&str, u64, u64)]) -> Self {
+            let mut engine = Self::new(
+                entries
+                    .iter()
+                    .map(|(t, _, end)| (*t, None, Some(*end)))
+                    .collect(),
+            );
+            for (line, (_, start, _)) in engine.script.iter_mut().zip(entries.iter().rev()) {
+                line.start_ms = *start;
+            }
+            engine
+        }
+
         fn new(entries: Vec<(&str, Option<&str>, Option<u64>)>) -> Self {
             Self {
                 script: entries
                     .iter()
                     .rev()
-                    .map(|(t, l, e)| (t.to_string(), l.map(str::to_string), *e))
+                    .map(|(t, l, e)| Line {
+                        text: t.to_string(),
+                        lang: l.map(str::to_string),
+                        start_ms: 0,
+                        end_ms: *e,
+                    })
                     .collect(),
                 received_samples: Vec::new(),
                 received_langs: Vec::new(),
@@ -231,15 +315,22 @@ mod tests {
         fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis> {
             self.received_samples.push(samples.len());
             self.received_langs.push(lang.map(str::to_string));
-            let (text, detected, end_ms) = self.script.pop().expect("script exhausted");
+            let line = self.script.pop().expect("script exhausted");
             Ok(Hypothesis {
-                text,
-                start_ms: 0,
-                end_ms: end_ms
+                text: line.text,
+                start_ms: line.start_ms,
+                end_ms: line
+                    .end_ms
                     .unwrap_or((samples.len() * 1000 / TARGET_RATE as usize) as u64),
-                lang: detected,
+                lang: line.lang,
             })
         }
+    }
+
+    /// The text of a finished utterance, for the tests that only care about
+    /// what was said and not when.
+    fn said(utterance: &Option<Utterance>) -> Option<&str> {
+        utterance.as_ref().map(|u| u.text.as_str())
     }
 
     /// Audible fake audio: constant amplitude well above AmplitudeVad's bar.
@@ -425,7 +516,73 @@ mod tests {
         assert_eq!(third.committed_delta, "世界");
         assert_eq!(third.volatile, "");
         // the whole utterance, in one piece: the translation lane's input
-        assert_eq!(third.utterance_final.as_deref(), Some("こんにちは、世界"));
+        assert_eq!(said(&third.utterance_final), Some("こんにちは、世界"));
+    }
+
+    #[test]
+    fn an_utterance_carries_its_position_in_the_stream() {
+        let mut engine = FakeEngine::scripted_with_end_ms(&[("こんにちは", Some(2_000))]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        let mut audio = seconds(2);
+        audio.extend(vec![0.0; TARGET_RATE as usize]); // 1s pause → boundary
+        sched.push_audio(&audio);
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        let utterance = out.utterance_final.unwrap();
+        assert_eq!(utterance.text, "こんにちは");
+        assert_eq!((utterance.start_ms, utterance.end_ms), (0, 2_000));
+    }
+
+    #[test]
+    fn positions_keep_counting_across_a_window_slide() {
+        // The second utterance's clock must be the stream's, not the fresh
+        // window's — otherwise every utterance would claim to start at zero.
+        let mut engine = FakeEngine::scripted_with_end_ms(&[
+            ("ひとつめ", Some(2_000)),
+            ("ふたつめ", Some(2_000)),
+        ]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        let mut audio = seconds(2);
+        audio.extend(vec![0.0; TARGET_RATE as usize]);
+        sched.push_audio(&audio);
+        sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        // The slide kept only the onset guard, so the new window starts
+        // 3s − 0.3s into the stream.
+        sched.push_audio(&audio);
+        let second = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        let utterance = second.utterance_final.unwrap();
+        let window_start = 3_000 - 300;
+        assert_eq!(
+            (utterance.start_ms, utterance.end_ms),
+            (window_start, window_start + 2_000)
+        );
+    }
+
+    #[test]
+    fn an_utterance_starts_where_the_speech_did_not_where_the_window_did() {
+        // Whisper reports the first segment's offset: a window that opens
+        // with 2s of noise must not stamp the utterance 2s early.
+        let mut engine = FakeEngine::scripted_with_span(&[("はい", 2_000, 3_000)]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        let mut audio = seconds(3);
+        audio.extend(vec![0.0; TARGET_RATE as usize]);
+        sched.push_audio(&audio);
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        let utterance = out.utterance_final.unwrap();
+        assert_eq!((utterance.start_ms, utterance.end_ms), (2_000, 3_000));
+    }
+
+    #[test]
+    fn finish_stamps_the_tail_utterance() {
+        let mut engine = FakeEngine::scripted_with_end_ms(&[("はい", Some(1_500))]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.1; TARGET_RATE as usize * 3 / 2]);
+        let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
+        let utterance = fin.utterance_final.unwrap();
+        assert_eq!((utterance.start_ms, utterance.end_ms), (0, 1_500));
     }
 
     #[test]
@@ -503,7 +660,7 @@ mod tests {
         let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(fin.committed_delta, "こんにちは");
         assert_eq!(fin.volatile, "");
-        assert_eq!(fin.utterance_final.as_deref(), Some("こんにちは"));
+        assert_eq!(said(&fin.utterance_final), Some("こんにちは"));
         // and the scheduler is reset for the next session
         assert_eq!(sched.finish(&mut engine, &mut vad, None).unwrap(), None);
     }
@@ -519,7 +676,7 @@ mod tests {
         // next step: that audio was never transcribed and must not vanish
         sched.push_audio(&seconds(1));
         let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
-        assert_eq!(fin.utterance_final.as_deref(), Some("こんにちは"));
+        assert_eq!(said(&fin.utterance_final), Some("こんにちは"));
         assert_eq!(engine.received_samples, vec![2 * 16_000, 3 * 16_000]);
     }
 
@@ -533,7 +690,7 @@ mod tests {
         sched.push_audio(&vec![0.1; TARGET_RATE as usize / 2]);
         assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
         let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
-        assert_eq!(fin.utterance_final.as_deref(), Some("はい"));
+        assert_eq!(said(&fin.utterance_final), Some("はい"));
         assert_eq!(engine.received_samples, vec![MIN_WINDOW_SAMPLES]);
     }
 

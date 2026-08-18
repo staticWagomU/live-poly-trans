@@ -39,31 +39,38 @@ use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, Audio
 use objc2_core_foundation::CFDictionary;
 use objc2_foundation::{NSArray, NSMutableDictionary, NSNumber, NSString};
 
-use super::{CaptureSession, RING_CAPACITY_SECS};
+use super::{Anchor, CaptureSession, ANCHOR_CAPACITY, RING_CAPACITY_SECS};
 
 /// Written only by the CoreAudio IO block, which the HAL runs serially on
-/// the dispatch queue we hand it. Nothing else touches the producer, so the
+/// the dispatch queue we hand it. Nothing else touches this state, so the
 /// unsynchronised access is sound and the callback stays allocation- and
 /// lock-free like the cpal one.
+struct IoState {
+    producer: rtrb::Producer<f32>,
+    times: rtrb::Producer<Anchor>,
+    /// Frames written to the ring so far — the anchors' frame of reference.
+    frames: u64,
+}
+
 struct IoSink {
-    producer: std::cell::UnsafeCell<rtrb::Producer<f32>>,
+    state: std::cell::UnsafeCell<IoState>,
     channels: usize,
     dropped: Arc<AtomicUsize>,
 }
 
-// SAFETY: see IoSink's doc comment — access is serialised by the HAL.
+// SAFETY: see IoState's doc comment — access is serialised by the HAL.
 unsafe impl Send for IoSink {}
 unsafe impl Sync for IoSink {}
 
 impl IoSink {
     /// Copy one IO cycle's input into the ring. Mirrors mic.rs: whole frames
     /// only, since a partial frame would misalign every later de-interleave.
-    fn consume(&self, in_data: NonNull<AudioBufferList>) {
+    fn consume(&self, in_data: NonNull<AudioBufferList>, captured_nanos: u64) {
         let abl = unsafe { in_data.as_ref() };
         let buffers = unsafe {
             std::slice::from_raw_parts(abl.mBuffers.as_ptr(), abl.mNumberBuffers as usize)
         };
-        let producer = unsafe { &mut *self.producer.get() };
+        let state = unsafe { &mut *self.state.get() };
         for buf in buffers {
             if buf.mData.is_null() {
                 continue;
@@ -74,9 +81,19 @@ impl IoSink {
                     buf.mDataByteSize as usize / std::mem::size_of::<f32>(),
                 )
             };
-            let writable = (producer.slots().min(samples.len()) / self.channels) * self.channels;
-            if let Ok(chunk) = producer.write_chunk_uninit(writable) {
-                chunk.fill_from_iter(samples[..writable].iter().copied());
+            let writable =
+                (state.producer.slots().min(samples.len()) / self.channels) * self.channels;
+            if writable > 0 {
+                // Stamped before the write so the reader always finds an
+                // anchor at or before the audio it is looking at.
+                let _ = state.times.push(Anchor {
+                    frame: state.frames,
+                    nanos: captured_nanos,
+                });
+                if let Ok(chunk) = state.producer.write_chunk_uninit(writable) {
+                    chunk.fill_from_iter(samples[..writable].iter().copied());
+                }
+                state.frames += (writable / self.channels) as u64;
             }
             if writable < samples.len() {
                 self.dropped
@@ -84,6 +101,22 @@ impl IoSink {
             }
         }
     }
+}
+
+/// mach ticks → nanoseconds. The ratio is fixed for the machine, so it is
+/// read once and reused; a tap callback must not make system calls.
+fn host_time_nanos(ticks: u64) -> u64 {
+    static SCALE: std::sync::OnceLock<(u64, u64)> = std::sync::OnceLock::new();
+    let (numer, denom) = *SCALE.get_or_init(|| {
+        let mut info = mach2::mach_time::mach_timebase_info { numer: 0, denom: 0 };
+        // A zero denominator would mean a broken kernel; 1/1 at least keeps
+        // the arithmetic sane.
+        if unsafe { mach2::mach_time::mach_timebase_info(&mut info) } != 0 || info.denom == 0 {
+            return (1, 1);
+        }
+        (info.numer as u64, info.denom as u64)
+    });
+    (ticks as u128 * numer as u128 / denom as u128) as u64
 }
 
 /// Start tapping system audio on a new thread. The tap format and the ring
@@ -126,9 +159,14 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
 
     let (producer, consumer) =
         rtrb::RingBuffer::new(src_rate as usize * channels * RING_CAPACITY_SECS);
+    let (times_tx, times) = rtrb::RingBuffer::new(ANCHOR_CAPACITY);
     let dropped = Arc::new(AtomicUsize::new(0));
     let sink = Arc::new(IoSink {
-        producer: std::cell::UnsafeCell::new(producer),
+        state: std::cell::UnsafeCell::new(IoState {
+            producer,
+            times: times_tx,
+            frames: 0,
+        }),
         channels,
         dropped: dropped.clone(),
     });
@@ -136,10 +174,14 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
     let block = block2::RcBlock::new(
         move |_now: NonNull<AudioTimeStamp>,
               in_data: NonNull<AudioBufferList>,
-              _in_time: NonNull<AudioTimeStamp>,
+              in_time: NonNull<AudioTimeStamp>,
               _out_data: NonNull<AudioBufferList>,
               _out_time: NonNull<AudioTimeStamp>| {
-            sink.consume(in_data);
+            // The HAL's host time for this input buffer: the same mach clock
+            // cpal stamps the mic with, which is what puts both lanes on one
+            // timeline.
+            let captured = host_time_nanos(unsafe { in_time.as_ref() }.mHostTime);
+            sink.consume(in_data, captured);
         },
     );
     // A nil queue reportedly fails to register the block on macOS 26, so
@@ -165,6 +207,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
 
     let _ = ready_tx.send(Ok(CaptureSession {
         consumer,
+        times,
         src_rate,
         channels,
         dropped,
