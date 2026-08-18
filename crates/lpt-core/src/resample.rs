@@ -77,6 +77,21 @@ impl StreamResampler {
         self.pending.drain(..consumed);
         Ok(out)
     }
+
+    /// Push out what is still buffered: the sub-CHUNK pending remainder and
+    /// the audio inside the sinc filter's delay line, both driven through
+    /// with zero-padding. Call when capture stops. The resampler stays
+    /// usable afterwards, but the injected silence breaks stream
+    /// continuity, so treat it as the end of the session's audio.
+    pub fn flush(&mut self) -> Result<Vec<f32>> {
+        if self.inner.is_none() {
+            return Ok(Vec::new());
+        }
+        // One extra full chunk of silence flushes the filter delay
+        // (~sinc_len input samples, far below CHUNK).
+        let pad = (CHUNK - self.pending.len() % CHUNK) % CHUNK + CHUNK;
+        self.process(&vec![0.0; pad])
+    }
 }
 
 #[cfg(test)]
@@ -113,6 +128,29 @@ mod tests {
             }
             assert_eq!(out, expected, "chunk_size {chunk_size}");
         }
+    }
+
+    #[test]
+    fn flush_pushes_out_the_buffered_tail_and_filter_delay() {
+        // Stopping mid-chunk must not silently drop the pending remainder
+        // (up to CHUNK-1 samples) nor the audio inside the sinc delay line.
+        let mut rs = StreamResampler::new(48_000).unwrap();
+        let mut out = rs.process(&vec![0.5; 1536]).unwrap();
+        assert!(out.len() < 1536 / 3); // the 512-sample tail is still buffered
+        let flushed = rs.flush().unwrap();
+        out.extend(&flushed);
+        assert!(out.len() >= 1536 / 3, "got {}", out.len());
+        assert!(
+            flushed.iter().any(|s| s.abs() > 0.4),
+            "flush lost the tail audio"
+        );
+    }
+
+    #[test]
+    fn flush_at_target_rate_returns_nothing() {
+        let mut rs = StreamResampler::new(16_000).unwrap();
+        rs.process(&[0.1, 0.2]).unwrap();
+        assert!(rs.flush().unwrap().is_empty());
     }
 
     #[test]
