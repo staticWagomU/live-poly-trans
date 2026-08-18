@@ -50,8 +50,9 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] `AsrEngine` trait＋whisper-rs実装、LocalAgreementによるpartial/final確定（文字単位LCP・TDD済み、テスト11本）
 - [x] `transcript` イベント（committedDelta / volatile）をUIへ ※lane/start_msはStep 3のスピーカーレーン追加時に拡張
 - [x] 最小UI: 1ウィンドウのトランスクリプト表示（確定=白 / volatile=グレーの逐次更新）
-- [x] 無音ゲート（-50dBFS未満はデコードスキップ。無音時のWhisper幻覚対策、Step 0で実測確認）
-- [ ] 実発話での動作確認（アプリ起動済み。Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
+- [x] 無音ゲート（-50dBFS未満はデコードスキップ。無音時のWhisper幻覚対策、Step 0で実測確認）→ その後Silero VADに置換
+- [x] 2026-08-18 レビュー指摘の全面対応（plans/review-fixes.md）: 常駐パイプラインワーカー化（レース・再ロード解消）、`utterance_final`イベント（Step 2翻訳レーンの入力単位）、スライド時の音声持ち越し＋発話頭ガード、rubatoリサンプラ、RT安全なキャプチャ、UIのstatus同期・自動スクロール
+- [ ] 実発話での動作確認（Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
 
 ### Step 2: 確定文の翻訳レーン
 
