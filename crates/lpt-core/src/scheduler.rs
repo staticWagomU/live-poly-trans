@@ -67,6 +67,31 @@ impl StreamScheduler {
         self.utterance_acc.clear();
     }
 
+    /// Commit the agreement's pending tail and take the finished utterance.
+    /// Returns (newly committed tail, whole utterance if any).
+    fn finalize_utterance(&mut self) -> (String, Option<String>) {
+        let tail = self.agreement.flush();
+        self.utterance_acc.push_str(&tail);
+        let full = std::mem::take(&mut self.utterance_acc);
+        let full = full.trim();
+        (tail, (!full.is_empty()).then(|| full.to_string()))
+    }
+
+    /// End the stream (capture stopped): commit whatever text is still
+    /// pending and reset for a fresh session. Returns None if nothing was
+    /// pending.
+    pub fn finish(&mut self) -> Option<StepOutput> {
+        let (tail, utterance_final) = self.finalize_utterance();
+        let all = self.buffer.len();
+        self.slide_keeping(all);
+        utterance_final.as_ref()?;
+        Some(StepOutput {
+            committed_delta: tail,
+            volatile: String::new(),
+            utterance_final,
+        })
+    }
+
     pub fn step(
         &mut self,
         engine: &mut dyn AsrEngine,
@@ -103,13 +128,10 @@ impl StreamScheduler {
         if at_utterance_boundary || window_len >= MAX_WINDOW_SAMPLES {
             // The hypothesis is as stable as it will get: commit its tail
             // and hand the whole utterance downstream.
-            let tail = self.agreement.flush();
+            let (tail, full) = self.finalize_utterance();
             committed_delta.push_str(&tail);
-            self.utterance_acc.push_str(&tail);
             volatile.clear();
-            let full = std::mem::take(&mut self.utterance_acc);
-            let full = full.trim();
-            utterance_final = (!full.is_empty()).then(|| full.to_string());
+            utterance_final = full;
             if at_utterance_boundary {
                 // Everything after the last speech is silence — drop it,
                 // except the onset guard (the VAD is blind to an utterance
@@ -385,6 +407,23 @@ mod tests {
         let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
         assert_eq!(out.volatile, "続き");
         assert_eq!(engine.received_samples, vec![16 * 16_000, 2 * 16_000]);
+    }
+
+    #[test]
+    fn finish_flushes_pending_text_as_a_final_utterance() {
+        let mut engine = FakeEngine::scripted(&["こんにちは"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(out.volatile, "こんにちは");
+        // stopping capture must not lose the volatile tail
+        let fin = sched.finish().unwrap();
+        assert_eq!(fin.committed_delta, "こんにちは");
+        assert_eq!(fin.volatile, "");
+        assert_eq!(fin.utterance_final.as_deref(), Some("こんにちは"));
+        // and the scheduler is reset for the next session
+        assert_eq!(sched.finish(), None);
     }
 
     #[test]
