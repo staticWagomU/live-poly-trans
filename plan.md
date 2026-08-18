@@ -65,8 +65,11 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 3: スピーカーレーン
 
-- [ ] CoreAudio Process Tap実装（Step 0の検証結果に基づく）
-- [ ] マイク／スピーカー2レーンの同時稼働と表示分離
+- [x] CoreAudio Process Tap実装（Step 0の検証結果に基づく）— `capture/speaker.rs`
+- [x] マイク／スピーカー2レーンの同時稼働と表示分離 — UIはレーン別2カラム
+- [x] 権限が「無音」として現れる問題の検知（`SilenceWatch`）と`NSAudioCaptureUsageDescription`
+- [ ] 実発話での2レーン動作確認（`.app`として起動しないとスピーカーは無音。`bun run tauri build` → `open`）
+- [ ] デフォルト出力デバイス切り替え（ヘッドホン抜き差し等）への追従
 
 ### Step 4: 録音
 
