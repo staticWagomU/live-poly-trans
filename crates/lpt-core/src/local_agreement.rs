@@ -30,6 +30,18 @@ impl LocalAgreement {
         self.committed_chars = 0;
     }
 
+    /// Commit and return the pending volatile tail (the last hypothesis
+    /// beyond the committed point). Call when the hypothesis is known to be
+    /// stable: at an utterance boundary or when capture stops.
+    pub fn flush(&mut self) -> String {
+        let Some(prev) = &self.prev else {
+            return String::new();
+        };
+        let tail: String = prev.chars().skip(self.committed_chars).collect();
+        self.committed_chars += tail.chars().count();
+        tail
+    }
+
     pub fn feed(&mut self, hypothesis: &str) -> Agreement {
         let agreed_chars = match &self.prev {
             Some(prev) => common_prefix_chars(prev, hypothesis),
@@ -88,6 +100,22 @@ mod tests {
         let out = la.feed("こんに"); // hypothesis shrank below the committed point
         assert_eq!(out.committed_delta, "");
         assert_eq!(out.volatile, "");
+    }
+
+    #[test]
+    fn flush_commits_and_returns_the_pending_volatile_tail() {
+        let mut la = LocalAgreement::new();
+        la.feed("こんにちは、せ");
+        la.feed("こんにちは、世界"); // committed: こんにちは、 volatile: 世界
+        assert_eq!(la.flush(), "世界");
+        // the flushed tail is now committed: a second flush has nothing left
+        assert_eq!(la.flush(), "");
+    }
+
+    #[test]
+    fn flush_before_any_hypothesis_returns_nothing() {
+        let mut la = LocalAgreement::new();
+        assert_eq!(la.flush(), "");
     }
 
     #[test]
