@@ -167,13 +167,14 @@ fn run_session(
     let engines = load_engines(ui, engines)?;
     let stop_capture = Arc::new(AtomicBool::new(false));
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
-    capture::spawn(stop_capture.clone(), ready_tx);
+    capture::mic::spawn(stop_capture.clone(), ready_tx);
     let result = (|| {
         let session = match ready_rx.recv() {
             Ok(session) => session?,
             Err(_) => anyhow::bail!("capture thread died before reporting"),
         };
-        run_capture_loop(cmd_rx, ui, engines, LaneRuntime::new(Lane::Mic, session)?)
+        let mut lanes = [LaneRuntime::new(Lane::Mic, session)?];
+        run_capture_loop(cmd_rx, ui, engines, &mut lanes)
     })();
     stop_capture.store(true, Ordering::SeqCst);
     result
@@ -191,6 +192,11 @@ struct LaneRuntime {
     reported_drops: usize,
     /// While set, an overrun notice is on screen; cleared when it expires.
     overrun_until: Option<Instant>,
+    /// Per-lane: what the UI last saw of *this* lane's volatile tail.
+    gate: EmitGate,
+    /// When this lane is next due to decode. Per-lane so one lane's slow
+    /// decode delays only itself.
+    next_step: Instant,
 }
 
 impl LaneRuntime {
@@ -204,7 +210,68 @@ impl LaneRuntime {
             mono: Vec::new(),
             reported_drops: 0,
             overrun_until: None,
+            gate: EmitGate::default(),
+            next_step: Instant::now() + STEP_INTERVAL,
         })
+    }
+
+    /// One poll of this lane: drain captured audio, then decode if its
+    /// cadence came due.
+    fn tick(
+        &mut self,
+        ui: &Ui,
+        engines: &mut Engines,
+        lang: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.pump(ui)?;
+        if Instant::now() < self.next_step {
+            return Ok(());
+        }
+        // Measured step-start to step-start: a slow decode eats into the
+        // following idle time instead of stacking on top of it.
+        let started = Instant::now();
+        match self
+            .scheduler
+            .step(&mut engines.engine, &mut engines.vad, lang)
+        {
+            Ok(Some(out)) => {
+                if self.gate.should_emit(&out) {
+                    emit_step(ui, self.lane, out);
+                }
+            }
+            Ok(None) => {}
+            // Non-fatal: keep listening, surface the message.
+            Err(e) => emit_status(ui, "listening", Some(format!("decode error: {e:#}"))),
+        }
+        self.next_step = started + STEP_INTERVAL;
+        Ok(())
+    }
+
+    /// Stop: recover the audio still in flight (ring buffer → resampler
+    /// tail → an undecoded scheduler remainder) before flushing the text.
+    fn finish(
+        &mut self,
+        ui: &Ui,
+        engines: &mut Engines,
+        lang: Option<&str>,
+    ) -> anyhow::Result<()> {
+        self.pump(ui)?;
+        let tail = self.resampler.flush()?;
+        self.scheduler.push_audio(&tail);
+        if let Some(fin) = self
+            .scheduler
+            .finish(&mut engines.engine, &mut engines.vad, lang)?
+        {
+            if self.gate.should_emit(&fin) {
+                emit_step(ui, self.lane, fin);
+            }
+        }
+        // A tail can still be on screen when finish had nothing to flush (the
+        // scheduler discarded that hypothesis with a no-speech window drop).
+        if self.gate.volatile_on_screen {
+            emit_step(ui, self.lane, lpt_core::scheduler::StepOutput::default());
+        }
+        Ok(())
     }
 
     /// Move captured audio into the scheduler and report overruns. Fails
@@ -292,14 +359,12 @@ fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
     engines: &mut Engines,
-    mut lane: LaneRuntime,
+    lanes: &mut [LaneRuntime],
 ) -> anyhow::Result<()> {
     // Unset = auto-detect per utterance window (mixed ja/en meetings);
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
     emit_status(ui, "listening", None);
-    let mut gate = EmitGate::default();
-    let mut next_step = Instant::now() + STEP_INTERVAL;
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
@@ -307,42 +372,12 @@ fn run_capture_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
         }
-        lane.pump(ui)?;
-        if Instant::now() >= next_step {
-            let started = Instant::now();
-            match lane
-                .scheduler
-                .step(&mut engines.engine, &mut engines.vad, lang.as_deref())
-            {
-                Ok(Some(out)) => {
-                    if gate.should_emit(&out) {
-                        emit_step(ui, lane.lane, out);
-                    }
-                }
-                Ok(None) => {}
-                // Non-fatal: keep listening, surface the message.
-                Err(e) => emit_status(ui, "listening", Some(format!("decode error: {e:#}"))),
-            }
-            next_step = started + STEP_INTERVAL;
+        for lane in lanes.iter_mut() {
+            lane.tick(ui, engines, lang.as_deref())?;
         }
     }
-    // Stop: recover the audio still in flight (ring buffer → resampler
-    // tail → an undecoded scheduler remainder) before flushing the text.
-    lane.pump(ui)?;
-    let tail = lane.resampler.flush()?;
-    lane.scheduler.push_audio(&tail);
-    if let Some(fin) = lane
-        .scheduler
-        .finish(&mut engines.engine, &mut engines.vad, lang.as_deref())?
-    {
-        if gate.should_emit(&fin) {
-            emit_step(ui, lane.lane, fin);
-        }
-    }
-    // A tail can still be on screen when finish had nothing to flush (the
-    // scheduler discarded that hypothesis with a no-speech window drop).
-    if gate.volatile_on_screen {
-        emit_step(ui, lane.lane, lpt_core::scheduler::StepOutput::default());
+    for lane in lanes.iter_mut() {
+        lane.finish(ui, engines, lang.as_deref())?;
     }
     Ok(())
 }

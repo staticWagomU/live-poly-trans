@@ -1,6 +1,5 @@
 //! Microphone capture: owns the cpal stream on a dedicated thread (cpal
-//! streams are !Send) and hands interleaved f32 samples to the pipeline
-//! worker through a lock-free ring buffer.
+//! streams are !Send).
 //!
 //! The audio callback runs on a real-time thread: it converts and copies
 //! into the ring and nothing else — no allocation, no locks, no resampling.
@@ -14,21 +13,7 @@ use anyhow::{Context, Result};
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
 
-/// Seconds of interleaved audio the ring buffer can hold. The worker drains
-/// every 100ms; this survives multi-second decode stalls without dropping.
-const RING_CAPACITY_SECS: usize = 8;
-
-pub struct CaptureSession {
-    pub consumer: rtrb::Consumer<f32>,
-    pub src_rate: u32,
-    pub channels: usize,
-    /// Samples the callback had to drop because the ring was full.
-    pub dropped: Arc<AtomicUsize>,
-    /// First stream error (device unplugged, format change, …). The stream
-    /// keeps no audio flowing after one of these, so the pipeline must end
-    /// the session instead of listening to silence forever.
-    pub error: Arc<Mutex<Option<String>>>,
-}
+use super::{CaptureSession, RING_CAPACITY_SECS};
 
 /// Open the default input device on a new thread. The device config and the
 /// ring consumer come back through `ready_tx`; the thread then holds the
