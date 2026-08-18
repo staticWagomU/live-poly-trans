@@ -1,185 +1,51 @@
-//! Tauri shell: wires mic capture (cpal) → resampler → StreamScheduler →
-//! WhisperEngine, and emits `transcript`/`status` events to the UI.
+//! Tauri shell: UI commands feed the pipeline worker (pipeline.rs), which
+//! owns the capture session (capture.rs), the ASR engines, and the
+//! scheduler, and emits `transcript`/`status` events back to the UI.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+mod capture;
+mod pipeline;
 
-use anyhow::Context;
-use tauri::{AppHandle, Emitter, State};
+use std::sync::mpsc::Sender;
+use std::sync::Mutex;
 
-/// Decode cadence. Window decode itself costs ~0.7s (docs/step0-results.md),
-/// so a shorter interval would only queue up work.
-const STEP_INTERVAL: Duration = Duration::from_millis(1000);
+use tauri::{Manager, State};
 
-#[derive(Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-struct TranscriptPayload {
-    committed_delta: String,
-    volatile: String,
+struct PipelineHandle {
+    cmd_tx: Mutex<Sender<pipeline::Cmd>>,
 }
 
-#[derive(Default)]
-struct CaptureState {
-    running: Arc<AtomicBool>,
-}
-
-/// Languages the restricted auto-detection may choose between (Main/Sub pair).
-fn allowed_langs() -> Vec<String> {
-    std::env::var("LPT_LANGS")
-        .unwrap_or_else(|_| "ja,en".into())
-        .split(',')
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
-}
-
-fn model_path() -> String {
-    std::env::var("LPT_WHISPER_MODEL").unwrap_or_else(|_| {
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../models/ggml-large-v3-turbo-q8_0.bin"
-        )
-        .to_string()
-    })
-}
-
-fn vad_model_path() -> String {
-    std::env::var("LPT_VAD_MODEL").unwrap_or_else(|_| {
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../models/ggml-silero-v5.1.2.bin"
-        )
-        .to_string()
-    })
+impl PipelineHandle {
+    fn send(&self, cmd: pipeline::Cmd) -> Result<(), String> {
+        self.cmd_tx
+            .lock()
+            .unwrap()
+            .send(cmd)
+            .map_err(|_| "pipeline worker is gone".to_string())
+    }
 }
 
 #[tauri::command]
-fn start_capture(app: AppHandle, state: State<'_, CaptureState>) -> Result<(), String> {
-    if state.running.swap(true, Ordering::SeqCst) {
-        return Ok(());
-    }
-    let pending: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
-
-    spawn_capture_thread(state.running.clone(), pending.clone(), app.clone());
-    spawn_decode_thread(state.running.clone(), pending, app);
-    Ok(())
+fn start_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
+    state.send(pipeline::Cmd::Start)
 }
 
 #[tauri::command]
-fn stop_capture(state: State<'_, CaptureState>) {
-    state.running.store(false, Ordering::SeqCst);
-}
-
-fn spawn_capture_thread(
-    running: Arc<AtomicBool>,
-    pending: Arc<Mutex<Vec<f32>>>,
-    app: AppHandle,
-) {
-    std::thread::spawn(move || {
-        if let Err(e) = run_capture(&running, pending) {
-            let _ = app.emit("status", format!("capture error: {e:#}"));
-            running.store(false, Ordering::SeqCst);
-        }
-    });
-}
-
-/// cpal streams are !Send, so the stream lives entirely on this thread.
-fn run_capture(running: &AtomicBool, pending: Arc<Mutex<Vec<f32>>>) -> anyhow::Result<()> {
-    use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-
-    let host = cpal::default_host();
-    let device = host
-        .default_input_device()
-        .context("no default input device")?;
-    let config = device.default_input_config()?;
-    anyhow::ensure!(
-        config.sample_format() == cpal::SampleFormat::F32,
-        "unsupported input sample format: {:?}",
-        config.sample_format()
-    );
-    let src_rate = config.sample_rate();
-    let channels = config.channels() as usize;
-
-    let mut resampler = lpt_core::resample::StreamResampler::new(src_rate)?;
-    let stream = device.build_input_stream(
-        config.into(),
-        move |data: &[f32], _info| {
-            let mono: Vec<f32> = data
-                .chunks(channels)
-                .map(|frame| frame.iter().sum::<f32>() / channels as f32)
-                .collect();
-            match resampler.process(&mono) {
-                Ok(resampled) => pending.lock().unwrap().extend_from_slice(&resampled),
-                Err(e) => eprintln!("resample error: {e:#}"),
-            }
-        },
-        |err| eprintln!("input stream error: {err}"),
-        None,
-    )?;
-    stream.play()?;
-    while running.load(Ordering::SeqCst) {
-        std::thread::sleep(Duration::from_millis(100));
-    }
-    Ok(())
-}
-
-fn spawn_decode_thread(running: Arc<AtomicBool>, pending: Arc<Mutex<Vec<f32>>>, app: AppHandle) {
-    std::thread::spawn(move || {
-        let _ = app.emit("status", "loading model…");
-        let mut engine = match lpt_whisper::WhisperEngine::load(&model_path(), &allowed_langs()) {
-            Ok(engine) => engine,
-            Err(e) => {
-                let _ = app.emit("status", format!("model error: {e:#}"));
-                running.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
-        let mut vad = match lpt_whisper::SileroVad::load(&vad_model_path()) {
-            Ok(vad) => vad,
-            Err(e) => {
-                let _ = app.emit("status", format!("vad error: {e:#}"));
-                running.store(false, Ordering::SeqCst);
-                return;
-            }
-        };
-        let _ = app.emit("status", "listening");
-        // Unset = auto-detect per utterance window (mixed ja/en meetings);
-        // set LPT_LANG to pin a single language.
-        let lang = std::env::var("LPT_LANG").ok();
-        let mut scheduler = lpt_core::scheduler::StreamScheduler::new();
-
-        while running.load(Ordering::SeqCst) {
-            std::thread::sleep(STEP_INTERVAL);
-            {
-                let mut queued = pending.lock().unwrap();
-                scheduler.push_audio(&queued);
-                queued.clear();
-            }
-            match scheduler.step(&mut engine, &mut vad, lang.as_deref()) {
-                Ok(Some(out)) => {
-                    let _ = app.emit(
-                        "transcript",
-                        TranscriptPayload {
-                            committed_delta: out.committed_delta,
-                            volatile: out.volatile,
-                        },
-                    );
-                }
-                Ok(None) => {}
-                Err(e) => {
-                    let _ = app.emit("status", format!("decode error: {e:#}"));
-                }
-            }
-        }
-        let _ = app.emit("status", "idle");
-    });
+fn stop_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
+    state.send(pipeline::Cmd::Stop)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
-        .manage(CaptureState::default())
+        .setup(|app| {
+            let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
+            let handle = app.handle().clone();
+            std::thread::spawn(move || pipeline::run(cmd_rx, handle));
+            app.manage(PipelineHandle {
+                cmd_tx: Mutex::new(cmd_tx),
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![start_capture, stop_capture])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

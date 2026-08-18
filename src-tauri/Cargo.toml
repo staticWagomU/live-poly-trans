@@ -17,6 +17,7 @@ anyhow = "1"
 cpal = "0.18.1"
 lpt-core = { path = "../crates/lpt-core" }
 lpt-whisper = { path = "../crates/lpt-whisper" }
+rtrb = "0.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tauri = { version = "2", features = [] }
