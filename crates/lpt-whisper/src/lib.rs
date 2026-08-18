@@ -86,25 +86,6 @@ fn best_allowed_lang(probs: &[f32], allowed_ids: &[i32]) -> Option<i32> {
         .map(|(id, _)| id)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn picks_highest_probability_among_allowed() {
-        let mut probs = vec![0.0; 10];
-        probs[1] = 0.9; // highest overall, but not an allowed language
-        probs[3] = 0.2;
-        probs[7] = 0.5;
-        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some(7));
-    }
-
-    #[test]
-    fn empty_allowed_set_returns_none() {
-        assert_eq!(best_allowed_lang(&[0.1, 0.9], &[]), None);
-    }
-}
-
 impl WhisperEngine {
     pub fn load(model_path: &str, allowed_langs: &[String]) -> Result<Self> {
         let mut params = whisper_rs::WhisperContextParameters::default();
@@ -177,5 +158,24 @@ impl AsrEngine for WhisperEngine {
             end_ms,
             lang: detected.map(str::to_string),
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn picks_highest_probability_among_allowed() {
+        let mut probs = vec![0.0; 10];
+        probs[1] = 0.9; // highest overall, but not an allowed language
+        probs[3] = 0.2;
+        probs[7] = 0.5;
+        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some(7));
+    }
+
+    #[test]
+    fn empty_allowed_set_returns_none() {
+        assert_eq!(best_allowed_lang(&[0.1, 0.9], &[]), None);
     }
 }
