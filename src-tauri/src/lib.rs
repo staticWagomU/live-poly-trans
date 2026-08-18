@@ -101,6 +101,7 @@ fn run_capture(running: &AtomicBool, pending: Arc<Mutex<Vec<f32>>>) -> anyhow::R
     let src_rate = config.sample_rate();
     let channels = config.channels() as usize;
 
+    let mut resampler = lpt_core::resample::StreamResampler::new(src_rate)?;
     let stream = device.build_input_stream(
         config.into(),
         move |data: &[f32], _info| {
@@ -108,8 +109,10 @@ fn run_capture(running: &AtomicBool, pending: Arc<Mutex<Vec<f32>>>) -> anyhow::R
                 .chunks(channels)
                 .map(|frame| frame.iter().sum::<f32>() / channels as f32)
                 .collect();
-            let resampled = lpt_core::resample::resample_to_16k(&mono, src_rate);
-            pending.lock().unwrap().extend_from_slice(&resampled);
+            match resampler.process(&mono) {
+                Ok(resampled) => pending.lock().unwrap().extend_from_slice(&resampled),
+                Err(e) => eprintln!("resample error: {e:#}"),
+            }
         },
         |err| eprintln!("input stream error: {err}"),
         None,
