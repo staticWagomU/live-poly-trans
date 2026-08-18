@@ -78,13 +78,13 @@ impl SpeechDetector for SileroVad {
     }
 }
 
-/// Pick the allowed language with the highest detection probability.
-fn best_allowed_lang(probs: &[f32], allowed_ids: &[i32]) -> Option<i32> {
+/// Pick the allowed language with the highest detection probability,
+/// with that probability so callers can gate pinning on confidence.
+fn best_allowed_lang(probs: &[f32], allowed_ids: &[i32]) -> Option<(i32, f32)> {
     allowed_ids
         .iter()
         .filter_map(|&id| probs.get(id as usize).map(|p| (id, *p)))
         .max_by(|a, b| a.1.total_cmp(&b.1))
-        .map(|(id, _)| id)
 }
 
 impl WhisperEngine {
@@ -121,7 +121,7 @@ impl AsrEngine for WhisperEngine {
                 state.pcm_to_mel(samples, 4)?;
                 let (_, probs) = state.lang_detect(0, 4)?;
                 best_allowed_lang(&probs, &self.allowed_lang_ids)
-                    .and_then(whisper_rs::get_lang_str)
+                    .and_then(|(id, _)| whisper_rs::get_lang_str(id))
                     .map(str::to_string)
             }
             None => None,
@@ -173,11 +173,19 @@ mod tests {
         probs[1] = 0.9; // highest overall, but not an allowed language
         probs[3] = 0.2;
         probs[7] = 0.5;
-        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some(7));
+        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some((7, 0.5)));
     }
 
     #[test]
     fn empty_allowed_set_returns_none() {
         assert_eq!(best_allowed_lang(&[0.1, 0.9], &[]), None);
+    }
+
+    #[test]
+    fn reports_probability_so_callers_can_gate_pinning() {
+        let mut probs = vec![0.0; 10];
+        probs[3] = 0.2;
+        probs[7] = 0.5;
+        assert_eq!(best_allowed_lang(&probs, &[3, 7]), Some((7, 0.5)));
     }
 }
