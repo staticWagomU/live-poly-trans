@@ -34,7 +34,9 @@ pub trait AsrEngine: Send {
 }
 
 /// Voice activity detection over one window of 16 kHz mono audio.
-pub trait SpeechDetector {
+///
+/// Like [`AsrEngine`], implementations run on the decode thread.
+pub trait SpeechDetector: Send {
     /// Speech regions as (start, end) sample offsets within `samples`,
     /// in ascending order.
     fn speech_segments(&mut self, samples: &[f32]) -> anyhow::Result<Vec<(usize, usize)>>;
