@@ -14,7 +14,10 @@ use lpt_core::{AsrEngine, Hypothesis, SpeechDetector};
 const NO_SPEECH_THRESHOLD: f32 = 0.6;
 
 pub struct WhisperEngine {
-    ctx: whisper_rs::WhisperContext,
+    /// Decode state, created once and reused: whisper_init_state allocates
+    /// KV caches and buffers, which is wasteful per window. The state keeps
+    /// the model context alive via an internal Arc.
+    state: whisper_rs::WhisperState,
     /// When non-empty, auto-detection picks only among these languages
     /// (e.g. the app's Main/Sub pair) instead of whisper's full set.
     allowed_lang_ids: Vec<i32>,
@@ -28,19 +31,17 @@ pub struct WhisperEngine {
 /// LPT_VAD_MIN_SILENCE_MS, LPT_VAD_PAD_MS.
 pub struct SileroVad {
     ctx: whisper_rs::WhisperVadContext,
+    /// Tuning resolved from the environment once at load time.
+    params: whisper_rs::WhisperVadParams,
 }
 
 impl SileroVad {
     pub fn load(model_path: &str) -> Result<Self> {
-        let mut params = whisper_rs::WhisperVadContextParams::new();
-        params.set_n_threads(2);
-        params.set_use_gpu(false);
-        let ctx = whisper_rs::WhisperVadContext::new(model_path, params)
+        let mut ctx_params = whisper_rs::WhisperVadContextParams::new();
+        ctx_params.set_n_threads(2);
+        ctx_params.set_use_gpu(false);
+        let ctx = whisper_rs::WhisperVadContext::new(model_path, ctx_params)
             .with_context(|| format!("load VAD model {model_path}"))?;
-        Ok(Self { ctx })
-    }
-
-    fn params() -> whisper_rs::WhisperVadParams {
         let mut params = whisper_rs::WhisperVadParams::new();
         if let Some(v) = env_parse::<f32>("LPT_VAD_THRESHOLD") {
             params.set_threshold(v);
@@ -54,7 +55,7 @@ impl SileroVad {
         if let Some(v) = env_parse::<i32>("LPT_VAD_PAD_MS") {
             params.set_speech_pad(v);
         }
-        params
+        Ok(Self { ctx, params })
     }
 }
 
@@ -64,7 +65,7 @@ fn env_parse<T: std::str::FromStr>(name: &str) -> Option<T> {
 
 impl SpeechDetector for SileroVad {
     fn speech_segments(&mut self, samples: &[f32]) -> Result<Vec<(usize, usize)>> {
-        let segments = self.ctx.segments_from_samples(Self::params(), samples)?;
+        let segments = self.ctx.segments_from_samples(self.params, samples)?;
         // timestamps are centiseconds → x160 samples at 16 kHz
         Ok(segments
             .map(|seg| {
@@ -92,6 +93,7 @@ impl WhisperEngine {
         params.use_gpu(true);
         let ctx = whisper_rs::WhisperContext::new_with_params(model_path, params)
             .with_context(|| format!("load whisper model {model_path}"))?;
+        let state = ctx.create_state().context("create whisper state")?;
         let allowed_lang_ids = allowed_langs
             .iter()
             .map(|l| {
@@ -99,7 +101,7 @@ impl WhisperEngine {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(Self {
-            ctx,
+            state,
             allowed_lang_ids,
         })
     }
@@ -107,7 +109,7 @@ impl WhisperEngine {
 
 impl AsrEngine for WhisperEngine {
     fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> Result<Hypothesis> {
-        let mut state = self.ctx.create_state()?;
+        let state = &mut self.state;
 
         // Restricted detection: pick the most probable of the allowed
         // languages, so e.g. a ja/en meeting can never drift into zh/ko.
