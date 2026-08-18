@@ -20,6 +20,10 @@ const TRAILING_NON_SPEECH_SAMPLES: usize = TARGET_RATE as usize;
 pub struct StepOutput {
     pub committed_delta: String,
     pub volatile: String,
+    /// Full text of the utterance that just ended; present only on the step
+    /// that crossed an utterance boundary (trailing silence or max window).
+    /// This is the unit the translation lane consumes.
+    pub utterance_final: Option<String>,
 }
 
 #[derive(Debug, Default)]
@@ -31,6 +35,9 @@ pub struct StreamScheduler {
     /// keeps hypotheses stable within a window while letting each new window
     /// (usually a new speaker turn) re-detect.
     window_lang: Option<String>,
+    /// Text committed so far for the utterance in the current window; emitted
+    /// whole as `utterance_final` when the utterance ends.
+    utterance_acc: String,
 }
 
 impl StreamScheduler {
@@ -47,6 +54,7 @@ impl StreamScheduler {
         self.buffer.clear();
         self.agreement.reset();
         self.window_lang = None;
+        self.utterance_acc.clear();
     }
 
     pub fn step(
@@ -76,17 +84,27 @@ impl StreamScheduler {
         let agreement = self.agreement.feed(&hypothesis.text);
         let mut committed_delta = agreement.committed_delta;
         let mut volatile = agreement.volatile;
+        self.utterance_acc.push_str(&committed_delta);
 
         let at_utterance_boundary =
             window_len.saturating_sub(last_speech_end) >= TRAILING_NON_SPEECH_SAMPLES;
+        let mut utterance_final = None;
         if at_utterance_boundary || window_len >= MAX_WINDOW_SAMPLES {
-            committed_delta.push_str(&volatile);
+            // The hypothesis is as stable as it will get: commit its tail
+            // and hand the whole utterance downstream.
+            let tail = self.agreement.flush();
+            committed_delta.push_str(&tail);
+            self.utterance_acc.push_str(&tail);
             volatile.clear();
+            let full = std::mem::take(&mut self.utterance_acc);
+            let full = full.trim();
+            utterance_final = (!full.is_empty()).then(|| full.to_string());
             self.slide();
         }
         Ok(Some(StepOutput {
             committed_delta,
             volatile,
+            utterance_final,
         }))
     }
 }
@@ -214,6 +232,26 @@ mod tests {
         sched.push_audio(&vec![0.0; TARGET_RATE as usize]);
         assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
         assert_eq!(engine.received_samples.len(), 1);
+    }
+
+    #[test]
+    fn utterance_boundary_reports_the_full_utterance_for_translation() {
+        let mut engine =
+            FakeEngine::scripted(&["こんにちは、せ", "こんにちは、世界", "こんにちは、世界"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        let first = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(first.utterance_final, None);
+        sched.push_audio(&seconds(1));
+        let second = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(second.utterance_final, None);
+        sched.push_audio(&vec![0.0; TARGET_RATE as usize]); // 1s pause → boundary
+        let third = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(third.committed_delta, "世界");
+        assert_eq!(third.volatile, "");
+        // the whole utterance, in one piece: the translation lane's input
+        assert_eq!(third.utterance_final.as_deref(), Some("こんにちは、世界"));
     }
 
     #[test]
