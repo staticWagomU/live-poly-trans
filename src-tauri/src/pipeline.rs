@@ -21,6 +21,9 @@ const STEP_INTERVAL: Duration = Duration::from_millis(1000);
 /// How often the worker drains the ring buffer and checks for commands;
 /// also the worst-case extra latency for Stop.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
+/// How long an overrun notice stays up after the last drop; long enough to
+/// read, gone once the trouble has passed.
+const OVERRUN_NOTICE: Duration = Duration::from_secs(5);
 
 pub enum Cmd {
     Start,
@@ -186,6 +189,8 @@ struct LaneRuntime {
     /// Downmix scratch buffer, reused across polls.
     mono: Vec<f32>,
     reported_drops: usize,
+    /// While set, an overrun notice is on screen; cleared when it expires.
+    overrun_until: Option<Instant>,
 }
 
 impl LaneRuntime {
@@ -198,6 +203,7 @@ impl LaneRuntime {
             scheduler: lpt_core::scheduler::StreamScheduler::new(),
             mono: Vec::new(),
             reported_drops: 0,
+            overrun_until: None,
         })
     }
 
@@ -216,12 +222,20 @@ impl LaneRuntime {
         }
         let drops = self.session.dropped.load(Ordering::Relaxed);
         if drops > self.reported_drops {
+            // interleaved sample count → wall-clock duration of lost audio
+            let ms =
+                drops as u64 * 1000 / (self.session.channels as u64 * self.session.src_rate as u64);
             emit_status(
                 ui,
                 "listening",
-                Some(format!("audio overrun: {drops} samples dropped")),
+                Some(format!("audio overrun: ~{ms}ms dropped so far")),
             );
             self.reported_drops = drops;
+            self.overrun_until = Some(Instant::now() + OVERRUN_NOTICE);
+        } else if self.overrun_until.is_some_and(|until| Instant::now() >= until) {
+            // The overrun stopped a while ago; take the notice down.
+            emit_status(ui, "listening", None);
+            self.overrun_until = None;
         }
         Ok(())
     }
