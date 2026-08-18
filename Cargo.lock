@@ -2068,6 +2068,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "lpt-translate-ggml"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "llama-cpp-2",
+]
+
+[[package]]
 name = "lpt-whisper"
 version = "0.1.0"
 dependencies = [
@@ -3396,6 +3404,7 @@ dependencies = [
  "cpal",
  "hound",
  "libc",
+ "libloading 0.8.9",
  "llama-cpp-2",
  "lpt-core",
  "lpt-whisper",

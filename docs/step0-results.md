@@ -22,6 +22,22 @@ whisper.cppの処理がllama.cpp側のggml（バージョン不一致）を呼�
 
 → Step 2（翻訳レーン実装）の着手時にcdylib方式を検証し、ADRとして確定する。
 
+### 追記（2026-08-18）: cdylib分離の検証 — 成功
+
+`crates/lpt-translate-ggml`（llama-cpp-2をC ABIのcdylibに隔離）を
+whisper-rs静的リンク済みバイナリから`libloading`でロードし、
+ウィンドウ再デコード（負荷あり）と文翻訳を**同一プロセスで同時実行**して確認:
+
+- SIGABRTなし。ASR・翻訳とも正しい出力（両方Metal有効）
+- 翻訳 0.9〜2.1s/文、ASR最悪ウィンドウデコード 868ms（同時負荷下）
+- ピークRSS 3791MB（単一プロセス。2プロセス近似の3.9GBと同等）
+
+再現: `cargo build --release -p lpt-translate-ggml` →
+`cargo run --release -p spike --bin cdylib-check --no-default-features --features asr`
+
+→ **cdylib方式で確定してよい**。Step 2着手時にADR化し、`Translator` trait実装を
+このC ABI上に載せる（traitが同期的なのはABI境界と相性が良いことも確認済み）。
+
 ## A/B比較: ggml vs MLX
 
 同一音声・同一文・同一重み級（whisper large-v3-turbo / Qwen3-4B-Instruct-2507 4bit級）。

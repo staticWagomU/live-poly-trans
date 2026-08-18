@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["crates/lpt-core", "crates/lpt-whisper", "crates/spike", "src-tauri"]
+members = [
+    "crates/lpt-core",
+    "crates/lpt-translate-ggml",
+    "crates/lpt-whisper",
+    "crates/spike",
+    "src-tauri",
+]
 
 [workspace.package]
 edition = "2021"

@@ -72,6 +72,6 @@ TDD（Red-Green-Refactor）で進め、構造変更と振る舞い変更のコ�
 
 ## Phase 5: ggml cdylib分離スパイク（Step 2最大リスクの前倒し検証）
 
-- [ ] llama-cpp-2をC ABIのcdylibに隔離し、whisper-rsリンク済みバイナリからlibloadingでロード
-- [ ] whisperデコード＋翻訳の同時実行でSIGABRTが出ないことを確認
-- [ ] 結果をdocs/step0-results.mdに追記（ADR化はStep 2着手時）
+- [x] llama-cpp-2をC ABIのcdylibに隔離し、whisper-rsリンク済みバイナリからlibloadingでロード
+- [x] whisperデコード＋翻訳の同時実行でSIGABRTが出ないことを確認（Metal両有効、RSS 3791MB）
+- [x] 結果をdocs/step0-results.mdに追記（ADR化はStep 2着手時）
