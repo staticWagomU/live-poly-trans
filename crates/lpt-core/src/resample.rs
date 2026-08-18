@@ -21,14 +21,22 @@ pub const TARGET_RATE: u32 = 16_000;
 const CHUNK: usize = 1024;
 
 pub struct StreamResampler {
-    /// None: the source already runs at 16 kHz, pass through untouched.
+    /// None: the source already runs at the target rate, pass through
+    /// untouched.
     inner: Option<Async<f32>>,
     pending: Vec<f32>,
 }
 
 impl StreamResampler {
+    /// To Whisper's input rate.
     pub fn new(src_rate: u32) -> Result<Self> {
-        let inner = if src_rate == TARGET_RATE {
+        Self::to(src_rate, TARGET_RATE)
+    }
+
+    /// To an arbitrary rate — the recorder keeps its files at a fixed rate of
+    /// its own so the lanes and their mix share one format.
+    pub fn to(src_rate: u32, dst_rate: u32) -> Result<Self> {
+        let inner = if src_rate == dst_rate {
             None
         } else {
             let params = SincInterpolationParameters {
@@ -40,14 +48,14 @@ impl StreamResampler {
             };
             Some(
                 Async::new_sinc(
-                    TARGET_RATE as f64 / src_rate as f64,
+                    dst_rate as f64 / src_rate as f64,
                     1.0,
                     &params,
                     CHUNK,
                     1,
                     FixedAsync::Input,
                 )
-                .with_context(|| format!("resampler for {src_rate} Hz"))?,
+                .with_context(|| format!("resampler for {src_rate} Hz → {dst_rate} Hz"))?,
             )
         };
         Ok(Self {
@@ -161,6 +169,21 @@ mod tests {
         // 144000 in → 140 full chunks consumed → ~47787 out
         let consumed = (input.len() / CHUNK) * CHUNK;
         let expected = consumed / 3;
+        assert!(
+            (out.len() as i64 - expected as i64).abs() < 200,
+            "got {} expected ≈{expected}",
+            out.len()
+        );
+    }
+
+    #[test]
+    fn upsamples_to_an_arbitrary_target_rate() {
+        // The recorder pulls 44.1 kHz devices up to its own 48 kHz files.
+        let input = sine(440.0, 44_100, 1.0);
+        let mut rs = StreamResampler::to(44_100, 48_000).unwrap();
+        let out = rs.process(&input).unwrap();
+        let consumed = (input.len() / CHUNK) * CHUNK;
+        let expected = consumed * 48_000 / 44_100;
         assert!(
             (out.len() as i64 - expected as i64).abs() < 200,
             "got {} expected ≈{expected}",
