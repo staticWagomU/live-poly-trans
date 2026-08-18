@@ -46,6 +46,10 @@
 ### Confirmation
 
 * Spike: RustからProcess Tapでシステム音声のPCMが取得できること（v2最初の技術検証項目）
+  — **2026-08-19 検証済み・成功**。`objc2-core-audio`で48kHz/2ch/f32を取得でき、
+  Swift薄ヘルパーへのフォールバックは不要になった。ただし署名済み.appバンドルを
+  `open`で起動しないとTCCが無言でゼロ埋めバッファを返す（配布形態への制約）。
+  詳細は[docs/step0-tap-results.md](../step0-tap-results.md)
 * マイク／スピーカー各レーンの録音ファイルの時刻が文字起こしのタイムスタンプと一致すること
 
 ## Pros and Cons of the Options

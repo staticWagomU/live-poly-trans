@@ -31,7 +31,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 実測結果の詳細は [docs/step0-results.md](docs/step0-results.md)（2026-08-10, M4 Pro）。
 
-- [ ] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認（最大の未知数。不可ならSwift薄ヘルパーへフォールバックし、ADR-153803を更新）※Step 3までに実施
+- [x] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認 — **成功**（objc2-core-audioで48kHz/2ch/f32を取得、Swiftヘルパー不要）。再現: `scripts/tap-check.sh`。ただし署名済み.appを`open`で起動しないとTCCが無音を返す（[docs/step0-tap-results.md](docs/step0-tap-results.md)）
 - [x] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測 — 全予算クリア（最初の部分結果≈1.7s、RSS 1.1GB）。q5_0はq8_0より遅いためq8_0を既定候補に
 - [x] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）— 文あたり0.3〜0.9s、同時稼働時でも最悪4s/文で要件内
 - [x] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証 — **失敗を確認**: ggmlシンボル衝突により実行時SIGABRT。cdylib分離（推奨）/テキストサイドカー/バージョンピン留めの選択肢をStep 2で決定しADR化する

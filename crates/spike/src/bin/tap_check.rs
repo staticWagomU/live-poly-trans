@@ -5,18 +5,23 @@
 //! Success criteria: tap + aggregate device created, the IOProc fires, and
 //! the captured PCM is non-silent while audio is playing.
 //!
-//! Usage — audio MUST already be playing, otherwise the output device sits
-//! idle, its IO never starts, and the IOProc looks broken when it is not:
-//!   afplay assets/test-ja.wav &
-//!   cargo run -p spike --bin tap-check --no-default-features -- [seconds]
+//! RESULT (macOS 26.5, M4 Pro): PASS — 48kHz stereo system audio captured
+//! from Rust, no Swift helper needed. Two conditions are non-negotiable and
+//! both fail *silently* when unmet, which is why `scripts/tap-check.sh`
+//! exists rather than a plain `cargo run`:
+//!
+//! 1. Run from a signed .app bundle launched with `open`. A bare CLI binary
+//!    makes the terminal the TCC "responsible process", and the System Audio
+//!    Recording permission is then withheld as zero-filled buffers — every
+//!    call still returns noErr and the IOProc still fires at full cadence.
+//!    An identical Swift implementation behaved the same, ruling out FFI.
+//! 2. Something must be playing. An idle output device runs no IO cycle, so
+//!    the tap gets no callbacks at all and looks broken when it is not.
+//!
+//! Usage:
+//!   scripts/tap-check.sh [seconds]    # bundles, signs, plays audio, runs
 //! `tap-check out` bisects: same IO path on the plain output device, no tap.
 //! Writes /tmp/lpt-tap-check.wav for listening back.
-//!
-//! Findings so far (macOS 26.5, M4 Pro): every call succeeds, the IOProc
-//! fires at the expected cadence with correctly shaped buffers, and every
-//! sample is zero. An identical Swift implementation behaves the same, so
-//! this is not an FFI problem — it is the "System Audio Recording" TCC
-//! permission being withheld (silently, as zero-filled buffers).
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -47,6 +52,9 @@ use objc2_core_foundation::CFDictionary;
 use objc2_foundation::{NSArray, NSMutableDictionary, NSNumber, NSString};
 
 const WAV_PATH: &str = "/tmp/lpt-tap-check.wav";
+/// `open`-launched bundles have no terminal to print to, so the verdict is
+/// also written here for the runner script to show.
+const REPORT_PATH: &str = "/tmp/lpt-tap-check.txt";
 
 /// Shared with the IO block. A Mutex in an audio callback is fine for a
 /// spike; the production lane will reuse the rtrb ring from capture.rs.
@@ -258,10 +266,11 @@ fn capture(agg_id: AudioObjectID, asbd: &AudioStreamBasicDescription, secs: u64)
     let rms = (samples.iter().map(|s| (*s as f64).powi(2)).sum::<f64>()
         / samples.len().max(1) as f64)
         .sqrt();
-    println!(
+    let stats = format!(
         "callbacks: {callbacks}, samples: {}, peak: {peak:.4}, rms: {rms:.5}",
         samples.len()
     );
+    println!("{stats}");
 
     let channels = asbd.mChannelsPerFrame.max(1) as u16;
     let spec = hound::WavSpec {
@@ -277,19 +286,23 @@ fn capture(agg_id: AudioObjectID, asbd: &AudioStreamBasicDescription, secs: u64)
     writer.finalize()?;
     println!("wrote {WAV_PATH}");
 
-    if callbacks == 0 {
-        anyhow::bail!("FAIL: IOProc never fired");
-    }
-    if peak < 0.001 {
-        println!(
-            "WARN: the IOProc ran but every sample was zero. Either nothing \
-             was playing, or macOS is withholding the System Audio Recording \
-             permission (System Settings > Privacy & Security > Screen & \
-             System Audio Recording — add the terminal app, then restart it)."
-        );
+    let verdict = if callbacks == 0 {
+        "FAIL: the IOProc never fired — was anything playing? An idle output \
+         device runs no IO cycle for the tap to ride on."
+            .to_string()
+    } else if peak < 0.001 {
+        "FAIL: the IOProc ran but every sample was zero — macOS is withholding \
+         the System Audio Recording permission. Launch from a signed .app \
+         bundle via `open` so the app itself is the responsible process."
+            .to_string()
     } else {
-        println!("PASS: captured non-silent system audio from Rust");
-    }
+        format!("PASS: captured non-silent system audio from Rust (peak {peak:.4})")
+    };
+    println!("{verdict}");
+    // `open`-launched runs have nowhere to print, so leave the verdict on disk.
+    std::fs::write(REPORT_PATH, format!("{stats}\nwrote {WAV_PATH}\n{verdict}\n"))
+        .context("write report")?;
+    anyhow::ensure!(!verdict.starts_with("FAIL"), "{verdict}");
     Ok(())
 }
 
