@@ -19,6 +19,10 @@ const TRAILING_NON_SPEECH_SAMPLES: usize = TARGET_RATE as usize;
 /// claiming otherwise has garbage timestamps, and carrying it all would
 /// keep the window pinned at max size forever.
 const MAX_CARRY_SAMPLES: usize = 5 * TARGET_RATE as usize;
+/// Tail kept whenever non-speech audio is discarded. A VAD with a minimum
+/// speech duration (Silero: 250ms by default) cannot see an utterance that
+/// only just began, so dropping the whole window would clip its onset.
+const ONSET_GUARD_SAMPLES: usize = 3 * TARGET_RATE as usize / 10;
 
 /// One decode step's outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,13 +58,8 @@ impl StreamScheduler {
         self.buffer.extend_from_slice(samples);
     }
 
-    /// Advance past all buffered audio and start a fresh agreement context.
-    fn slide(&mut self) {
-        let all = self.buffer.len();
-        self.slide_keeping(all);
-    }
-
-    /// Slide, but keep `buffer[from..]` as the start of the next window.
+    /// Slide the window: discard `buffer[..from]`, keep the rest, and start
+    /// a fresh agreement context.
     fn slide_keeping(&mut self, from: usize) {
         self.buffer.drain(..from);
         self.agreement.reset();
@@ -78,14 +77,15 @@ impl StreamScheduler {
             return Ok(None);
         }
         let window = self.buffer.as_slice();
+        let window_len = window.len();
         let speech = vad.speech_segments(window)?;
         let Some(&(_, last_speech_end)) = speech.last() else {
             // No speech at all: drop the audio so silence and non-speech
-            // noise never accumulate (or reach whisper).
-            self.slide();
+            // noise never accumulate (or reach whisper). The onset-guard
+            // tail survives in case an utterance just began there.
+            self.slide_keeping(window_len.saturating_sub(ONSET_GUARD_SAMPLES));
             return Ok(None);
         };
-        let window_len = window.len();
 
         let effective_lang = lang.or(self.window_lang.as_deref());
         let hypothesis = engine.transcribe(window, effective_lang)?;
@@ -111,8 +111,10 @@ impl StreamScheduler {
             let full = full.trim();
             utterance_final = (!full.is_empty()).then(|| full.to_string());
             if at_utterance_boundary {
-                // Everything after the last speech is silence; drop it all.
-                self.slide();
+                // Everything after the last speech is silence — drop it,
+                // except the onset guard (the VAD is blind to an utterance
+                // that began in the window's final instants).
+                self.slide_keeping(window_len.saturating_sub(ONSET_GUARD_SAMPLES));
             } else {
                 // Forced slide mid-speech: the decode may not have reached
                 // the window end, and audio past `end_ms` has no text yet.
@@ -213,16 +215,52 @@ mod tests {
     }
 
     #[test]
-    fn no_speech_window_is_dropped_entirely() {
+    fn no_speech_window_is_dropped_except_the_onset_guard_tail() {
         let mut engine = FakeEngine::scripted(&["次"]);
         let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&vec![0.0005; 5 * TARGET_RATE as usize]); // noise only
         assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
-        // the noise was dropped: the next decode sees only the new speech
+        // the noise was dropped (bar the onset-guard tail): it never
+        // accumulates and the next decode is mostly the new speech
         sched.push_audio(&seconds(2));
         sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
-        assert_eq!(engine.received_samples, vec![2 * 16_000]);
+        assert_eq!(
+            engine.received_samples,
+            vec![ONSET_GUARD_SAMPLES + 2 * 16_000]
+        );
+    }
+
+    /// Amplitude VAD that, like Silero, cannot see speech shorter than a
+    /// minimum duration (here 0.5s).
+    struct MinDurationVad;
+
+    impl crate::SpeechDetector for MinDurationVad {
+        fn speech_segments(&mut self, samples: &[f32]) -> anyhow::Result<Vec<(usize, usize)>> {
+            let mut all = AmplitudeVad.speech_segments(samples)?;
+            all.retain(|(s, e)| e - s >= TARGET_RATE as usize / 2);
+            Ok(all)
+        }
+    }
+
+    #[test]
+    fn dropping_a_no_speech_window_keeps_a_just_started_utterance() {
+        let mut engine = FakeEngine::scripted(&["もし"]);
+        let mut vad = MinDurationVad;
+        let mut sched = StreamScheduler::new();
+        // 2s of near-silence, then an utterance begins in the last 200ms —
+        // still below the VAD's minimum, so the window reads as "no speech".
+        let mut audio = vec![0.0005; 2 * TARGET_RATE as usize];
+        audio.extend(vec![0.1; TARGET_RATE as usize / 5]);
+        sched.push_audio(&audio);
+        assert_eq!(sched.step(&mut engine, &mut vad, None).unwrap(), None);
+        // once the utterance continues, its first samples are still there
+        sched.push_audio(&seconds(1));
+        sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(
+            engine.received_samples,
+            vec![ONSET_GUARD_SAMPLES + 16_000]
+        );
     }
 
     #[test]
