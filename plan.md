@@ -53,7 +53,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] 無音ゲート（-50dBFS未満はデコードスキップ。無音時のWhisper幻覚対策、Step 0で実測確認）→ その後Silero VADに置換
 - [x] 2026-08-18 レビュー指摘の全面対応（plans/review-fixes.md）: 常駐パイプラインワーカー化（レース・再ロード解消）、`utterance_final`イベント（Step 2翻訳レーンの入力単位）、スライド時の音声持ち越し＋発話頭ガード、rubatoリサンプラ、RT安全なキャプチャ、UIのstatus同期・自動スクロール
 - [x] 2026-08-18 2回目レビュー対応（plans/review-fixes-2.md）: EmitGate（volatile取り消しイベントの配送）、Stop時の未デコード音声救済（ring/resampler/schedulerの畳み込み）、`get_status`同期＋楽観更新、キャプチャエラーのセッション伝播、レーン配管（`lane`フィールド・LaneRuntime）、空仮説の言語ピン抑止、翻訳cdylib強化（catch_unwind・context再利用・chat template・切り詰めの可視化）、追尾スクロールの一時停止、overrun表示のms化
-- [ ] 実発話での動作確認（Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
+- [x] 実発話での動作確認（Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
 
 ### Step 2: 確定文の翻訳レーン
 
@@ -68,7 +68,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] CoreAudio Process Tap実装（Step 0の検証結果に基づく）— `capture/speaker.rs`
 - [x] マイク／スピーカー2レーンの同時稼働と表示分離 — UIはレーン別2カラム
 - [x] 権限が「無音」として現れる問題の検知（`SilenceWatch`）と`NSAudioCaptureUsageDescription`
-- [ ] 実発話での2レーン動作確認（`.app`として起動しないとスピーカーは無音。`bun run tauri build` → `open`）
+- [x] 実発話での2レーン動作確認（`.app`として起動しないとスピーカーは無音。`bun run tauri build` → `open`）
 - [ ] デフォルト出力デバイス切り替え（ヘッドホン抜き差し等）への追従
 
 ### Step 4: 録音
