@@ -54,10 +54,6 @@ struct LaneWriter {
     writer: Wav,
     /// Only resamples when the device disagrees with [`RECORD_RATE`].
     resampler: StreamResampler,
-    /// Silence written into this lane's file that its device never delivered:
-    /// its late start plus every dropout since. This is exactly how far the
-    /// lane's own clock trails the recording's.
-    padding: usize,
     /// Samples in this lane's file, silence included.
     written: usize,
 }
@@ -144,7 +140,6 @@ impl SessionRecorder {
             lanes.push(LaneWriter {
                 writer: create_wav(&dir, spec.name)?,
                 resampler: StreamResampler::to(spec.src_rate, RECORD_RATE)?,
-                padding: 0,
                 written: 0,
             });
         }
@@ -191,7 +186,6 @@ impl SessionRecorder {
         // written out. The lane's own file follows that decision, silence and
         // all, so the files stay in step with each other.
         let skipped = self.mixer.push_at(lane, &resampled, start);
-        lane_writer.padding += skipped;
         lane_writer.written += skipped + resampled.len();
         write_silence(&mut lane_writer.writer, skipped)?;
         write_samples(&mut lane_writer.writer, &resampled)
@@ -256,13 +250,15 @@ impl SessionRecorder {
     }
 
     fn flush_tails(&mut self) -> Result<()> {
-        if let Some(msg) = &self.failure {
-            anyhow::bail!("{msg}");
+        if self.failure.is_some() {
+            // Already failed — and reported — mid-session: nothing more may
+            // be written, but the files still get their headers closed.
+            // Bailing here would resurrect an old failure as a session error.
+            return Ok(());
         }
         for (index, lane) in self.lanes.iter_mut().enumerate() {
             let tail = lane.resampler.flush()?;
             let skipped = self.mixer.push_at(index, &tail, lane.written);
-            lane.padding += skipped;
             lane.written += skipped + tail.len();
             write_silence(&mut lane.writer, skipped)?;
             write_samples(&mut lane.writer, &tail)?;
@@ -275,7 +271,6 @@ impl SessionRecorder {
         let total = self.mixer.position();
         for lane in self.lanes.iter_mut() {
             let owed = total.saturating_sub(lane.written);
-            lane.padding += owed;
             lane.written += owed;
             write_silence(&mut lane.writer, owed)?;
         }
@@ -466,6 +461,24 @@ mod tests {
         assert_eq!(lines[0]["endMs"], 3_400);
         assert_eq!(lines[0]["text"], "こんにちは");
         assert_eq!(lines[1]["lane"], "speaker");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn finish_after_a_reported_failure_closes_the_files_quietly() {
+        // The failure already stopped the recording and was reported once;
+        // Stop must not resurrect it as a session error — the transcript
+        // that kept running was fine, and the files written so far deserve
+        // readable headers.
+        let base = scratch("failed");
+        let mut rec = SessionRecorder::open(&base, "s", &[spec("mic", RECORD_RATE)]).unwrap();
+        rec.write_at(0, &[0.5; 4], 0);
+        rec.fail(anyhow::anyhow!("disk full"));
+        assert_eq!(rec.take_failure().as_deref(), Some("disk full"));
+        let dir = rec.dir().to_path_buf();
+        rec.finish().unwrap();
+        let (_, mic) = read(&dir.join("mic.wav"));
+        assert_eq!(mic.len(), 4);
         std::fs::remove_dir_all(&base).unwrap();
     }
 

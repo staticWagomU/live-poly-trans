@@ -212,8 +212,13 @@ fn run_session(
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
         let mut notices = Vec::new();
-        match start_speaker(&stop_capture) {
-            Ok(Some(speaker)) => lanes.push(LaneRuntime::new(Lane::Speaker, speaker)?),
+        let speaker = start_speaker(&stop_capture).and_then(|session| {
+            session
+                .map(|s| LaneRuntime::new(Lane::Speaker, s))
+                .transpose()
+        });
+        match speaker {
+            Ok(Some(lane)) => lanes.push(lane),
             Ok(None) => {}
             Err(e) => notices.push(format!("speaker lane unavailable: {e:#}")),
         }
@@ -792,6 +797,9 @@ fn run_capture_loop(
             report_recording_failure(ui, rec);
         }
     }
+    // Every lane gets to flush its tail even when another failed: the
+    // speaker's last utterance must not vanish because the mic died at Stop.
+    let mut result = Ok(());
     for (index, lane) in lanes.iter_mut().enumerate() {
         let mut poll = Poll {
             ui,
@@ -799,9 +807,15 @@ fn run_capture_loop(
             rec: recorder.as_deref_mut(),
             index,
         };
-        lane.finish(&mut poll, engines, lang.as_deref())?;
+        let finished = lane.finish(&mut poll, engines, lang.as_deref());
+        result = result.and(finished);
     }
-    Ok(())
+    // The finish writes above can be the ones that fail; a failure here has
+    // no later poll to report it.
+    if let Some(rec) = recorder {
+        report_recording_failure(ui, rec);
+    }
+    result
 }
 
 /// A write failure stops the recording but not the session, so the UI has to

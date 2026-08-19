@@ -25,17 +25,20 @@ use objc2_core_audio::{
     kAudioAggregateDeviceIsPrivateKey, kAudioAggregateDeviceIsStackedKey,
     kAudioAggregateDeviceMainSubDeviceKey, kAudioAggregateDeviceNameKey,
     kAudioAggregateDeviceSubDeviceListKey, kAudioAggregateDeviceTapAutoStartKey,
-    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey,
-    kAudioDevicePropertyDeviceUID, kAudioHardwarePropertyDefaultOutputDevice,
-    kAudioObjectPropertyElementMain, kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject,
-    kAudioSubDeviceUIDKey, kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
-    kAudioTapPropertyFormat, AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID,
-    AudioDeviceIOProcID, AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
+    kAudioAggregateDeviceTapListKey, kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
+    kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
+    kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioSubDeviceUIDKey,
+    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
+    AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID, AudioDeviceIOProcID,
+    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
     AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
     AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
     AudioObjectPropertyAddress, CATapDescription,
 };
-use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
+use objc2_core_audio_types::{
+    kAudioFormatFlagIsFloat, kAudioFormatFlagIsNonInterleaved, kAudioFormatLinearPCM,
+    AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp,
+};
 use objc2_core_foundation::CFDictionary;
 use objc2_foundation::{NSArray, NSMutableDictionary, NSNumber, NSString};
 
@@ -150,6 +153,17 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
     let _tap = TapGuard(tap_id);
 
     let asbd = tap_format(tap_id)?;
+    // The IO block reads the buffers as interleaved f32 frames; any other
+    // format would come out as garbage rather than an error, so refuse it
+    // loudly here.
+    anyhow::ensure!(
+        asbd.mFormatID == kAudioFormatLinearPCM
+            && asbd.mFormatFlags & kAudioFormatFlagIsFloat != 0
+            && asbd.mFormatFlags & kAudioFormatFlagIsNonInterleaved == 0,
+        "tap format is not interleaved f32 PCM (format {:#x}, flags {:#x})",
+        asbd.mFormatID,
+        asbd.mFormatFlags,
+    );
     let channels = (asbd.mChannelsPerFrame as usize).max(1);
     let src_rate = asbd.mSampleRate as u32;
     anyhow::ensure!(src_rate > 0, "tap reported a zero sample rate");
@@ -270,9 +284,21 @@ fn create_aggregate(desc: &CATapDescription) -> Result<AudioObjectID> {
             kAudioAggregateDeviceUIDKey,
             &NSString::from_str("dev.wagomu.live-poly-trans.speaker-lane"),
         );
-        set(&agg, kAudioAggregateDeviceIsPrivateKey, &NSNumber::new_bool(true));
-        set(&agg, kAudioAggregateDeviceIsStackedKey, &NSNumber::new_bool(false));
-        set(&agg, kAudioAggregateDeviceTapAutoStartKey, &NSNumber::new_bool(true));
+        set(
+            &agg,
+            kAudioAggregateDeviceIsPrivateKey,
+            &NSNumber::new_bool(true),
+        );
+        set(
+            &agg,
+            kAudioAggregateDeviceIsStackedKey,
+            &NSNumber::new_bool(false),
+        );
+        set(
+            &agg,
+            kAudioAggregateDeviceTapAutoStartKey,
+            &NSNumber::new_bool(true),
+        );
         set(&agg, kAudioAggregateDeviceMainSubDeviceKey, &out_uid);
         set(&agg, kAudioAggregateDeviceSubDeviceListKey, &sub_devs);
         set(&agg, kAudioAggregateDeviceTapListKey, &taps);
@@ -307,12 +333,7 @@ fn default_output_uid() -> Result<Retained<NSString>> {
     unsafe { Retained::from_raw(uid) }.context("default output device UID was null")
 }
 
-fn read_property<T>(
-    object: AudioObjectID,
-    selector: u32,
-    out: &mut T,
-    what: &str,
-) -> Result<()> {
+fn read_property<T>(object: AudioObjectID, selector: u32, out: &mut T, what: &str) -> Result<()> {
     let mut addr = AudioObjectPropertyAddress {
         mSelector: selector,
         mScope: kAudioObjectPropertyScopeGlobal,
