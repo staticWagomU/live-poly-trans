@@ -32,7 +32,7 @@
     min-height: 100vh;
     display: grid;
     place-items: center;
-    padding: 12px;
+    padding: 24px;
     color: var(--text);
     background: #1d2335;
     font-family: var(--font);
@@ -48,125 +48,17 @@
 
   .hidden { display: none !important; }
 
-  .stage {
-    position: relative;
-    width: min(1720px, calc(100vw - 24px));
-    height: min(980px, calc(100vh - 24px));
-    min-height: 760px;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.18);
-    border-radius: 18px;
-    background:
-      radial-gradient(760px 520px at 82% 16%, rgba(151, 204, 255, 0.34), transparent 64%),
-      radial-gradient(760px 600px at 10% 94%, rgba(248, 137, 113, 0.4), transparent 58%),
-      linear-gradient(150deg, #324d75 0%, #604b6e 48%, #222b50 100%);
-    box-shadow: 0 44px 120px rgba(0, 0, 0, 0.52);
-  }
-
-  .menubar {
-    position: absolute;
-    inset: 0 0 auto;
-    z-index: 60;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    gap: 18px;
-    padding: 0 14px;
-    color: rgba(255, 255, 255, 0.95);
-    background: rgba(18, 18, 24, 0.34);
-    backdrop-filter: blur(24px) saturate(170%);
-    font-size: 12px;
-    text-shadow: 0 1px 8px rgba(0, 0, 0, 0.36);
-  }
-  .menu-app { font-weight: 700; }
-  .menu-spacer { flex: 1; }
-
-  .call-window {
-    position: absolute;
-    inset: 70px 84px 90px;
-    z-index: 5;
-    overflow: hidden;
-    display: grid;
-    grid-template-rows: 34px 1fr 52px;
-    border: 1px solid rgba(255, 255, 255, 0.12);
-    border-radius: 14px;
-    background: #191a20;
-    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.42);
-  }
-  .call-top {
-    display: flex;
-    align-items: center;
-    gap: 9px;
-    padding: 0 12px;
-    color: #c7c7ce;
-    background: #25262d;
-    font-size: 11px;
-  }
   .traffic { display: flex; gap: 7px; flex: 0 0 auto; }
   .traffic i { width: 11px; height: 11px; border-radius: 50%; }
   .traffic i:nth-child(1) { background: #ff5f57; }
   .traffic i:nth-child(2) { background: #febc2e; }
   .traffic i:nth-child(3) { background: #28c840; }
-  .call-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 10px;
-    padding: 12px;
-  }
-  .video-tile {
-    position: relative;
-    display: grid;
-    place-items: center;
-    border-radius: 10px;
-    background: linear-gradient(145deg, #30343f, #191b22);
-  }
-  .video-tile.speaking { box-shadow: inset 0 0 0 2px #30d158; }
-  .avatar {
-    width: 84px;
-    height: 84px;
-    display: grid;
-    place-items: center;
-    border-radius: 50%;
-    color: #fff;
-    background: #536178;
-    font-size: 24px;
-    font-weight: 700;
-  }
-  .tile-name {
-    position: absolute;
-    left: 10px;
-    bottom: 9px;
-    padding: 4px 8px;
-    border-radius: 5px;
-    color: #fff;
-    background: rgba(0, 0, 0, 0.58);
-    font-size: 11px;
-  }
-  .call-controls {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 12px;
-    background: #24252b;
-  }
-  .call-pill {
-    padding: 7px 12px;
-    border-radius: 16px;
-    color: #dedee4;
-    background: #34353d;
-    font-size: 11px;
-  }
-  .call-pill.end { color: #fff; background: #bd2b31; }
 
   .app-window {
-    position: absolute;
-    left: 50%;
-    top: 84px;
-    z-index: 20;
-    width: min(1080px, calc(100% - 160px));
-    height: min(660px, calc(100% - 158px));
+    position: relative;
+    width: min(1080px, calc(100vw - 48px));
+    height: min(720px, calc(100vh - 48px));
     min-height: 560px;
-    transform: translateX(-50%);
     overflow: hidden;
     display: grid;
     grid-template-rows: 54px 1fr;
@@ -175,7 +67,6 @@
     background: var(--surface);
     box-shadow: var(--shadow-window), inset 0 0 0 0.5px rgba(255, 255, 255, 0.4);
   }
-  .app-window.is-hidden { display: none; }
 
   .window-toolbar {
     min-width: 0;
@@ -311,9 +202,9 @@
   }
   .recording-row {
     width: 100%;
-    min-height: 76px;
+    min-height: 62px;
     display: grid;
-    grid-template-columns: 44px minmax(170px, 0.72fr) minmax(220px, 1.2fr) 140px 16px;
+    grid-template-columns: 44px minmax(170px, 1fr) 140px 16px;
     align-items: center;
     gap: 14px;
     padding: 11px 16px;
@@ -352,16 +243,10 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  .row-meta, .row-snippet, .row-source {
+  .row-meta, .row-source {
     color: var(--muted);
     font-size: 12px;
     line-height: 1.45;
-  }
-  .row-snippet {
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-box-orient: vertical;
-    -webkit-line-clamp: 2;
   }
   .row-source { text-align: right; white-space: nowrap; }
   .row-chevron { color: var(--muted); font-size: 18px; }
@@ -385,14 +270,14 @@
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 320px;
+    grid-template-columns: minmax(0, 1fr);
   }
   .session-main {
     min-width: 0;
     min-height: 0;
     overflow: auto;
     display: grid;
-    grid-template-rows: auto auto 1fr;
+    grid-template-rows: auto auto 1fr auto;
   }
   .session-main.live-mode { grid-template-rows: auto 1fr auto; }
   .session-head {
@@ -459,12 +344,14 @@
   .level-meter i:nth-child(2) { height: 11px; animation-delay: 140ms; }
   .level-meter i:nth-child(3) { height: 8px; animation-delay: 260ms; }
   .session-actions { position: relative; margin-left: auto; display: flex; gap: 7px; }
-  .export-menu {
+  .actions-menu {
     position: absolute;
-    right: 37px;
+    right: 0;
     top: 36px;
     z-index: 35;
     width: 250px;
+    max-height: calc(100vh - 190px);
+    overflow: auto;
     display: none;
     padding: 6px;
     border: 1px solid var(--separator);
@@ -473,7 +360,7 @@
     box-shadow: var(--shadow-menu);
     backdrop-filter: blur(28px) saturate(180%);
   }
-  .export-menu.open { display: block; animation: appear 160ms ease-out; }
+  .actions-menu.open { display: block; animation: appear 160ms ease-out; }
   .menu-heading {
     padding: 6px 9px 4px;
     color: var(--muted);
@@ -494,6 +381,8 @@
   .menu-item:hover { color: #fff; background: var(--accent); }
   .menu-item .ext { margin-left: auto; color: var(--muted); font-size: 11px; }
   .menu-item:hover .ext { color: rgba(255, 255, 255, 0.82); }
+  .menu-item.destructive { color: var(--record); }
+  .menu-item.destructive:hover { color: #fff; background: var(--record); }
   .menu-separator { height: 1px; margin: 5px 7px; background: var(--separator); }
   .waveform {
     position: relative;
@@ -528,18 +417,66 @@
     overflow: auto;
     padding: 18px 24px 30px;
   }
-  .transcript-label {
+  .transcript-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     margin-bottom: 12px;
+  }
+  .transcript-label {
     color: var(--muted);
     font-size: 11px;
     font-weight: 650;
   }
+  .copy-all-button {
+    min-height: 26px;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 9px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .copy-all-button:hover { background: var(--accent-soft); }
+  .copy-all-button.copied {
+    color: var(--success);
+    border-color: rgba(22, 130, 59, 0.28);
+    background: rgba(22, 130, 59, 0.1);
+  }
   .transcript-line {
     display: grid;
-    grid-template-columns: 48px 74px minmax(0, 1fr);
+    grid-template-columns: 48px 74px minmax(0, 1fr) 26px;
     gap: 10px;
     align-items: baseline;
     padding: 7px 0;
+    border-radius: 6px;
+    transition: background 160ms ease-out;
+  }
+  .transcript-line:hover { background: rgba(120, 120, 128, 0.07); }
+  .transcript-line.source-highlight { background: var(--accent-soft); }
+  .line-delete {
+    width: 26px;
+    height: 26px;
+    align-self: center;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 15px;
+    line-height: 1;
+    opacity: 0;
+    transition: opacity 120ms ease-out;
+  }
+  .line-delete:hover { color: #fff; background: var(--record); }
+  .transcript-line:hover .line-delete,
+  .line-delete:focus-visible { opacity: 1; }
+  @media (hover: none) {
+    .line-delete { opacity: 1; }
   }
   .timestamp { color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
   .speaker {
@@ -553,11 +490,13 @@
     font-weight: 650;
   }
   .speaker::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
-  .speaker.me { color: var(--speaker-a); background: var(--accent-soft); }
-  .speaker.them { color: var(--speaker-b); background: rgba(154, 79, 0, 0.1); }
+  .speaker.me,
+  .speaker.mic { color: var(--speaker-a); background: var(--accent-soft); }
+  .speaker.them,
+  .speaker.system { color: var(--speaker-b); background: rgba(154, 79, 0, 0.1); }
   .utterance { font-size: 14px; line-height: 1.55; }
   .translation { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; }
-  .live-transcript .transcript-line { grid-template-columns: 74px minmax(0, 1fr); }
+  .live-transcript .transcript-line { grid-template-columns: 92px minmax(0, 1fr); }
   .live-transcript .utterance { font-size: 17px; font-weight: 600; line-height: 1.5; }
   .partial { color: var(--muted); }
   .partial::after {
@@ -571,43 +510,94 @@
     animation: blink 1s steps(1) infinite;
   }
 
-  .live-ask {
-    position: relative;
+  .session-ask {
+    min-height: 67px;
+    max-height: min(40vh, 360px);
+    display: grid;
+    grid-template-rows: auto minmax(0, auto) auto;
+    border-top: 1px solid var(--separator);
+    background: rgba(251, 251, 253, 0.94);
+  }
+  .ask-header {
+    min-height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 20px 0 24px;
+  }
+  .ask-title {
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 700;
+  }
+  .ask-conversation {
+    min-height: 0;
+    overflow: auto;
+    display: grid;
+    gap: 8px;
+    padding: 16px 24px 4px;
+    cursor: auto;
+    user-select: text;
+  }
+  .ask-message {
+    max-width: min(76%, 620px);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .ask-message.user {
+    justify-self: end;
+    color: #fff;
+    background: var(--accent);
+  }
+  .ask-message.assistant {
+    justify-self: start;
+    color: var(--secondary);
+    background: rgba(120, 120, 128, 0.11);
+  }
+  .ask-message.assistant::before {
+    content: "Ask";
+    display: block;
+    margin-bottom: 3px;
+    color: var(--accent);
+    font-size: 10px;
+    font-weight: 700;
+  }
+  .ask-message p { margin: 0; }
+  .ask-sources { display: flex; gap: 6px; margin-top: 8px; }
+  .ask-sources button {
+    min-height: 25px;
+    padding: 0 8px;
+    border: 1px solid rgba(0, 104, 216, 0.2);
+    border-radius: 6px;
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.7);
+    font-size: 11px;
+    cursor: pointer;
+    touch-action: auto;
+  }
+  .ask-composer {
     display: flex;
     align-items: center;
     gap: 8px;
     padding: 16px 24px 14px;
-    border-top: 1px solid var(--separator);
-    background: rgba(251, 251, 253, 0.94);
-    cursor: grab;
-    touch-action: none;
-    user-select: none;
-    transition: background 160ms ease-out, box-shadow 160ms ease-out, transform 160ms ease-out;
   }
-  .live-ask.is-pressing { background: rgba(242, 246, 252, 0.98); }
-  .live-ask.dragging {
-    position: absolute;
-    z-index: 48;
-    border: 1px solid rgba(0, 104, 216, 0.22);
-    border-radius: 12px;
-    background: rgba(251, 251, 253, 0.96);
-    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25);
-    cursor: grabbing;
-    transform: translate(-50%, -50%) scale(0.98);
-    transition: none;
+  .ask-composer .ask-toggle-button {
+    width: 28px;
+    height: 28px;
+    flex: 0 0 28px;
+    border-radius: 7px;
+    color: var(--muted);
+    background: transparent;
+    font-size: 16px;
+    cursor: pointer;
   }
-  .live-ask-grip {
-    position: absolute;
-    left: 50%;
-    top: 5px;
-    width: 30px;
-    height: 3px;
-    transform: translateX(-50%);
-    border-radius: 999px;
-    background: rgba(60, 60, 67, 0.28);
-    pointer-events: none;
+  .ask-toggle-button:hover {
+    color: var(--text);
+    background: rgba(120, 120, 128, 0.1);
   }
-  .live-ask input {
+  .session-ask input {
     min-width: 0;
     flex: 1;
     height: 36px;
@@ -620,7 +610,7 @@
     touch-action: auto;
     user-select: text;
   }
-  .live-ask button {
+  .ask-composer button {
     width: 36px;
     height: 36px;
     border-radius: 8px;
@@ -630,219 +620,10 @@
     cursor: pointer;
     touch-action: auto;
   }
-  .chat-edge-handle {
-    position: absolute;
-    top: 54%;
-    z-index: 46;
-    width: 28px;
-    height: 84px;
-    transform: translateY(-50%);
-    border: 1px solid var(--separator);
-    background: rgba(251, 251, 253, 0.94);
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-    backdrop-filter: blur(18px) saturate(160%);
-  }
-  .chat-edge-handle.edge-left {
-    left: 0;
-    border-left: 0;
-    border-radius: 0 10px 10px 0;
-  }
-  .chat-edge-handle.edge-right {
-    right: 0;
-    border-right: 0;
-    border-radius: 10px 0 0 10px;
-  }
-  .chat-edge-handle span {
-    display: block;
-    width: 3px;
-    height: 34px;
-    margin: auto;
-    border-radius: 999px;
-    background: rgba(60, 60, 67, 0.42);
-  }
-  .chat-edge-handle:hover span { background: var(--accent); }
-  .chat-drop-zone {
-    position: absolute;
-    top: 92px;
-    bottom: 24px;
-    z-index: 44;
-    width: 66px;
-    display: none;
-    place-items: center;
-    border: 1px solid rgba(0, 104, 216, 0.18);
-    background: rgba(0, 104, 216, 0.07);
-    pointer-events: none;
-  }
-  .chat-drop-zone::after {
-    content: "";
-    width: 4px;
-    height: 54px;
-    border-radius: 999px;
-    background: rgba(0, 104, 216, 0.45);
-  }
-  .chat-drop-zone.active {
-    border-color: rgba(0, 104, 216, 0.5);
-    background: rgba(0, 104, 216, 0.2);
-    box-shadow: inset 0 0 0 1px rgba(0, 104, 216, 0.12);
-  }
-  .chat-drop-zone.active::after {
-    width: 5px;
-    height: 64px;
-    background: var(--accent);
-    box-shadow: 0 0 0 5px rgba(0, 104, 216, 0.1);
-  }
-  .chat-drop-zone.left { left: 0; border-left: 0; border-radius: 0 12px 12px 0; }
-  .chat-drop-zone.right { right: 0; border-right: 0; border-radius: 12px 0 0 12px; }
-  .session-view.chat-dragging .chat-drop-zone { display: grid; }
-
-  .inspector {
-    min-width: 0;
-    min-height: 0;
-    overflow: hidden;
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-    border-left: 1px solid var(--separator);
-    background: var(--sidebar);
-  }
-  #readyInspector {
-    min-height: 0;
-    display: grid;
-    grid-template-rows: auto 1fr auto;
-  }
-  .inspector.is-hidden { display: none; }
-  .session-layout.inspector-hidden { grid-template-columns: minmax(0, 1fr); }
-  .inspector-header {
-    padding: 18px 16px 10px;
-    border-bottom: 1px solid var(--separator);
-  }
-  .inspector-title {
-    margin-bottom: 12px;
-    font-size: 13px;
-    font-weight: 650;
-  }
-  .inspector-tabs {
-    display: grid;
-    grid-template-columns: repeat(3, 1fr);
-    gap: 3px;
-    padding: 2px;
-    border-radius: 8px;
-    background: rgba(120, 120, 128, 0.14);
-  }
-  .inspector-tabs button {
-    min-height: 27px;
-    padding: 0 5px;
-    border-radius: 6px;
-    color: var(--secondary);
-    font-size: 12px;
-    font-weight: 600;
-  }
-  .inspector-tabs button[aria-selected="true"] {
-    color: var(--text);
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15);
-  }
-  .inspector-body { min-height: 0; overflow: auto; padding: 14px 16px; }
-  .inspector-panel { display: none; }
-  .inspector-panel.active { display: block; }
-  .panel-meta { margin-bottom: 8px; color: var(--muted); font-size: 11px; }
-  .summary-text { margin: 0; color: var(--secondary); font-size: 13px; line-height: 1.7; }
-  .action-list { display: grid; gap: 8px; }
-  .action-item {
-    display: grid;
-    grid-template-columns: auto 1fr;
-    gap: 9px;
-    align-items: start;
-    padding: 10px;
-    border: 1px solid var(--separator);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.76);
-    font-size: 12.5px;
-    line-height: 1.45;
-  }
-  .action-item input { margin: 2px 0 0; accent-color: var(--accent); }
-  .action-item.done span { color: var(--muted); text-decoration: line-through; }
-  .action-meta { display: block; margin-top: 3px; color: var(--muted); font-size: 11px; text-decoration: none !important; }
-  .ask-history {
-    padding: 10px;
-    border-radius: 8px;
-    color: var(--secondary);
-    background: rgba(255, 255, 255, 0.72);
-    font-size: 12.5px;
-    line-height: 1.55;
-  }
-  .ask-row {
-    display: flex;
-    gap: 7px;
-    padding: 10px 12px 12px;
-    border-top: 1px solid var(--separator);
-  }
-  .ask-row input {
-    min-width: 0;
-    flex: 1;
-    height: 32px;
-    padding: 0 10px;
-    border: 1px solid var(--separator);
-    border-radius: 8px;
-    background: #fff;
-    font-size: 12px;
-  }
-  .ask-row button {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    color: #fff;
-    background: var(--accent);
-    font-size: 16px;
-  }
-
-  .dock {
-    position: absolute;
-    left: 50%;
-    bottom: 17px;
-    z-index: 55;
-    height: 68px;
-    transform: translateX(-50%);
-    display: flex;
-    align-items: end;
-    gap: 10px;
-    padding: 8px 12px;
-    border: 1px solid rgba(255, 255, 255, 0.17);
-    border-radius: 20px;
-    background: rgba(255, 255, 255, 0.24);
-    backdrop-filter: blur(28px) saturate(180%);
-    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.28);
-  }
-  .dock button {
-    position: relative;
-    width: 50px;
-    height: 50px;
-    display: grid;
-    place-items: center;
-    border-radius: 12px;
-    color: #1c2534;
-    background: linear-gradient(145deg, #fdfdff, #bec7d5);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7), 0 8px 16px rgba(0, 0, 0, 0.23);
-    font-size: 11px;
-    font-weight: 750;
-  }
-  .dock .lpt { color: #fff; background: linear-gradient(145deg, #087cff, #4e70d6 60%, #ef5b76); }
-  .dock .zoom { color: #fff; background: linear-gradient(145deg, #54b7ff, #1d6eed); }
-  .dock button.active::after {
-    content: "";
-    position: absolute;
-    left: 50%;
-    bottom: -8px;
-    width: 4px;
-    height: 4px;
-    transform: translateX(-50%);
-    border-radius: 50%;
-    background: rgba(255, 255, 255, 0.86);
-  }
-
   .toast {
     position: absolute;
     right: 24px;
-    bottom: 104px;
+    bottom: 86px;
     z-index: 80;
     width: 280px;
     display: none;
@@ -856,7 +637,19 @@
     font-size: 12.5px;
     line-height: 1.5;
   }
-  .toast.show { display: block; animation: appear 160ms ease-out; }
+  .toast.show { display: flex; align-items: center; gap: 10px; animation: appear 160ms ease-out; }
+  .toast-message { min-width: 0; flex: 1; }
+  .toast-action {
+    flex: 0 0 auto;
+    min-height: 26px;
+    padding: 0 9px;
+    border: 1px solid rgba(255, 255, 255, 0.26);
+    border-radius: 7px;
+    color: #fff;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .toast-action:hover { background: rgba(255, 255, 255, 0.16); }
 
   @keyframes appear {
     from { opacity: 0; transform: translateY(6px); }
@@ -870,42 +663,35 @@
 
   @media (max-width: 980px) {
     body { padding: 0; }
-    .stage { width: 100vw; min-height: 100vh; border-radius: 0; }
-    .call-window { inset: 54px 18px 82px; }
     .app-window {
-      top: 62px;
-      width: calc(100% - 36px);
-      height: calc(100% - 142px);
-      min-height: 560px;
+      width: 100vw;
+      height: 100vh;
+      min-height: 100vh;
+      border: 0;
+      border-radius: 0;
+      box-shadow: none;
     }
-    .recording-row { grid-template-columns: 40px minmax(150px, 0.9fr) 1.2fr 16px; }
+    .recording-row { grid-template-columns: 40px minmax(150px, 1fr) 16px; }
     .row-source { display: none; }
     .session-layout { grid-template-columns: minmax(0, 1fr); }
-    .inspector {
-      position: absolute;
-      inset: 0 0 0 auto;
-      z-index: 30;
-      width: min(340px, 92%);
-      box-shadow: -18px 0 42px rgba(0, 0, 0, 0.2);
-    }
   }
 
   @media (max-width: 720px) {
-    .menubar span:not(.menu-app):not(.menu-spacer) { display: none; }
     .home-view { padding: 22px 20px; }
     .home-heading { align-items: stretch; flex-wrap: wrap; }
     .search-field { width: 100%; margin-left: 0; }
     .recording-row { grid-template-columns: 38px 1fr 16px; }
-    .row-snippet { display: none; }
     .toolbar-button .long-label { display: none; }
     .session-head { padding: 18px 18px 12px; }
     .waveform { margin: 0 18px; }
     .transcript { padding: 16px 18px 24px; }
+    .ask-conversation { padding-inline: 18px; }
+    .ask-composer { padding-inline: 18px; }
   }
 
   @media (prefers-contrast: more) {
     :root { --separator: rgba(0, 0, 0, 0.32); --muted: #494a50; }
-    .toolbar-button, .recording-list, .action-item { border-width: 2px; }
+    .toolbar-button, .recording-list { border-width: 2px; }
   }
 
   @media (prefers-reduced-motion: reduce) {
@@ -914,261 +700,205 @@
 </style>
 </head>
 <body>
-  <main class="stage" aria-label="LivePolyTrans macOS desktop prototype">
-    <div class="menubar" aria-hidden="true">
-      <span class="menu-app">LivePolyTrans</span>
-      <span>ファイル</span>
-      <span>編集</span>
-      <span>表示</span>
-      <span>ウインドウ</span>
-      <span>ヘルプ</span>
-      <span class="menu-spacer"></span>
-      <span>Wi-Fi</span>
-      <span>82%</span>
-      <span>火 14:02</span>
-    </div>
+  <main class="app-window" aria-label="LivePolyTrans">
+    <header class="window-toolbar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <button class="back-button hidden" id="backButton" type="button" aria-label="録音一覧に戻る">‹</button>
+      <span class="window-title" id="windowTitle">録音</span>
+      <span class="toolbar-spacer"></span>
 
-    <section class="call-window" aria-label="ビデオ会議">
-      <div class="call-top">
-        <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
-        <span>Zoom ミーティング</span>
-        <span class="menu-spacer"></span>
-        <span>Live</span>
-      </div>
-      <div class="call-grid">
-        <div class="video-tile speaking"><div class="avatar">SC</div><span class="tile-name">Sarah Chen</span></div>
-        <div class="video-tile"><div class="avatar">自分</div><span class="tile-name">田中</span></div>
-      </div>
-      <div class="call-controls" aria-hidden="true">
-        <span class="call-pill">Mic</span><span class="call-pill">Camera</span><span class="call-pill">Share</span><span class="call-pill end">End</span>
-      </div>
-    </section>
+      <button class="toolbar-button" id="startRecording" type="button">
+        <span class="record-symbol" aria-hidden="true">●</span>
+        <span class="long-label">録音を開始</span>
+      </button>
 
-    <section class="app-window" id="appWindow" aria-label="LivePolyTrans">
-      <header class="window-toolbar">
-        <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
-        <button class="back-button hidden" id="backButton" type="button" aria-label="録音一覧に戻る">‹</button>
-        <span class="window-title" id="windowTitle">録音</span>
-        <span class="toolbar-spacer"></span>
-
-        <button class="toolbar-button" id="startRecording" type="button">
-          <span class="record-symbol" aria-hidden="true">●</span>
-          <span class="long-label">録音を開始</span>
+      <div class="toolbar-group hidden" id="recordingControls">
+        <button class="toolbar-button record-active" id="returnToRecording" type="button" aria-label="録音中のセッションを表示">
+          <span aria-hidden="true">●</span><span id="recordTime">00:00</span>
         </button>
+        <button class="toolbar-button icon-button" id="pauseRecording" type="button" aria-label="録音を一時停止">Ⅱ</button>
+        <button class="toolbar-button stop-button" id="stopRecording" type="button">
+          <span aria-hidden="true">■</span><span class="long-label">停止</span>
+        </button>
+      </div>
+    </header>
 
-        <div class="toolbar-group hidden" id="recordingControls">
-          <button class="toolbar-button record-active" id="returnToRecording" type="button" aria-label="録音中のセッションを表示">
-            <span aria-hidden="true">●</span><span id="recordTime">00:00</span>
+    <section class="view home-view active" id="homeView" aria-labelledby="homeTitle">
+      <div class="home-heading">
+        <div>
+          <h1 id="homeTitle">すべての録音</h1>
+          <span class="count" id="recordingCount">3件</span>
+        </div>
+        <label class="search-field">
+          <span aria-hidden="true">⌕</span>
+          <input id="recordingSearch" type="search" placeholder="録音を検索" aria-label="録音を検索" />
+        </label>
+      </div>
+
+      <div class="recording-section" id="activeSection" hidden>
+        <h2 class="section-label">録音中</h2>
+        <div class="recording-list">
+          <button class="recording-row active-session-row" id="activeSessionRow" type="button">
+            <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="row-main"><span class="row-title">新しい録音</span><span class="row-meta" id="activeRowTime">録音中 · 00:00</span></span>
+            <span class="row-source">マイク + スピーカー</span>
+            <span class="row-chevron" aria-hidden="true">›</span>
           </button>
-          <button class="toolbar-button icon-button" id="pauseRecording" type="button" aria-label="録音を一時停止">Ⅱ</button>
-          <button class="toolbar-button stop-button" id="stopRecording" type="button">
-            <span aria-hidden="true">■</span><span class="long-label">停止</span>
+        </div>
+      </div>
+
+      <div class="recording-section searchable-section">
+        <h2 class="section-label">今日</h2>
+        <div class="recording-list">
+          <button class="recording-row searchable-row" type="button" data-title="定例ミーティング" data-snippet="ベータ版は今月末までにリリースした方がよさそうですね">
+            <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="row-main"><span class="row-title">定例ミーティング</span><span class="row-meta">14:00 · 42分</span></span>
+            <span class="row-source">マイク + スピーカー</span>
+            <span class="row-chevron" aria-hidden="true">›</span>
           </button>
         </div>
-      </header>
+      </div>
 
-      <section class="view home-view active" id="homeView" aria-labelledby="homeTitle">
-        <div class="home-heading">
-          <div>
-            <h1 id="homeTitle">すべての録音</h1>
-            <span class="count" id="recordingCount">3件</span>
-          </div>
-          <label class="search-field">
-            <span aria-hidden="true">⌕</span>
-            <input id="recordingSearch" type="search" placeholder="録音を検索" aria-label="録音を検索" />
-          </label>
+      <div class="recording-section searchable-section">
+        <h2 class="section-label">昨日</h2>
+        <div class="recording-list">
+          <button class="recording-row searchable-row" type="button" data-title="1on1 Sarah" data-snippet="ベータ版のフィードバック集約について">
+            <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="row-main"><span class="row-title">1on1 Sarah</span><span class="row-meta">11:00 · 28分</span></span>
+            <span class="row-source">マイク</span>
+            <span class="row-chevron" aria-hidden="true">›</span>
+          </button>
+          <button class="recording-row searchable-row" type="button" data-title="プロダクト会議" data-snippet="クローズドベータの対象ユーザー">
+            <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+            <span class="row-main"><span class="row-title">プロダクト会議</span><span class="row-meta">7/28 · 51分</span></span>
+            <span class="row-source">マイク + スピーカー</span>
+            <span class="row-chevron" aria-hidden="true">›</span>
+          </button>
         </div>
-
-        <div class="recording-section" id="activeSection" hidden>
-          <h2 class="section-label">録音中</h2>
-          <div class="recording-list">
-            <button class="recording-row active-session-row" id="activeSessionRow" type="button">
-              <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="row-main"><span class="row-title">新しい録音</span><span class="row-meta" id="activeRowTime">録音中 · 00:00</span></span>
-              <span class="row-snippet">リアルタイム文字起こしを表示</span>
-              <span class="row-source">マイク + システム音声</span>
-              <span class="row-chevron" aria-hidden="true">›</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="recording-section searchable-section">
-          <h2 class="section-label">今日</h2>
-          <div class="recording-list">
-            <button class="recording-row searchable-row" type="button" data-title="定例ミーティング" data-snippet="ベータ版は今月末までにリリースした方がよさそうですね">
-              <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="row-main"><span class="row-title">定例ミーティング</span><span class="row-meta">14:00 · 42分</span></span>
-              <span class="row-snippet">Sarah: ベータ版は今月末までにリリースした方がよさそうですね。</span>
-              <span class="row-source">マイク + システム音声</span>
-              <span class="row-chevron" aria-hidden="true">›</span>
-            </button>
-          </div>
-        </div>
-
-        <div class="recording-section searchable-section">
-          <h2 class="section-label">昨日</h2>
-          <div class="recording-list">
-            <button class="recording-row searchable-row" type="button" data-title="1on1 Sarah" data-snippet="ベータ版のフィードバック集約について">
-              <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="row-main"><span class="row-title">1on1 Sarah</span><span class="row-meta">11:00 · 28分</span></span>
-              <span class="row-snippet">ベータ版のフィードバック集約と次回リリースについて。</span>
-              <span class="row-source">マイク</span>
-              <span class="row-chevron" aria-hidden="true">›</span>
-            </button>
-            <button class="recording-row searchable-row" type="button" data-title="プロダクト会議" data-snippet="クローズドベータの対象ユーザー">
-              <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
-              <span class="row-main"><span class="row-title">プロダクト会議</span><span class="row-meta">7/28 · 51分</span></span>
-              <span class="row-snippet">クローズドベータの対象ユーザーと案内方法を確認。</span>
-              <span class="row-source">マイク + システム音声</span>
-              <span class="row-chevron" aria-hidden="true">›</span>
-            </button>
-          </div>
-        </div>
-        <div class="empty-search" id="emptySearch">該当する録音はありません</div>
-      </section>
-
-      <section class="view session-view" id="sessionView" aria-labelledby="sessionTitle">
-        <div class="session-layout" id="sessionLayout">
-          <div class="session-main" id="sessionMain">
-            <div class="session-head">
-              <div>
-                <h1 id="sessionTitle">定例ミーティング</h1>
-                <div class="session-meta">
-                  <span id="sessionDate">2026/08/18 14:00 · 42分</span>
-                  <span class="state-badge" id="sessionState"><span aria-hidden="true">✓</span>文字起こし完了</span>
-                  <span class="capture-badges hidden" id="captureBadges">
-                    <span class="capture-badge" aria-label="マイク音声を認識中">
-                      <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク
-                    </span>
-                    <span class="capture-badge" aria-label="スピーカー音声を認識中">
-                      <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>スピーカー
-                    </span>
-                  </span>
-                </div>
-              </div>
-              <div class="session-actions" id="sessionActions">
-                <button class="toolbar-button" id="insightToggle" type="button" aria-expanded="true" aria-controls="inspector">インサイト</button>
-                <button class="toolbar-button" id="exportButton" type="button" aria-haspopup="menu" aria-expanded="false">書き出す</button>
-                <button class="toolbar-button icon-button" type="button" aria-label="その他の操作">•••</button>
-                <div class="export-menu" id="exportMenu" role="menu">
-                  <div class="menu-heading">音声</div>
-                  <button class="menu-item" type="button" role="menuitem">マイク音声<span class="ext">.m4a</span></button>
-                  <button class="menu-item" type="button" role="menuitem">システム音声<span class="ext">.m4a</span></button>
-                  <button class="menu-item" type="button" role="menuitem">ミックス<span class="ext">.m4a</span></button>
-                  <div class="menu-separator"></div>
-                  <div class="menu-heading">テキスト</div>
-                  <button class="menu-item" type="button" role="menuitem">文字起こし<span class="ext">.md</span></button>
-                  <button class="menu-item" type="button" role="menuitem">字幕<span class="ext">.srt</span></button>
-                </div>
-              </div>
-            </div>
-
-            <div class="waveform" id="waveform" role="img" aria-label="録音波形">
-              <i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i>
-              <i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i>
-              <i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i>
-              <i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i>
-              <i style="height:42%"></i><i style="height:68%"></i><i style="height:34%"></i><i style="height:56%"></i>
-              <span class="playhead"></span>
-            </div>
-
-            <div class="transcript" id="readyTranscript">
-              <div class="transcript-label">文字起こし</div>
-              <div class="transcript-line"><span class="timestamp">00:12</span><span class="speaker me">田中</span><span class="utterance">それでは定例を始めます。今日はベータ版のスケジュール確認からです。</span></div>
-              <div class="transcript-line"><span class="timestamp">00:31</span><span class="speaker them">Sarah</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
-              <div class="transcript-line"><span class="timestamp">00:58</span><span class="speaker me">田中</span><span class="utterance">了解です。では残タスクを洗い出しましょう。</span></div>
-              <div class="transcript-line"><span class="timestamp">01:16</span><span class="speaker them">Sarah</span><span class="utterance">Can you also draft the announcement post by Friday?<span class="translation">金曜までに告知文のドラフトも書いてもらえますか？</span></span></div>
-            </div>
-
-            <div class="transcript live-transcript hidden" id="liveTranscript" aria-live="polite" aria-atomic="false">
-              <div class="transcript-label">リアルタイム文字起こし</div>
-              <div class="transcript-line"><span class="speaker me">田中</span><span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。<span class="translation">Got it. I'll arrange the schedule and put it on the calendar.</span></span></div>
-              <div class="transcript-line"><span class="speaker them">Sarah</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
-              <div class="transcript-line"><span class="speaker them">Sarah</span><span class="utterance partial">Can you also draft the announcement</span></div>
-            </div>
-
-            <div class="live-ask hidden" id="liveAsk" aria-label="移動可能なチャット入力" aria-description="上部のグリップを長押しして左右へ移動できます">
-              <span class="live-ask-grip" aria-hidden="true"></span>
-              <input id="liveAskInput" type="text" placeholder="この会話について質問" aria-label="この会話について質問" />
-              <button id="liveAskSend" type="button" aria-label="質問を送信">↑</button>
-            </div>
-          </div>
-
-          <aside class="inspector" id="inspector" aria-label="録音インサイト">
-            <div id="readyInspector">
-              <div class="inspector-header">
-                <div class="inspector-title">インサイト</div>
-                <div class="inspector-tabs" role="tablist" aria-label="インサイトの種類">
-                  <button id="summaryTab" type="button" role="tab" aria-selected="true" aria-controls="summaryPanel">要約</button>
-                  <button id="actionsTab" type="button" role="tab" aria-selected="false" aria-controls="actionsPanel">アクション</button>
-                  <button id="askTab" type="button" role="tab" aria-selected="false" aria-controls="askPanel">Ask</button>
-                </div>
-              </div>
-              <div class="inspector-body">
-                <section class="inspector-panel active" id="summaryPanel" role="tabpanel" aria-labelledby="summaryTab">
-                  <div class="panel-meta">14:03に更新</div>
-                  <p class="summary-text">ベータ版を今月末までにリリースする方針を確認。告知文の作成、日程のカレンダー登録、デザインチームの招待が次の対応事項。</p>
-                </section>
-                <section class="inspector-panel" id="actionsPanel" role="tabpanel" aria-labelledby="actionsTab">
-                  <div class="panel-meta">3件のアクション</div>
-                  <div class="action-list">
-                    <label class="action-item"><input type="checkbox" /><span>日程を調整してカレンダーに登録する<span class="action-meta">田中 · 14:01</span></span></label>
-                    <label class="action-item"><input type="checkbox" /><span>ベータ版を今月末までにリリースする<span class="action-meta">チーム · 14:02</span></span></label>
-                    <label class="action-item"><input type="checkbox" /><span>金曜までに告知文のドラフトを書く<span class="action-meta">田中 · 14:03</span></span></label>
-                  </div>
-                </section>
-                <section class="inspector-panel" id="askPanel" role="tabpanel" aria-labelledby="askTab">
-                  <div class="ask-history">この録音について質問できます。</div>
-                </section>
-              </div>
-              <label class="ask-row">
-                <input type="text" placeholder="この録音について質問" aria-label="この録音について質問" />
-                <button type="button" aria-label="質問を送信">↑</button>
-              </label>
-            </div>
-          </aside>
-        </div>
-        <button class="chat-edge-handle hidden" id="chatEdgeHandle" type="button" aria-label="最小化したチャットを開く"><span aria-hidden="true"></span></button>
-        <span class="chat-drop-zone left" aria-hidden="true"></span>
-        <span class="chat-drop-zone right" aria-hidden="true"></span>
-      </section>
+      </div>
+      <div class="empty-search" id="emptySearch">該当する録音はありません</div>
     </section>
 
-    <nav class="dock" aria-label="Dock">
-      <button class="active lpt" id="dockLpt" type="button" aria-label="LivePolyTrans">LPT</button>
-      <button class="active zoom" type="button" aria-label="Zoom">Zoom</button>
-      <button type="button" aria-label="メモ">メモ</button>
-      <button type="button" aria-label="Finder">Finder</button>
-    </nav>
+    <section class="view session-view" id="sessionView" aria-labelledby="sessionTitle">
+      <div class="session-layout" id="sessionLayout">
+        <div class="session-main" id="sessionMain">
+          <div class="session-head">
+            <div>
+              <h1 id="sessionTitle">定例ミーティング</h1>
+              <div class="session-meta">
+                <span id="sessionDate">2026/08/18 14:00 · 42分</span>
+                <span class="state-badge" id="sessionState"><span aria-hidden="true">✓</span>文字起こし完了</span>
+                <span class="capture-badges hidden" id="captureBadges">
+                  <span class="capture-badge" aria-label="マイク音声を認識中">
+                    <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク
+                  </span>
+                  <span class="capture-badge" aria-label="スピーカー音声を認識中">
+                    <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>スピーカー
+                  </span>
+                </span>
+              </div>
+            </div>
+            <div class="session-actions" id="sessionActions">
+              <button class="toolbar-button icon-button" id="actionsButton" type="button" aria-label="この録音の操作" aria-haspopup="menu" aria-expanded="false">•••</button>
+              <div class="actions-menu" id="actionsMenu" role="menu">
+                <div class="menu-heading">書き出す</div>
+                <button class="menu-item" type="button" role="menuitem" data-export="文字起こし">文字起こし<span class="ext">.md</span></button>
+                <button class="menu-item" type="button" role="menuitem" data-export="字幕">字幕<span class="ext">.srt</span></button>
+                <button class="menu-item" type="button" role="menuitem" data-export="ミックス音声">ミックス音声<span class="ext">.m4a</span></button>
+                <button class="menu-item" type="button" role="menuitem" data-export="マイク音声">マイク音声<span class="ext">.m4a</span></button>
+                <button class="menu-item" type="button" role="menuitem" data-export="スピーカー音声">スピーカー音声<span class="ext">.m4a</span></button>
+                <div class="menu-separator"></div>
+                <div class="menu-heading">クリップボード</div>
+                <button class="menu-item" type="button" role="menuitem" data-copy="full">全文をコピー<span class="ext">⌘C</span></button>
+                <button class="menu-item" type="button" role="menuitem" data-copy="original">原文のみをコピー</button>
+                <button class="menu-item" type="button" role="menuitem" data-copy="translation">翻訳のみをコピー</button>
+                <div class="menu-separator"></div>
+                <div class="menu-heading">編集</div>
+                <button class="menu-item" type="button" role="menuitem" data-todo="名前を変更">名前を変更</button>
+                <button class="menu-item" type="button" role="menuitem" data-todo="文字起こしのやり直し">文字起こしをやり直す</button>
+                <button class="menu-item" type="button" role="menuitem" data-todo="翻訳先の言語変更">翻訳先の言語を変更</button>
+                <div class="menu-separator"></div>
+                <button class="menu-item" type="button" role="menuitem" data-todo="Finderで表示">Finderで表示</button>
+                <button class="menu-item destructive" type="button" role="menuitem" data-todo="録音の削除">この録音を削除</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="waveform" id="waveform" role="img" aria-label="録音波形">
+            <i style="height:30%"></i><i style="height:55%"></i><i style="height:70%"></i><i style="height:40%"></i>
+            <i style="height:62%"></i><i style="height:35%"></i><i style="height:75%"></i><i style="height:50%"></i>
+            <i style="height:28%"></i><i style="height:58%"></i><i style="height:66%"></i><i style="height:44%"></i>
+            <i style="height:70%"></i><i style="height:38%"></i><i style="height:52%"></i><i style="height:60%"></i>
+            <i style="height:42%"></i><i style="height:68%"></i><i style="height:34%"></i><i style="height:56%"></i>
+            <span class="playhead"></span>
+          </div>
+
+          <div class="transcript" id="readyTranscript">
+            <div class="transcript-header">
+              <span class="transcript-label">文字起こし</span>
+              <button class="copy-all-button" id="copyTranscript" type="button">
+                <span aria-hidden="true">⧉</span><span class="copy-all-label">全文をコピー</span>
+              </button>
+            </div>
+            <div class="transcript-line"><span class="timestamp">00:12</span><span class="speaker me">田中</span><span class="utterance">それでは定例を始めます。今日はベータ版のスケジュール確認からです。</span><button class="line-delete" type="button" aria-label="この発言を削除">×</button></div>
+            <div class="transcript-line" id="transcript-0031"><span class="timestamp">00:31</span><span class="speaker them">Sarah</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span><button class="line-delete" type="button" aria-label="この発言を削除">×</button></div>
+            <div class="transcript-line"><span class="timestamp">00:47</span><span class="speaker me">田中</span><span class="utterance">あー、えー、うん。</span><button class="line-delete" type="button" aria-label="この発言を削除">×</button></div>
+            <div class="transcript-line"><span class="timestamp">00:58</span><span class="speaker me">田中</span><span class="utterance">了解です。では残タスクを洗い出しましょう。</span><button class="line-delete" type="button" aria-label="この発言を削除">×</button></div>
+            <div class="transcript-line" id="transcript-0116"><span class="timestamp">01:16</span><span class="speaker them">Sarah</span><span class="utterance">Can you also draft the announcement post by Friday?<span class="translation">金曜までに告知文のドラフトも書いてもらえますか？</span></span><button class="line-delete" type="button" aria-label="この発言を削除">×</button></div>
+          </div>
+
+          <div class="transcript live-transcript hidden" id="liveTranscript" aria-live="polite" aria-atomic="false">
+            <div class="transcript-header">
+              <span class="transcript-label">リアルタイム文字起こし</span>
+              <button class="copy-all-button" id="copyLiveTranscript" type="button">
+                <span aria-hidden="true">⧉</span><span class="copy-all-label">ここまでをコピー</span>
+              </button>
+            </div>
+            <div class="transcript-line"><span class="speaker mic">マイク</span><span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。<span class="translation">Got it. I'll arrange the schedule and put it on the calendar.</span></span></div>
+            <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+            <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance partial">Can you also draft the announcement</span></div>
+          </div>
+
+          <div class="session-ask" id="sessionAsk" aria-label="Ask">
+            <div class="ask-header hidden" id="askHeader">
+              <span class="ask-title">Ask</span>
+            </div>
+            <div class="ask-conversation hidden" id="askConversation" role="log" aria-label="Askの会話" aria-live="polite"></div>
+            <div class="ask-composer">
+              <button class="ask-toggle-button hidden" id="askToggle" type="button" aria-label="Askの会話を折りたたむ" aria-expanded="true"><span aria-hidden="true">⌄</span></button>
+              <input id="askInput" type="text" placeholder="Askに質問" aria-label="この録音について質問" />
+              <button id="askSend" type="button" aria-label="質問を送信">↑</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
   </main>
 
 <script>
   const qs = (selector) => document.querySelector(selector);
-  const qsa = (selector) => Array.from(document.querySelectorAll(selector));
+  const qsa = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
-  const appWindow = qs('#appWindow');
   const homeView = qs('#homeView');
   const sessionView = qs('#sessionView');
   const startRecordingButton = qs('#startRecording');
   const recordingControls = qs('#recordingControls');
-  const exportButton = qs('#exportButton');
-  const exportMenu = qs('#exportMenu');
-  const inspector = qs('#inspector');
-  const sessionLayout = qs('#sessionLayout');
+  const actionsButton = qs('#actionsButton');
+  const actionsMenu = qs('#actionsMenu');
   const sessionMain = qs('#sessionMain');
-  const insightToggle = qs('#insightToggle');
-  const liveAsk = qs('#liveAsk');
-  const chatEdgeHandle = qs('#chatEdgeHandle');
+  const sessionAsk = qs('#sessionAsk');
+  const askInput = qs('#askInput');
+  const askConversation = qs('#askConversation');
+  const askHeader = qs('#askHeader');
+  const askToggle = qs('#askToggle');
   const toast = qs('#toast');
 
   let recording = false;
   let paused = false;
   let elapsed = 0;
-  let chatDockSide = null;
-  let chatDrag = null;
-  let longPressTimer;
+  let chatCollapsed = false;
   let toastTimer;
 
   function formatTime(total) {
@@ -1177,11 +907,107 @@
     return `${minutes}:${seconds}`;
   }
 
-  function showToast(message) {
-    toast.textContent = message;
+  // action を渡すと「取り消す」付きトーストになり、表示時間も長めに取る
+  function showToast(message, action) {
+    const body = document.createElement('span');
+    body.className = 'toast-message';
+    body.textContent = message;
+    toast.replaceChildren(body);
+
+    if (action) {
+      const button = document.createElement('button');
+      button.className = 'toast-action';
+      button.type = 'button';
+      button.textContent = action.label;
+      button.addEventListener('click', () => {
+        action.run();
+        toast.classList.remove('show');
+        clearTimeout(toastTimer);
+      });
+      toast.append(button);
+    }
+
     toast.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.remove('show'), 1800);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), action ? 5000 : 1800);
+  }
+
+  // 文字起こしを「[時刻] 話者: 原文 / 訳文」形式のプレーンテキストに組み立てる
+  function buildTranscriptText(container, scope = 'full') {
+    return qsa('.transcript-line', container).map((line) => {
+      const time = line.querySelector('.timestamp')?.textContent.trim();
+      const speaker = line.querySelector('.speaker')?.textContent.trim();
+      const translation = line.querySelector('.translation')?.textContent.trim() ?? '';
+      const utterance = line.querySelector('.utterance');
+      const original = utterance
+        ? Array.from(utterance.childNodes)
+            .filter((node) => node.nodeType === Node.TEXT_NODE)
+            .map((node) => node.textContent)
+            .join('')
+            .trim()
+        : '';
+
+      const body = scope === 'translation' ? translation || original : original;
+      const head = [time && `[${time}]`, speaker && `${speaker}:`].filter(Boolean).join(' ');
+      const headline = [head, body].filter(Boolean).join(' ');
+      if (scope !== 'full' || !translation) return headline;
+      return `${headline}\n    ${translation}`;
+    }).join('\n');
+  }
+
+  async function copyText(text) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // file:// やクリップボード権限拒否でも動くフォールバック
+      const staging = document.createElement('textarea');
+      staging.value = text;
+      staging.setAttribute('readonly', '');
+      staging.style.cssText = 'position:fixed;top:-1000px;opacity:0;';
+      document.body.append(staging);
+      staging.select();
+      const copied = document.execCommand('copy');
+      staging.remove();
+      return copied;
+    }
+  }
+
+  // 押したボタン自身を一時的に「コピーしました」に変え、成否をその場で返す
+  async function runCopy(button, text, label) {
+    const copied = await copyText(text);
+    showToast(copied ? `${label}をコピーしました` : 'コピーできませんでした');
+    if (!copied || !button) return;
+
+    const labelNode = button.querySelector('.copy-all-label');
+    const original = labelNode?.textContent;
+    button.classList.add('copied');
+    if (labelNode) labelNode.textContent = 'コピーしました';
+    clearTimeout(button.copyTimer);
+    button.copyTimer = setTimeout(() => {
+      button.classList.remove('copied');
+      if (labelNode && original) labelNode.textContent = original;
+    }, 1600);
+  }
+
+  function activeTranscript() {
+    return recording ? qs('#liveTranscript') : qs('#readyTranscript');
+  }
+
+  // ノイズや言い淀みの行を落とす。元の位置を覚えておき「取り消す」で戻せるようにする
+  function deleteTranscriptLine(line) {
+    const parent = line.parentElement;
+    const next = line.nextElementSibling;
+    line.remove();
+    showToast('1件の発言を削除しました', {
+      label: '取り消す',
+      run: () => (next ? parent.insertBefore(line, next) : parent.append(line)),
+    });
+  }
+
+  function closeActionsMenu() {
+    actionsMenu.classList.remove('open');
+    actionsButton.setAttribute('aria-expanded', 'false');
   }
 
   function showView(view) {
@@ -1189,34 +1015,18 @@
     sessionView.classList.toggle('active', view === 'session');
     qs('#backButton').classList.toggle('hidden', view === 'home');
     qs('#windowTitle').textContent = view === 'home' ? '録音' : qs('#sessionTitle').textContent;
-    exportMenu.classList.remove('open');
-    exportButton.setAttribute('aria-expanded', 'false');
+    closeActionsMenu();
   }
 
-  function setInspectorVisible(visible) {
-    inspector.classList.toggle('is-hidden', !visible);
-    sessionLayout.classList.toggle('inspector-hidden', !visible);
-    insightToggle.setAttribute('aria-expanded', String(visible));
-  }
-
-  function renderLiveChat(live) {
-    const docked = live && Boolean(chatDockSide);
-    liveAsk.classList.toggle('hidden', !live || docked);
-    chatEdgeHandle.classList.toggle('hidden', !docked);
-    chatEdgeHandle.classList.toggle('edge-left', docked && chatDockSide === 'left');
-    chatEdgeHandle.classList.toggle('edge-right', docked && chatDockSide === 'right');
-    if (docked) chatEdgeHandle.setAttribute('aria-label', `${chatDockSide === 'left' ? '左' : '右'}に最小化したチャットを開く`);
-  }
-
-  function dockChat(side) {
-    chatDockSide = side;
-    renderLiveChat(true);
-  }
-
-  function restoreChat() {
-    chatDockSide = null;
-    renderLiveChat(true);
-    requestAnimationFrame(() => qs('#liveAskInput').focus());
+  function renderAskExpansion() {
+    const hasMessages = askConversation.childElementCount > 0;
+    const expanded = hasMessages && !chatCollapsed;
+    askHeader.classList.toggle('hidden', !expanded);
+    askConversation.classList.toggle('hidden', !expanded);
+    askToggle.classList.toggle('hidden', !hasMessages);
+    askToggle.setAttribute('aria-expanded', String(expanded));
+    askToggle.setAttribute('aria-label', expanded ? 'Askの会話を折りたたむ' : 'Askの会話を展開');
+    askToggle.querySelector('span').textContent = expanded ? '⌄' : '⌃';
   }
 
   function setSessionMode(mode, title = '定例ミーティング') {
@@ -1232,10 +1042,6 @@
     qs('#waveform').classList.toggle('hidden', live);
     qs('#readyTranscript').classList.toggle('hidden', live);
     qs('#liveTranscript').classList.toggle('hidden', !live);
-    qs('#readyInspector').classList.toggle('hidden', live);
-    exportButton.disabled = live;
-    setInspectorVisible(!live && window.innerWidth > 980);
-    renderLiveChat(live);
     showView('session');
   }
 
@@ -1253,7 +1059,9 @@
     recording = true;
     paused = false;
     elapsed = 0;
-    chatDockSide = null;
+    chatCollapsed = false;
+    askConversation.replaceChildren();
+    renderAskExpansion();
     qs('#pauseRecording').textContent = 'Ⅱ';
     qs('#pauseRecording').setAttribute('aria-label', '録音を一時停止');
     updateRecordingControls();
@@ -1264,7 +1072,6 @@
   function stopRecording() {
     recording = false;
     paused = false;
-    chatDockSide = null;
     updateRecordingControls();
     setSessionMode('ready', '新しい録音');
     showToast('録音を保存しました');
@@ -1287,151 +1094,120 @@
   qs('#backButton').addEventListener('click', () => showView('home'));
 
   qsa('.searchable-row').forEach((row) => {
-    row.addEventListener('click', () => setSessionMode('ready', row.dataset.title));
-  });
-
-  insightToggle.addEventListener('click', () => {
-    setInspectorVisible(inspector.classList.contains('is-hidden'));
-  });
-
-  const tabs = qsa('.inspector-tabs [role="tab"]');
-  tabs.forEach((tab, index) => {
-    tab.addEventListener('click', () => selectInsightTab(tab));
-    tab.addEventListener('keydown', (event) => {
-      if (!['ArrowLeft', 'ArrowRight'].includes(event.key)) return;
-      event.preventDefault();
-      const offset = event.key === 'ArrowRight' ? 1 : -1;
-      const next = tabs[(index + offset + tabs.length) % tabs.length];
-      selectInsightTab(next);
-      next.focus();
+    row.addEventListener('click', () => {
+      chatCollapsed = false;
+      askConversation.replaceChildren();
+      renderAskExpansion();
+      setSessionMode('ready', row.dataset.title);
     });
   });
 
-  function selectInsightTab(selected) {
-    tabs.forEach((tab) => {
-      const active = tab === selected;
-      tab.setAttribute('aria-selected', String(active));
-      qs(`#${tab.getAttribute('aria-controls')}`).classList.toggle('active', active);
-    });
+  function appendAskMessage(text, role) {
+    const message = document.createElement('div');
+    message.className = `ask-message ${role}`;
+    message.textContent = text;
+    askConversation.append(message);
+    chatCollapsed = false;
+    renderAskExpansion();
+    askConversation.scrollTop = askConversation.scrollHeight;
+    return message;
   }
 
-  qsa('.action-item input').forEach((checkbox) => {
-    checkbox.addEventListener('change', () => checkbox.closest('.action-item').classList.toggle('done', checkbox.checked));
-  });
+  function answerForQuestion(question) {
+    if (/Sarah|発言/.test(question)) {
+      return 'Sarahは、ベータ版を今月末までにリリースすることと、金曜までに告知文のドラフトを用意することを提案しています。';
+    }
+    if (/金曜|告知/.test(question)) {
+      return '金曜までに、告知文のドラフトを用意することが依頼されています。';
+    }
+    return 'ベータ版を今月末までにリリースする方針が話されています。田中は日程調整を行い、金曜までに告知文のドラフトを用意します。';
+  }
 
-  function sendLiveQuestion() {
-    const input = qs('#liveAskInput');
-    if (!input.value.trim()) return;
-    input.value = '';
+  function completeAskAnswer(message, question) {
+    message.replaceChildren();
+    const answer = document.createElement('p');
+    answer.textContent = answerForQuestion(question);
+    message.append(answer);
+
+    if (recording) return;
+    const sources = document.createElement('div');
+    sources.className = 'ask-sources';
+    [['00:31 Sarah', 'transcript-0031'], ['01:16 Sarah', 'transcript-0116']].forEach(([label, targetId]) => {
+      const source = document.createElement('button');
+      source.type = 'button';
+      source.textContent = label;
+      source.addEventListener('click', () => {
+        const target = qs(`#${targetId}`);
+        // 引用元の発言は後から削除できるので、失われている場合を必ず見る
+        if (!target) {
+          showToast('引用元の発言は削除されています');
+          return;
+        }
+        target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        target.classList.add('source-highlight');
+        setTimeout(() => target.classList.remove('source-highlight'), 1400);
+      });
+      sources.append(source);
+    });
+    message.append(sources);
+    askConversation.scrollTop = askConversation.scrollHeight;
+  }
+
+  function sendQuestion() {
+    const question = askInput.value.trim();
+    if (!question) return;
+    appendAskMessage(question, 'user');
+    const answer = appendAskMessage('文字起こし全体を参照して回答を生成しています…', 'assistant');
+    setTimeout(() => completeAskAnswer(answer, question), 480);
+    askInput.value = '';
     showToast('質問を送信しました');
   }
 
-  qs('#liveAskSend').addEventListener('click', sendLiveQuestion);
-  qs('#liveAskInput').addEventListener('keydown', (event) => {
+  qs('#askSend').addEventListener('click', sendQuestion);
+  askToggle.addEventListener('click', () => {
+    chatCollapsed = !chatCollapsed;
+    renderAskExpansion();
+    if (chatCollapsed) askInput.focus();
+  });
+  askInput.addEventListener('keydown', (event) => {
     if (event.key !== 'Enter') return;
     event.preventDefault();
-    sendLiveQuestion();
+    sendQuestion();
   });
 
-  function clearChatPress() {
-    clearTimeout(longPressTimer);
-    liveAsk.classList.remove('is-pressing');
-  }
-
-  function positionDraggedChat(clientX, clientY) {
-    if (!chatDrag?.dragging) return;
-    const bounds = sessionView.getBoundingClientRect();
-    const halfWidth = chatDrag.width / 2;
-    const x = Math.max(halfWidth + 18, Math.min(clientX - bounds.left, bounds.width - halfWidth - 18));
-    const y = Math.max(86, Math.min(clientY - bounds.top, bounds.height - 44));
-    liveAsk.style.left = `${x}px`;
-    liveAsk.style.top = `${y}px`;
-    const activeSide = clientX < bounds.left + bounds.width / 2 ? 'left' : 'right';
-    qsa('.chat-drop-zone').forEach((zone) => zone.classList.toggle('active', zone.classList.contains(activeSide)));
-  }
-
-  function beginChatDrag() {
-    if (!chatDrag) return;
-    const askBounds = liveAsk.getBoundingClientRect();
-    const viewBounds = sessionView.getBoundingClientRect();
-    chatDrag.dragging = true;
-    chatDrag.width = Math.min(askBounds.width, viewBounds.width - 48);
-    liveAsk.style.width = `${chatDrag.width}px`;
-    liveAsk.classList.remove('is-pressing');
-    liveAsk.classList.add('dragging');
-    sessionView.classList.add('chat-dragging');
-    positionDraggedChat(chatDrag.lastX, chatDrag.lastY);
-  }
-
-  function resetChatDrag() {
-    clearChatPress();
-    liveAsk.classList.remove('dragging');
-    liveAsk.style.removeProperty('left');
-    liveAsk.style.removeProperty('top');
-    liveAsk.style.removeProperty('width');
-    sessionView.classList.remove('chat-dragging');
-    qsa('.chat-drop-zone').forEach((zone) => zone.classList.remove('active'));
-    chatDrag = null;
-  }
-
-  liveAsk.addEventListener('pointerdown', (event) => {
-    if (event.target.closest('input, button')) return;
-    if (event.pointerType === 'mouse' && event.button !== 0) return;
-    chatDrag = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      lastX: event.clientX,
-      lastY: event.clientY,
-      dragging: false,
-      width: 0,
-    };
-    liveAsk.setPointerCapture(event.pointerId);
-    liveAsk.classList.add('is-pressing');
-    longPressTimer = setTimeout(beginChatDrag, 380);
+  actionsButton.addEventListener('click', () => {
+    const open = actionsMenu.classList.toggle('open');
+    actionsButton.setAttribute('aria-expanded', String(open));
   });
 
-  liveAsk.addEventListener('pointermove', (event) => {
-    if (!chatDrag || chatDrag.pointerId !== event.pointerId) return;
-    chatDrag.lastX = event.clientX;
-    chatDrag.lastY = event.clientY;
-    if (!chatDrag.dragging) {
-      const distance = Math.hypot(event.clientX - chatDrag.startX, event.clientY - chatDrag.startY);
-      if (distance > 8) {
-        clearChatPress();
-        chatDrag = null;
-      }
-      return;
-    }
-    event.preventDefault();
-    positionDraggedChat(event.clientX, event.clientY);
-  });
+  const COPY_LABELS = { full: '文字起こし全文', original: '原文', translation: '翻訳' };
 
-  liveAsk.addEventListener('pointerup', (event) => {
-    if (!chatDrag || chatDrag.pointerId !== event.pointerId) return;
-    const wasDragging = chatDrag.dragging;
-    const finalX = chatDrag.lastX;
-    const middle = sessionView.getBoundingClientRect().left + sessionView.clientWidth / 2;
-    resetChatDrag();
-    if (wasDragging) dockChat(finalX < middle ? 'left' : 'right');
-  });
-
-  liveAsk.addEventListener('pointercancel', resetChatDrag);
-  liveAsk.addEventListener('contextmenu', (event) => {
-    if (!event.target.closest('input, button')) event.preventDefault();
-  });
-  chatEdgeHandle.addEventListener('click', restoreChat);
-
-  exportButton.addEventListener('click', () => {
-    const open = exportMenu.classList.toggle('open');
-    exportButton.setAttribute('aria-expanded', String(open));
-  });
-  qsa('.export-menu .menu-item').forEach((item) => {
+  qsa('.actions-menu .menu-item').forEach((item) => {
     item.addEventListener('click', () => {
-      exportMenu.classList.remove('open');
-      exportButton.setAttribute('aria-expanded', 'false');
-      showToast(`${item.textContent.trim()}を書き出しました`);
+      closeActionsMenu();
+      const { copy, export: exported, todo } = item.dataset;
+      if (copy) {
+        runCopy(qs('#copyTranscript'), buildTranscriptText(activeTranscript(), copy), COPY_LABELS[copy]);
+        return;
+      }
+      if (exported) {
+        showToast(`${exported}を書き出しました`);
+        return;
+      }
+      showToast(`${todo}はこのモックアップでは動作しません`);
     });
+  });
+
+  qs('#copyTranscript').addEventListener('click', (event) => {
+    runCopy(event.currentTarget, buildTranscriptText(qs('#readyTranscript')), '文字起こし');
+  });
+  qs('#copyLiveTranscript').addEventListener('click', (event) => {
+    runCopy(event.currentTarget, buildTranscriptText(qs('#liveTranscript')), 'ここまでの文字起こし');
+  });
+
+  qs('#readyTranscript').addEventListener('click', (event) => {
+    const button = event.target.closest('.line-delete');
+    if (button) deleteTranscriptLine(button.closest('.transcript-line'));
   });
 
   qs('#recordingSearch').addEventListener('input', (event) => {
@@ -1449,28 +1225,26 @@
     qs('#emptySearch').style.display = visibleCount ? 'none' : 'block';
   });
 
-  qs('#dockLpt').addEventListener('click', () => {
-    appWindow.classList.toggle('is-hidden');
-    qs('#dockLpt').classList.toggle('active', !appWindow.classList.contains('is-hidden'));
-  });
-
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      exportMenu.classList.remove('open');
-      exportButton.setAttribute('aria-expanded', 'false');
-    }
+    if (event.key === 'Escape') closeActionsMenu();
     if (event.metaKey && event.altKey && event.key.toLocaleLowerCase() === 'r') {
       event.preventDefault();
       if (recording) stopRecording();
       else startRecording();
     }
+    // ⌘C は選択範囲のコピーが優先。選択がないときだけ全文コピーに引き当てる
+    if (event.metaKey && !event.altKey && !event.shiftKey && event.key.toLocaleLowerCase() === 'c') {
+      const editing = document.activeElement?.matches('input, textarea');
+      const selecting = !document.getSelection().isCollapsed;
+      if (editing || selecting || !sessionView.classList.contains('active')) return;
+      event.preventDefault();
+      const button = recording ? qs('#copyLiveTranscript') : qs('#copyTranscript');
+      runCopy(button, buildTranscriptText(activeTranscript()), '文字起こし');
+    }
   });
 
   document.addEventListener('click', (event) => {
-    if (!exportMenu.contains(event.target) && event.target !== exportButton) {
-      exportMenu.classList.remove('open');
-      exportButton.setAttribute('aria-expanded', 'false');
-    }
+    if (!actionsMenu.contains(event.target) && event.target !== actionsButton) closeActionsMenu();
   });
 
   setInterval(() => {
