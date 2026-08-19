@@ -345,7 +345,7 @@ fn run_session(
 
 /// Where sessions are recorded: the platform's music folder by default
 /// (`~/Music/kikimimic` on macOS), overridable with `KKM_RECORD_DIR`.
-fn record_base(app: &AppHandle) -> anyhow::Result<PathBuf> {
+pub fn record_base(app: &AppHandle) -> anyhow::Result<PathBuf> {
     match std::env::var("KKM_RECORD_DIR") {
         Ok(dir) => Ok(PathBuf::from(dir)),
         Err(_) => Ok(app.path().audio_dir()?.join("kikimimic")),

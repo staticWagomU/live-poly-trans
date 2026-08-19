@@ -68,7 +68,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 ### Step 3: スピーカーレーン
 
 - [x] CoreAudio Process Tap実装（Step 0の検証結果に基づく）— `capture/speaker.rs`
-- [x] マイク／スピーカー2レーンの同時稼働と表示分離 — UIはレーン別2カラム
+- [x] マイク／スピーカー2レーンの同時稼働と表示分離 — 当初はレーン別2カラム。Step 4でレーン間同期が実測±15msに収まったため、`start_ms`順の**1本のストリーム＋話者ピル**に変更（`mockups/desktop-prototype.html`、`plans/ui-mockup-alignment.md`）
 - [x] 権限が「無音」として現れる問題の検知（`SilenceWatch`）と`NSAudioCaptureUsageDescription`
 - [x] 実発話での2レーン動作確認（`.app`として起動しないとスピーカーは無音。`bun run tauri build` → `open`）
 - [ ] デフォルト出力デバイス切り替え（ヘッドホン抜き差し等）への追従
@@ -80,6 +80,18 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] タイムスタンプとトランスクリプトの整合 — schedulerがストリーム絶対位置で`Utterance{text,start_ms,end_ms}`を返し、`LaneTimeline`が録音時間へ変換。`transcript.jsonl`に追記＋UIは各行を`mm:ss`付きで表示
 - [x] レーン間の厳密な同期 — cpalの`capture`タイムスタンプとProcess Tapの`mHostTime`（どちらもmach host time）でバッファごとの録音位置を決定。`capture::Anchor`＋`SessionClock`。overrunで落ちた分も時間の穴として正しく残る（設計: plans/lane-sync.md）
 - [x] 同期の実測（2026-08-19）— スピーカーから鳴らしたクリックが両レーンで **+15〜16ms**（空気の伝搬＋入力レイテンシ）に収まり、18.5秒離れた点で1ms以内。再測は `python3 scripts/check-recording.py --sync`（ヘッドホン再生だと測定不能）
+
+### Step 4.5: UIをモックアップに合わせる
+
+設計は `plans/ui-mockup-alignment.md`、意匠は `mockups/desktop-prototype.html`。
+
+- [x] 録音一覧（`list_recordings`）と過去セッションの読み戻し（`read_recording`）— `src-tauri/src/library.rs`。
+      `transcript.jsonl`は追記ログなので、読むときはidで訳文を結合し`start_ms`で並べ直す
+- [x] ホーム（録音一覧）／セッションの2ビュー、ライトテーマ、ツールバー、状態バッジ、
+      言語ピル＋ポップオーバー、1本の文字起こし
+- [ ] 実アプリでの確認（`./scripts/build-app.sh --open`）
+- モックアップにあるが未実装（バックエンドが無いもの）: Ask、波形／再生、書き出し、行削除、
+      一時停止、レーン×言語マトリクス
 
 ### Step 5: 話者分離（SHOULD）
 

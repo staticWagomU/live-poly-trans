@@ -4,6 +4,7 @@
 //! back to the UI.
 
 mod capture;
+mod library;
 mod pipeline;
 mod record;
 mod translate;
@@ -45,6 +46,24 @@ fn stop_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
 #[tauri::command]
 fn get_status(state: State<'_, PipelineHandle>) -> pipeline::StatusPayload {
     state.status.lock().unwrap().clone()
+}
+
+/// The sessions already on disk, newest first. Read on every visit to the
+/// library rather than cached: the folder is the user's to move things in and
+/// out of, and a list that disagrees with Finder would be worse than a
+/// directory scan.
+#[tauri::command]
+fn list_recordings(app: tauri::AppHandle) -> Result<Vec<library::Recording>, String> {
+    let base = library::base(&app).map_err(|e| format!("{e:#}"))?;
+    Ok(library::list(&base))
+}
+
+/// A past session's transcript, joined back together from its append log.
+/// Takes the directory the list handed out rather than a name, so a recording
+/// reached from anywhere resolves the same way.
+#[tauri::command]
+fn read_recording(dir: String) -> Result<library::Session, String> {
+    library::read(std::path::Path::new(&dir)).map_err(|e| format!("{e:#}"))
 }
 
 /// The language settings as the UI exchanges them. Kept here rather than
@@ -122,7 +141,9 @@ pub fn run() {
             stop_capture,
             get_status,
             get_languages,
-            set_languages
+            set_languages,
+            list_recordings,
+            read_recording
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
