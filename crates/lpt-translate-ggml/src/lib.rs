@@ -167,9 +167,19 @@ pub unsafe extern "C" fn lpt_translate_shutdown(handle: *mut Translator) {
 /// swapped-in GGUF (Step 2's model picker) keeps working; ChatML only as
 /// a last resort.
 fn build_prompt(t: &Translator, sentence: &str, source: &str, target: &str) -> Result<String> {
+    // An empty source means detection was unconfident about this window
+    // (lpt_core::language). Naming a language we are not sure of is worse
+    // than naming none: told the wrong one, the model "corrects" the
+    // sentence into it instead of translating what was actually said.
+    let from = if source.is_empty() {
+        String::new()
+    } else {
+        format!("from {source} ")
+    };
     let system = format!(
         "You are a professional simultaneous interpreter. \
-         Translate the user's sentence from {source} to {target}. \
+         Translate the user's sentence {from}to {target}. \
+         If it is already in {target}, repeat it unchanged. \
          Output only the translation, nothing else."
     );
     if let Some(template) = &t.template {

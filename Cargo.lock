@@ -2012,6 +2012,7 @@ dependencies = [
  "dispatch2",
  "hound",
  "lpt-core",
+ "lpt-translate",
  "lpt-whisper",
  "mach2 0.4.3",
  "objc2",
@@ -2075,6 +2076,15 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "rubato",
+]
+
+[[package]]
+name = "lpt-translate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "libloading 0.8.9",
+ "lpt-core",
 ]
 
 [[package]]

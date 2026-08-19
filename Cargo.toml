@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "crates/lpt-core",
+    "crates/lpt-translate",
     "crates/lpt-translate-ggml",
     "crates/lpt-whisper",
     "crates/spike",
