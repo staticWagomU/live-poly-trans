@@ -26,6 +26,12 @@ const POLL_INTERVAL: Duration = Duration::from_millis(100);
 /// How long an overrun notice stays up after the last drop; long enough to
 /// read, gone once the trouble has passed.
 const OVERRUN_NOTICE: Duration = Duration::from_secs(5);
+/// A pending anchor within this much of where the current clock predicts it
+/// is the same continuous stream: capture timestamps wobble a little, and a
+/// hole this small is absorbed by the recorder's snap anyway. Beyond it, the
+/// audio either side belongs to different moments and must be placed
+/// separately (see [`LaneRuntime::drain`]).
+const ANCHOR_JUMP_NANOS: u64 = 30_000_000;
 
 pub enum Cmd {
     Start,
@@ -35,7 +41,7 @@ pub enum Cmd {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TranscriptPayload {
-    /// Which audio lane the text belongs to ("mic" now; "speaker" in Step 3).
+    /// Which audio lane the text belongs to ("mic" or "speaker").
     lane: &'static str,
     committed_delta: String,
     volatile: String,
@@ -182,10 +188,7 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui) {
     }
 }
 
-fn load_engines<'a>(
-    ui: &Ui,
-    engines: &'a mut Option<Engines>,
-) -> anyhow::Result<&'a mut Engines> {
+fn load_engines<'a>(ui: &Ui, engines: &'a mut Option<Engines>) -> anyhow::Result<&'a mut Engines> {
     if engines.is_none() {
         emit_status(ui, "loading", None);
         let engine = lpt_whisper::WhisperEngine::load(&model_path(), &allowed_langs())?;
@@ -279,9 +282,7 @@ fn start_capture(
 /// `Ok(None)` on platforms with no loopback backend yet (Windows gets
 /// WASAPI in a later pass).
 #[cfg(target_os = "macos")]
-fn start_speaker(
-    stop: &Arc<AtomicBool>,
-) -> anyhow::Result<Option<capture::CaptureSession>> {
+fn start_speaker(stop: &Arc<AtomicBool>) -> anyhow::Result<Option<capture::CaptureSession>> {
     start_capture(capture::speaker::spawn, stop).map(Some)
 }
 
@@ -319,8 +320,8 @@ struct Poll<'a> {
     index: usize,
 }
 
-/// Per-lane capture-to-scheduler state. Step 3 adds the speaker lane by
-/// constructing a second runtime; the engines stay shared across lanes.
+/// Per-lane capture-to-scheduler state: one runtime per lane, with the
+/// engines shared across them.
 struct LaneRuntime {
     lane: Lane,
     session: capture::CaptureSession,
@@ -464,13 +465,18 @@ impl LaneRuntime {
         if let Some(msg) = self.session.error.lock().unwrap().take() {
             anyhow::bail!("input stream failed: {msg}");
         }
-        let captured = self.drain();
-        if let Some(watch) = self.silence.as_mut() {
-            if let Some(notice) = watch.observe(&self.mono, Instant::now()) {
-                emit_status(poll.ui, "listening", Some(notice.to_string()));
+        // One pass per contiguous run: drain() stops at a time jump, and the
+        // next pass places what follows by its own anchor.
+        loop {
+            let captured = self.drain();
+            if self.mono.is_empty() {
+                break;
             }
-        }
-        if !self.mono.is_empty() {
+            if let Some(watch) = self.silence.as_mut() {
+                if let Some(notice) = watch.observe(&self.mono, Instant::now()) {
+                    emit_status(poll.ui, "listening", Some(notice.to_string()));
+                }
+            }
             // Where the OS says this audio was captured. Without an anchor
             // (the backend's ring of them overflowed) assume it continues
             // where the last chunk left off.
@@ -506,7 +512,10 @@ impl LaneRuntime {
             );
             self.reported_drops = drops;
             self.overrun_until = Some(Instant::now() + OVERRUN_NOTICE);
-        } else if self.overrun_until.is_some_and(|until| Instant::now() >= until) {
+        } else if self
+            .overrun_until
+            .is_some_and(|until| Instant::now() >= until)
+        {
             // The overrun stopped a while ago; take the notice down.
             emit_status(poll.ui, "listening", None);
             self.overrun_until = None;
@@ -519,15 +528,28 @@ impl LaneRuntime {
         samples * record::RECORD_RATE as usize / self.session.src_rate as usize
     }
 
-    /// Move everything the ring currently holds into `mono`, downmixed, and
-    /// report when the first frame of it was captured.
+    /// Move the ring's next contiguous run of audio into `mono`, downmixed,
+    /// and report when the first frame of it was captured.
+    ///
+    /// The read stops at a time jump between callbacks (a dropout, or a tap
+    /// that had nothing to deliver for a while): read past one, the hole
+    /// would collapse and everything after it would sit early in the
+    /// timeline. The caller drains in a loop, one pass per run.
     fn drain(&mut self) -> Option<u64> {
         let channels = self.session.channels;
-        let n = (self.session.consumer.slots() / channels) * channels;
-        if n == 0 {
+        let mut frames = self.session.consumer.slots() / channels;
+        if frames == 0 {
             return None;
         }
         let captured = self.captured_at();
+        let limit = self.frames_read + frames as u64;
+        if let Some(jump) =
+            self.trail
+                .jump_before(&mut self.session.times, limit, self.session.src_rate)
+        {
+            frames = (jump - self.frames_read) as usize;
+        }
+        let n = frames * channels;
         let Ok(chunk) = self.session.consumer.read_chunk(n) else {
             return None;
         };
@@ -591,6 +613,33 @@ impl AnchorTrail {
         let ahead = frames_read.saturating_sub(anchor.frame);
         Some(anchor.nanos + ahead * 1_000_000_000 / rate as u64)
     }
+
+    /// The frame of the first pending anchor before `limit` whose time
+    /// disagrees with the current clock — a real hole in the lane's audio.
+    /// Anchors that agree (within [`ANCHOR_JUMP_NANOS`]) are absorbed as the
+    /// scan passes them; they refine the clock but change nothing.
+    fn jump_before(
+        &mut self,
+        times: &mut rtrb::Consumer<capture::Anchor>,
+        limit: u64,
+        rate: u32,
+    ) -> Option<u64> {
+        let mut current = self.current?;
+        while let Ok(&next) = times.peek() {
+            if next.frame >= limit {
+                return None;
+            }
+            let expected =
+                current.nanos + (next.frame - current.frame) * 1_000_000_000 / rate as u64;
+            if next.nanos.abs_diff(expected) > ANCHOR_JUMP_NANOS {
+                return Some(next.frame);
+            }
+            current = next;
+            self.current = Some(next);
+            let _ = times.pop();
+        }
+        None
+    }
 }
 
 /// How long a lane may deliver nothing but digital silence before we call
@@ -633,14 +682,22 @@ impl SilenceWatch {
     }
 }
 
+/// Below this, a change in a lane's stream-to-recording offset is clock
+/// wobble, not a dropout: the 16 kHz resampler holds back up to ~21ms of
+/// input between polls, so the offset jitters that much even on a lane that
+/// never dropped a sample. Same idea as the recorder's snap on the write
+/// side.
+const TIMELINE_SLACK_MS: u64 = 30;
+
 /// Converts a lane's own clock — the audio the recognizer was given — into
 /// the recording's clock. The two differ by the silence the recorder had to
 /// insert: the lane's late start, plus every stretch where its device
 /// delivered nothing at all (a tap with nothing playing).
 ///
-/// That offset only changes at a dropout, so a lane that never drops out
-/// keeps a single anchor. Queries arrive in stream order, which is what lets
-/// spent anchors be dropped as they are passed.
+/// Only an offset change beyond [`TIMELINE_SLACK_MS`] — a real dropout —
+/// records a new anchor, so a lane that never drops out keeps a single one.
+/// Queries arrive in stream order, which is what lets spent anchors be
+/// dropped as they are passed.
 #[derive(Default)]
 struct LaneTimeline {
     /// (stream ms from which it applies, offset ms), oldest first.
@@ -650,7 +707,11 @@ struct LaneTimeline {
 impl LaneTimeline {
     /// Note the offset that applies to audio pushed at `stream_ms`.
     fn observe(&mut self, stream_ms: u64, offset_ms: u64) {
-        if self.anchors.last().is_none_or(|(_, at)| *at != offset_ms) {
+        if self
+            .anchors
+            .last()
+            .is_none_or(|(_, at)| at.abs_diff(offset_ms) > TIMELINE_SLACK_MS)
+        {
             self.anchors.push((stream_ms, offset_ms));
         }
     }
@@ -770,7 +831,7 @@ mod tests {
         let mut gate = EmitGate::default();
         assert!(!gate.should_emit(&out("", ""))); // nothing shown yet: idle
         assert!(gate.should_emit(&out("", "こんにち"))); // tail appears
-        // agreement hid the contradicted tail: the UI must be told
+                                                         // agreement hid the contradicted tail: the UI must be told
         assert!(gate.should_emit(&out("", "")));
         assert!(!gate.should_emit(&out("", ""))); // already clear: idle again
     }
@@ -792,7 +853,10 @@ mod tests {
         // Callbacks arriving full of zeros: the lane is running, so this is
         // not an idle device — it is the permission being withheld.
         assert_eq!(watch.observe(&[0.0; 16], t0), None);
-        assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE), Some(SILENT_LANE_NOTICE));
+        assert_eq!(
+            watch.observe(&[0.0; 16], t0 + SILENCE_GRACE),
+            Some(SILENT_LANE_NOTICE)
+        );
         // Said once: repeating it every poll would bury the real status.
         assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE * 2), None);
     }
@@ -891,6 +955,71 @@ mod tests {
         assert_eq!(trail.nanos_at(&mut times, 0, RATE), None);
     }
 
+    /// A LaneRuntime over hand-fed rings, for driving `drain` directly.
+    fn test_lane() -> (
+        rtrb::Producer<f32>,
+        rtrb::Producer<capture::Anchor>,
+        LaneRuntime,
+    ) {
+        let (audio_tx, consumer) = rtrb::RingBuffer::new(RATE as usize);
+        let (anchor_tx, times) = rtrb::RingBuffer::new(16);
+        let session = capture::CaptureSession {
+            consumer,
+            times,
+            src_rate: RATE,
+            channels: 1,
+            dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            error: Arc::new(Mutex::new(None)),
+        };
+        let lane = LaneRuntime::new(Lane::Mic, session).expect("48 kHz lane");
+        (audio_tx, anchor_tx, lane)
+    }
+
+    fn feed(
+        audio: &mut rtrb::Producer<f32>,
+        anchors: &mut rtrb::Producer<capture::Anchor>,
+        frame: u64,
+        nanos: u64,
+        samples: &[f32],
+    ) {
+        anchors
+            .push(capture::Anchor { frame, nanos })
+            .expect("room for the anchor");
+        for s in samples {
+            audio.push(*s).expect("room for the audio");
+        }
+    }
+
+    #[test]
+    fn a_time_jump_inside_one_drain_splits_the_read() {
+        // Two callbacks a second apart sit in the ring together (a decode
+        // stall kept the worker away). Read as one chunk, the second of
+        // silence between them would collapse and the later audio would sit
+        // a second early in the timeline.
+        let (mut audio, mut anchors, mut lane) = test_lane();
+        feed(&mut audio, &mut anchors, 0, 1_000 * MS, &[0.1; 480]);
+        feed(&mut audio, &mut anchors, 480, 2_000 * MS, &[0.2; 480]);
+
+        assert_eq!(lane.drain(), Some(1_000 * MS));
+        assert_eq!(lane.mono.len(), 480, "only up to the jump");
+        lane.mono.clear();
+        assert_eq!(lane.drain(), Some(2_000 * MS), "the hole survives");
+        assert_eq!(lane.mono.len(), 480);
+    }
+
+    #[test]
+    fn contiguous_callbacks_drain_as_one_chunk() {
+        // 480 frames at 48 kHz is 10ms: the second anchor sits exactly where
+        // the first predicts it, so nothing splits.
+        let (mut audio, mut anchors, mut lane) = test_lane();
+        feed(&mut audio, &mut anchors, 0, 1_000 * MS, &[0.1; 480]);
+        feed(&mut audio, &mut anchors, 480, 1_010 * MS, &[0.2; 480]);
+
+        assert_eq!(lane.drain(), Some(1_000 * MS));
+        assert_eq!(lane.mono.len(), 960);
+        assert_eq!(lane.session.times.slots(), 0, "both anchors consumed");
+    }
+
     #[test]
     fn the_session_clock_starts_at_the_first_moment_it_is_shown() {
         let mut clock = SessionClock::default();
@@ -919,6 +1048,19 @@ mod tests {
         timeline.observe(0, 300);
         assert_eq!(timeline.recording_ms(0), 300);
         assert_eq!(timeline.recording_ms(5_000), 5_300);
+    }
+
+    #[test]
+    fn offset_wobble_within_the_slack_is_not_a_dropout() {
+        // The 16 kHz resampler's holdback makes the offset jitter by ~21ms
+        // per poll; recording an anchor for each would bury the real
+        // dropouts under bookkeeping.
+        let mut timeline = LaneTimeline::default();
+        timeline.observe(0, 100);
+        timeline.observe(50, 115);
+        timeline.observe(100, 92);
+        assert_eq!(timeline.anchors.len(), 1);
+        assert_eq!(timeline.recording_ms(200), 300);
     }
 
     #[test]

@@ -152,7 +152,10 @@ impl StreamScheduler {
             let effective_lang = lang.or(self.window_lang.as_deref());
             let hypothesis = engine.transcribe(&self.buffer, effective_lang)?;
             self.note_utterance_start(&hypothesis);
-            end_ms = self.window_start_ms() + hypothesis.end_ms;
+            // Trust an earlier end (the speech stopped before the audio did)
+            // but never a later one: whisper's loose last-segment timestamp
+            // routinely claims the padding.
+            end_ms = end_ms.min(self.window_start_ms() + hypothesis.end_ms);
             let agreement = self.agreement.feed(&hypothesis.text);
             self.utterance_acc.push_str(&agreement.committed_delta);
             committed_delta.push_str(&agreement.committed_delta);
@@ -312,7 +315,11 @@ mod tests {
     }
 
     impl AsrEngine for FakeEngine {
-        fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis> {
+        fn transcribe(
+            &mut self,
+            samples: &[f32],
+            lang: Option<&str>,
+        ) -> anyhow::Result<Hypothesis> {
             self.received_samples.push(samples.len());
             self.received_langs.push(lang.map(str::to_string));
             let line = self.script.pop().expect("script exhausted");
@@ -402,10 +409,7 @@ mod tests {
         // once the utterance continues, its first samples are still there
         sched.push_audio(&seconds(1));
         sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
-        assert_eq!(
-            engine.received_samples,
-            vec![ONSET_GUARD_SAMPLES + 16_000]
-        );
+        assert_eq!(engine.received_samples, vec![ONSET_GUARD_SAMPLES + 16_000]);
     }
 
     #[test]
@@ -451,10 +455,7 @@ mod tests {
         sched.push_audio(&seconds(1));
         sched.step(&mut engine, &mut vad, None).unwrap();
         // detection stays open until a hypothesis with text pins it
-        assert_eq!(
-            engine.received_langs,
-            vec![None, None, Some("ja".into())]
-        );
+        assert_eq!(engine.received_langs, vec![None, None, Some("ja".into())]);
     }
 
     #[test]
@@ -476,10 +477,7 @@ mod tests {
         sched.step(&mut engine, &mut vad, None).unwrap();
         sched.push_audio(&seconds(1));
         sched.step(&mut engine, &mut vad, None).unwrap();
-        assert_eq!(
-            engine.received_langs,
-            vec![None, None, Some("ja".into())]
-        );
+        assert_eq!(engine.received_langs, vec![None, None, Some("ja".into())]);
     }
 
     #[test]
@@ -583,6 +581,19 @@ mod tests {
         let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
         let utterance = fin.utterance_final.unwrap();
         assert_eq!((utterance.start_ms, utterance.end_ms), (0, 1_500));
+    }
+
+    #[test]
+    fn finish_does_not_stretch_the_end_into_the_padding() {
+        // Half a second of real audio is padded up to a decodable window;
+        // whisper's loose end timestamp claims the padding too. The
+        // utterance still ends where the captured audio does.
+        let mut engine = FakeEngine::scripted_with_end_ms(&[("はい", Some(900))]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&vec![0.1; TARGET_RATE as usize / 2]);
+        let fin = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(fin.utterance_final.unwrap().end_ms, 500);
     }
 
     #[test]

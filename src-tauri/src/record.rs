@@ -5,12 +5,11 @@
 //! the files hold what the devices actually heard rather than what the
 //! recognizer chose to look at.
 //!
-//! All three files share one timeline — the leading lane is the clock, and a
-//! lane that delivers nothing gets padded with silence rather than having its
-//! next audio butted against its last. That alignment is only as sharp as the
-//! mix's lag: nothing in the capture path carries per-buffer timestamps, so a
-//! lane running under half a second behind is taken to be buffering, not
-//! silent.
+//! All three files share one timeline, whose zero is the session's first
+//! captured moment. The caller places every chunk by the capture timestamp
+//! the OS stamped it with (`pipeline::SessionClock`), so a lane that opened
+//! late or delivered nothing for a while gets silence where it was absent —
+//! no lane is another's clock.
 //!
 //! Recording never takes the session down with it. A failure while writing
 //! (disk full, volume ejected) stops the recording and is reported once; the
