@@ -4,7 +4,7 @@ the transcript point at the audio it claims?
 
     scripts/check-recording.py [session-dir] [--sync]
 
-With no argument it takes the newest session under ~/Music/live-poly-trans.
+With no argument it takes the newest session under ~/Music/kikimimic.
 
 The alignment test is deliberately blunt: an utterance's span should be
 louder than the lane's quiet background. A transcript stamped against the
@@ -101,7 +101,7 @@ def report_sync(audio, hop_ms=5, span_ms=1000):
 
 
 def main():
-    base = Path.home() / "Music" / "live-poly-trans"
+    base = Path.home() / "Music" / "kikimimic"
     argv = [a for a in sys.argv[1:] if not a.startswith("--")]
     want_sync = "--sync" in sys.argv
     if argv:

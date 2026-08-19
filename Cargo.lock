@@ -1928,6 +1928,66 @@ dependencies = [
 ]
 
 [[package]]
+name = "kikimimic"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "block2",
+ "chrono",
+ "cpal",
+ "dispatch2",
+ "hound",
+ "kkm-core",
+ "kkm-translate",
+ "kkm-whisper",
+ "mach2 0.4.3",
+ "objc2",
+ "objc2-core-audio",
+ "objc2-core-audio-types",
+ "objc2-core-foundation",
+ "objc2-foundation",
+ "rtrb",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+]
+
+[[package]]
+name = "kkm-core"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rubato",
+]
+
+[[package]]
+name = "kkm-translate"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kkm-core",
+ "libloading 0.8.9",
+]
+
+[[package]]
+name = "kkm-translate-ggml"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "llama-cpp-2",
+]
+
+[[package]]
+name = "kkm-whisper"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "kkm-core",
+ "whisper-rs",
+]
+
+[[package]]
 name = "libappindicator"
 version = "0.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2002,32 +2062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "92daf443525c4cce67b150400bc2316076100ce0b3686209eb8cf3c31612e6f0"
 
 [[package]]
-name = "live-poly-trans"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "block2",
- "chrono",
- "cpal",
- "dispatch2",
- "hound",
- "lpt-core",
- "lpt-translate",
- "lpt-whisper",
- "mach2 0.4.3",
- "objc2",
- "objc2-core-audio",
- "objc2-core-audio-types",
- "objc2-core-foundation",
- "objc2-foundation",
- "rtrb",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
-]
-
-[[package]]
 name = "llama-cpp-2"
 version = "0.1.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2069,40 +2103,6 @@ name = "log"
 version = "0.4.33"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0ceec5bc11778974d1bcb055b18002eba7f4b3518b6a0081b3af5f21666da9ad"
-
-[[package]]
-name = "lpt-core"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "rubato",
-]
-
-[[package]]
-name = "lpt-translate"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "libloading 0.8.9",
- "lpt-core",
-]
-
-[[package]]
-name = "lpt-translate-ggml"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "llama-cpp-2",
-]
-
-[[package]]
-name = "lpt-whisper"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "lpt-core",
- "whisper-rs",
-]
 
 [[package]]
 name = "mach2"
@@ -3436,11 +3436,11 @@ dependencies = [
  "cpal",
  "dispatch2",
  "hound",
+ "kkm-core",
+ "kkm-whisper",
  "libc",
  "libloading 0.8.9",
  "llama-cpp-2",
- "lpt-core",
- "lpt-whisper",
  "objc2",
  "objc2-core-audio",
  "objc2-core-audio-types",

@@ -15,13 +15,13 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 echo "==> translation backend (cdylib)"
-cargo build --release -p lpt-translate-ggml
+cargo build --release -p kkm-translate-ggml
 
 echo "==> app bundle"
 bun run tauri build
 
 # The workspace shares one target dir, so the bundle lands at the root.
-app="target/release/bundle/macos/LivePolyTrans.app"
+app="target/release/bundle/macos/Kikimimic.app"
 echo "==> built $app"
 if [[ "${1-}" == "--open" ]]; then
   open "$app"

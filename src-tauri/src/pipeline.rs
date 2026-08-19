@@ -16,9 +16,9 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::capture;
 use crate::record;
 use crate::translate::{Outcome, Status, TranslateLane};
-use lpt_core::language::LanguagePolicy;
-use lpt_core::models::{Model, ModelManager};
-use lpt_core::Lane;
+use kkm_core::language::LanguagePolicy;
+use kkm_core::models::{Model, ModelManager};
+use kkm_core::Lane;
 
 /// Decode cadence, measured step-start to step-start: a slow decode eats
 /// into the following idle time instead of stacking on top of it.
@@ -116,11 +116,11 @@ pub fn new_policy_store() -> PolicyStore {
 }
 
 /// The startup default, still honouring the environment variables the
-/// pipeline grew up with: `LPT_LANG` pins one spoken language, `LPT_LANGS`
-/// lists the candidates, `LPT_TARGET` (or `none`) sets the translation target.
+/// pipeline grew up with: `KKM_LANG` pins one spoken language, `KKM_LANGS`
+/// lists the candidates, `KKM_TARGET` (or `none`) sets the translation target.
 fn policy_from_env() -> LanguagePolicy {
     let mut policy = LanguagePolicy::default();
-    if let Ok(langs) = std::env::var("LPT_LANGS") {
+    if let Ok(langs) = std::env::var("KKM_LANGS") {
         let spoken: Vec<String> = langs
             .split(',')
             .map(|l| l.trim().to_string())
@@ -130,10 +130,10 @@ fn policy_from_env() -> LanguagePolicy {
             policy.spoken = spoken;
         }
     }
-    if let Ok(lang) = std::env::var("LPT_LANG") {
+    if let Ok(lang) = std::env::var("KKM_LANG") {
         policy.spoken = vec![lang];
     }
-    if let Ok(target) = std::env::var("LPT_TARGET") {
+    if let Ok(target) = std::env::var("KKM_TARGET") {
         policy.target = (target != "none" && !target.is_empty()).then_some(target);
     }
     policy
@@ -147,8 +147,8 @@ pub struct Ui {
 }
 
 struct Engines {
-    engine: lpt_whisper::WhisperEngine,
-    vad: lpt_whisper::SileroVad,
+    engine: kkm_whisper::WhisperEngine,
+    vad: kkm_whisper::SileroVad,
     /// What the engine was last told detection may choose between. The
     /// engines outlive a session while the policy can change between (and
     /// during) sessions, so the two have to be compared rather than assumed.
@@ -199,7 +199,7 @@ fn emit_recording_dir(ui: &Ui, dir: Option<String>) {
 fn emit_step(
     ui: &Ui,
     lane: Lane,
-    out: lpt_core::scheduler::StepOutput,
+    out: kkm_core::scheduler::StepOutput,
     utterance_final: Option<UtterancePayload>,
 ) {
     let _ = ui.app.emit(
@@ -261,11 +261,11 @@ fn load_engines<'a>(
     if engines.is_none() {
         emit_status(ui, "loading", None);
         let models = models(&ui.app);
-        let engine = lpt_whisper::WhisperEngine::load(
+        let engine = kkm_whisper::WhisperEngine::load(
             &models.resolve(Model::Asr)?.to_string_lossy(),
             spoken,
         )?;
-        let vad = lpt_whisper::SileroVad::load(&models.resolve(Model::Vad)?.to_string_lossy())?;
+        let vad = kkm_whisper::SileroVad::load(&models.resolve(Model::Vad)?.to_string_lossy())?;
         *engines = Some(Engines {
             engine,
             vad,
@@ -344,11 +344,11 @@ fn run_session(
 }
 
 /// Where sessions are recorded: the platform's music folder by default
-/// (`~/Music/live-poly-trans` on macOS), overridable with `LPT_RECORD_DIR`.
+/// (`~/Music/kikimimic` on macOS), overridable with `KKM_RECORD_DIR`.
 fn record_base(app: &AppHandle) -> anyhow::Result<PathBuf> {
-    match std::env::var("LPT_RECORD_DIR") {
+    match std::env::var("KKM_RECORD_DIR") {
         Ok(dir) => Ok(PathBuf::from(dir)),
-        Err(_) => Ok(app.path().audio_dir()?.join("live-poly-trans")),
+        Err(_) => Ok(app.path().audio_dir()?.join("kikimimic")),
     }
 }
 
@@ -500,7 +500,7 @@ struct Submitted {
     translating: bool,
     /// The older sentence dropped to make room, whose line is still waiting
     /// for a translation that will now never arrive.
-    evicted: Option<lpt_core::translate::Job>,
+    evicted: Option<kkm_core::translate::Job>,
 }
 
 impl Translations {
@@ -538,7 +538,7 @@ impl Translations {
                 evicted: None,
             };
         };
-        let evicted = self.lane.submit(lpt_core::translate::Job {
+        let evicted = self.lane.submit(kkm_core::translate::Job {
             id,
             lane,
             text: text.to_string(),
@@ -588,8 +588,8 @@ struct LaneRuntime {
     /// Where this lane's audio is expected to continue, for the rare poll
     /// with no anchor to go on.
     next_position: usize,
-    resampler: lpt_core::resample::StreamResampler,
-    scheduler: lpt_core::scheduler::StreamScheduler,
+    resampler: kkm_core::resample::StreamResampler,
+    scheduler: kkm_core::scheduler::StreamScheduler,
     /// Downmix scratch buffer, reused across polls.
     mono: Vec<f32>,
     reported_drops: usize,
@@ -611,7 +611,7 @@ struct LaneRuntime {
 
 impl LaneRuntime {
     fn new(lane: Lane, session: capture::CaptureSession) -> anyhow::Result<Self> {
-        let resampler = lpt_core::resample::StreamResampler::new(session.src_rate)?;
+        let resampler = kkm_core::resample::StreamResampler::new(session.src_rate)?;
         Ok(Self {
             lane,
             session,
@@ -619,7 +619,7 @@ impl LaneRuntime {
             trail: AnchorTrail::default(),
             next_position: 0,
             resampler,
-            scheduler: lpt_core::scheduler::StreamScheduler::new(),
+            scheduler: kkm_core::scheduler::StreamScheduler::new(),
             mono: Vec::new(),
             reported_drops: 0,
             overrun_until: None,
@@ -634,7 +634,7 @@ impl LaneRuntime {
     /// Milliseconds of audio handed to the scheduler so far — the clock its
     /// hypotheses are timed against.
     fn stream_ms(&self) -> u64 {
-        self.stream_samples as u64 * 1000 / lpt_core::resample::TARGET_RATE as u64
+        self.stream_samples as u64 * 1000 / kkm_core::resample::TARGET_RATE as u64
     }
 
     /// One poll of this lane: drain captured audio, then decode if its
@@ -675,7 +675,7 @@ impl LaneRuntime {
     /// Send a step's outcome to the UI, a finished utterance to the session's
     /// transcript (both timed against the recording), and the same utterance
     /// to the translation lane.
-    fn deliver(&mut self, poll: &mut Poll<'_>, out: lpt_core::scheduler::StepOutput) {
+    fn deliver(&mut self, poll: &mut Poll<'_>, out: kkm_core::scheduler::StepOutput) {
         if !self.gate.should_emit(&out) {
             return;
         }
@@ -734,7 +734,7 @@ impl LaneRuntime {
             emit_step(
                 poll.ui,
                 self.lane,
-                lpt_core::scheduler::StepOutput::default(),
+                kkm_core::scheduler::StepOutput::default(),
                 None,
             );
         }
@@ -1035,7 +1035,7 @@ struct EmitGate {
 }
 
 impl EmitGate {
-    fn should_emit(&mut self, out: &lpt_core::scheduler::StepOutput) -> bool {
+    fn should_emit(&mut self, out: &kkm_core::scheduler::StepOutput) -> bool {
         let has_news = !out.committed_delta.is_empty()
             || !out.volatile.is_empty()
             || out.utterance_final.is_some();
@@ -1270,7 +1270,7 @@ fn report_recording_failure(ui: &Ui, notices: &mut Notices, rec: &mut record::Se
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lpt_core::scheduler::StepOutput;
+    use kkm_core::scheduler::StepOutput;
 
     fn out(committed: &str, volatile: &str) -> StepOutput {
         StepOutput {
@@ -1386,7 +1386,7 @@ mod tests {
         let fin = StepOutput {
             committed_delta: String::new(),
             volatile: String::new(),
-            utterance_final: Some(lpt_core::scheduler::Utterance {
+            utterance_final: Some(kkm_core::scheduler::Utterance {
                 text: "こんにちは".into(),
                 start_ms: 0,
                 end_ms: 1_000,

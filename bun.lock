@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "live-poly-trans",
+      "name": "kikimimic",
       "dependencies": {
         "@tauri-apps/api": "^2.6.0",
         "svelte": "^5.56.3",

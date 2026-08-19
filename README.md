@@ -1,6 +1,9 @@
-# LivePolyTrans v2
+# Kikimimic v2
 
 リアルタイム多言語文字起こし＋翻訳アプリの作り直し（v2）ブランチ。
+
+名前は「聞き耳（kikimimi）」と「mimic（真似る＝話を写し取る）」の重ね合わせで、
+共有している `mimi` が二つのレーン——自分の声とスピーカーから届く相手の声——にあたる。
 
 - 単語単位のリアルタイム文字起こし（ローカルWhisper）
 - 確定文単位のリアルタイム翻訳（ローカルLLM）
@@ -22,7 +25,7 @@ v1の実装は `v1` ブランチに保存されている。
 翻訳バックエンドはcdylibとして別にビルドする。llama.cppのggmlをwhisperのggmlと同じバイナリに入れられないため（[ADR-153805](docs/ADR/20260819-143000-isolate-llama-cpp-in-a-cdylib.md)）:
 
 ```sh
-cargo build --release -p lpt-translate-ggml
+cargo build --release -p kkm-translate-ggml
 ```
 
 起動:
@@ -32,7 +35,7 @@ cargo build --release -p lpt-translate-ggml
 
 ## 録音
 
-Recordを押すとセッションごとに `~/Music/live-poly-trans/<yyyyMMddHHmmss>/` が作られ、以下が書き出される（48kHz / モノラル / 16bit PCM）:
+Recordを押すとセッションごとに `~/Music/kikimimic/<yyyyMMddHHmmss>/` が作られ、以下が書き出される（48kHz / モノラル / 16bit PCM）:
 
 - `mic.wav` — マイクレーン
 - `speaker.wav` — スピーカーレーン（取得できなかった場合は無音）
@@ -71,16 +74,16 @@ VADや無音ゲートより手前の音をそのまま書くので、文字起�
 
 | 変数 | 既定 | 意味 |
 |---|---|---|
-| `LPT_WHISPER_MODEL` | `models/ggml-large-v3-turbo-q8_0.bin` | Whisperモデルのパス |
-| `LPT_VAD_MODEL` | `models/ggml-silero-v5.1.2.bin` | Silero VADモデルのパス |
-| `LPT_LLM_MODEL` | `models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` | 翻訳LLMのパス |
-| `LPT_TRANSLATE_DYLIB` | `.app`内 → `target/{release,debug}` の順に探索 | 翻訳バックエンドcdylibのパス |
-| `LPT_LLM_GPU_LAYERS` | 全層 | 翻訳LLMをGPUに載せる層数。`0`でCPU |
-| `LPT_LANGS` | `ja,en` | 起動時の「話される言語」候補（最大2）。アプリ内の言語ピルで変更でき、そちらが優先 |
-| `LPT_LANG` | 未設定 | 設定すると起動時の話される言語を1つに固定（言語判定を行わない） |
-| `LPT_TARGET` | `ja` | 起動時の翻訳先。`none` で翻訳オフ |
-| `LPT_VAD_THRESHOLD` | whisper.cpp既定(0.5) | 発話判定しきい値 0..1 |
-| `LPT_VAD_MIN_SPEECH_MS` | whisper.cpp既定 | これより短い発話は無視 |
-| `LPT_VAD_MIN_SILENCE_MS` | whisper.cpp既定 | 発話区切りとみなす最短無音 |
-| `LPT_VAD_PAD_MS` | whisper.cpp既定 | 検出区間の前後パディング |
-| `LPT_RECORD_DIR` | `~/Music/live-poly-trans` | 録音セッションフォルダを作る親ディレクトリ |
+| `KKM_WHISPER_MODEL` | `models/ggml-large-v3-turbo-q8_0.bin` | Whisperモデルのパス |
+| `KKM_VAD_MODEL` | `models/ggml-silero-v5.1.2.bin` | Silero VADモデルのパス |
+| `KKM_LLM_MODEL` | `models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf` | 翻訳LLMのパス |
+| `KKM_TRANSLATE_DYLIB` | `.app`内 → `target/{release,debug}` の順に探索 | 翻訳バックエンドcdylibのパス |
+| `KKM_LLM_GPU_LAYERS` | 全層 | 翻訳LLMをGPUに載せる層数。`0`でCPU |
+| `KKM_LANGS` | `ja,en` | 起動時の「話される言語」候補（最大2）。アプリ内の言語ピルで変更でき、そちらが優先 |
+| `KKM_LANG` | 未設定 | 設定すると起動時の話される言語を1つに固定（言語判定を行わない） |
+| `KKM_TARGET` | `ja` | 起動時の翻訳先。`none` で翻訳オフ |
+| `KKM_VAD_THRESHOLD` | whisper.cpp既定(0.5) | 発話判定しきい値 0..1 |
+| `KKM_VAD_MIN_SPEECH_MS` | whisper.cpp既定 | これより短い発話は無視 |
+| `KKM_VAD_MIN_SILENCE_MS` | whisper.cpp既定 | 発話区切りとみなす最短無音 |
+| `KKM_VAD_PAD_MS` | whisper.cpp既定 | 検出区間の前後パディング |
+| `KKM_RECORD_DIR` | `~/Music/kikimimic` | 録音セッションフォルダを作る親ディレクトリ |

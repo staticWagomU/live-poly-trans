@@ -20,8 +20,8 @@ use std::io::{BufWriter, Write};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use lpt_core::mix::Mixer;
-use lpt_core::resample::StreamResampler;
+use kkm_core::mix::Mixer;
+use kkm_core::resample::StreamResampler;
 
 /// One rate for every file we write, so the lanes and their mix share a
 /// format regardless of what each device runs at. 48 kHz is what both macOS
@@ -319,7 +319,7 @@ mod tests {
         static N: AtomicUsize = AtomicUsize::new(0);
         let n = N.fetch_add(1, Ordering::Relaxed);
         let dir =
-            std::env::temp_dir().join(format!("lpt-record-{label}-{}-{n}", std::process::id()));
+            std::env::temp_dir().join(format!("kkm-record-{label}-{}-{n}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         dir
     }

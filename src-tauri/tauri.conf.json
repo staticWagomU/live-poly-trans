@@ -1,8 +1,8 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "LivePolyTrans",
+  "productName": "Kikimimic",
   "version": "0.1.0",
-  "identifier": "com.staticwagomu.live-poly-trans",
+  "identifier": "com.staticwagomu.kikimimic",
   "build": {
     "beforeDevCommand": "bun run dev",
     "beforeBuildCommand": "bun run build",
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "LivePolyTrans",
+        "title": "Kikimimic",
         "label": "main",
         "width": 980,
         "height": 700,
@@ -30,7 +30,7 @@
     "icon": ["icons/icon.png"],
     "macOS": {
       "minimumSystemVersion": "14.2",
-      "frameworks": ["../target/release/liblpt_translate_ggml.dylib"]
+      "frameworks": ["../target/release/libkkm_translate_ggml.dylib"]
     }
   }
 }

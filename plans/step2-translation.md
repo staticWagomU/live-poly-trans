@@ -14,7 +14,7 @@
 
 ```
 utterance_final ──> TranslationQueue（バックプレッシャー）──> 翻訳ワーカースレッド
-   (pipeline)          lpt-core（純ロジック）                 lpt-translate（dlopen）
+   (pipeline)          kkm-core（純ロジック）                 kkm-translate（dlopen）
                                                                     │
    pipeline のポーリングループが結果を回収 ──> transcript イベント / transcript.jsonl
 ```
@@ -44,11 +44,11 @@ utterance_final ──> TranslationQueue（バックプレッシャー）──>
 
 ## 作業（TDD）
 
-- [x] `lpt-core::language`: `LanguagePolicy`（`pinned_lang` / `target_for`）と言語表示名
-- [x] `lpt-core::translate`: `TranslationQueue`（有限長・最古退避）
-- [x] `lpt-core::models`: モデルパス解決（env override → 探索ディレクトリ）
+- [x] `kkm-core::language`: `LanguagePolicy`（`pinned_lang` / `target_for`）と言語表示名
+- [x] `kkm-core::translate`: `TranslationQueue`（有限長・最古退避）
+- [x] `kkm-core::models`: モデルパス解決（env override → 探索ディレクトリ）
 - [x] `scheduler::Utterance` に `lang` を追加（翻訳元の判定に要る）
-- [x] `crates/lpt-translate`: cdylib の dlopen ローダ（`Translator` 実装）＋探索順のテスト
+- [x] `crates/kkm-translate`: cdylib の dlopen ローダ（`Translator` 実装）＋探索順のテスト
 - [x] cdylib: 元言語を指定しないプロンプト経路
 - [x] `src-tauri/src/translate.rs`: ワーカースレッド（遅延ロード・失敗は通知のみ）
 - [x] pipeline 配線: 発話ID採番・投入・結果回収・Stop時のドレイン

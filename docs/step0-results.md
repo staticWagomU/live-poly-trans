@@ -24,7 +24,7 @@ whisper.cppの処理がllama.cpp側のggml（バージョン不一致）を呼�
 
 ### 追記（2026-08-18）: cdylib分離の検証 — 成功
 
-`crates/lpt-translate-ggml`（llama-cpp-2をC ABIのcdylibに隔離）を
+`crates/kkm-translate-ggml`（llama-cpp-2をC ABIのcdylibに隔離）を
 whisper-rs静的リンク済みバイナリから`libloading`でロードし、
 ウィンドウ再デコード（負荷あり）と文翻訳を**同一プロセスで同時実行**して確認:
 
@@ -32,7 +32,7 @@ whisper-rs静的リンク済みバイナリから`libloading`でロードし、
 - 翻訳 0.9〜2.1s/文、ASR最悪ウィンドウデコード 868ms（同時負荷下）
 - ピークRSS 3791MB（単一プロセス。2プロセス近似の3.9GBと同等）
 
-再現: `cargo build --release -p lpt-translate-ggml` →
+再現: `cargo build --release -p kkm-translate-ggml` →
 `cargo run --release -p spike --bin cdylib-check --no-default-features --features asr`
 
 → **cdylib方式で確定してよい**。Step 2着手時にADR化し、`Translator` trait実装を

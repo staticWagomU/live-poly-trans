@@ -2,35 +2,35 @@
 //! Play a known wav through the speakers while this runs and the committed
 //! text should converge to its script.
 //!
-//! Usage: pipeline-check  (env: WHISPER_MODEL, LPT_LANG, CAPTURE_SECS)
+//! Usage: pipeline-check  (env: WHISPER_MODEL, KKM_LANG, CAPTURE_SECS)
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::Context;
-use lpt_core::scheduler::StreamScheduler;
+use kkm_core::scheduler::StreamScheduler;
 
 fn main() -> anyhow::Result<()> {
     let model = std::env::var("WHISPER_MODEL")
         .unwrap_or_else(|_| "models/ggml-large-v3-turbo-q8_0.bin".into());
-    let lang = std::env::var("LPT_LANG").ok(); // unset = auto-detect per window
+    let lang = std::env::var("KKM_LANG").ok(); // unset = auto-detect per window
     let secs: u64 = std::env::var("CAPTURE_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
         .unwrap_or(20);
 
-    let allowed: Vec<String> = std::env::var("LPT_LANGS")
+    let allowed: Vec<String> = std::env::var("KKM_LANGS")
         .unwrap_or_else(|_| "ja,en".into())
         .split(',')
         .map(|l| l.trim().to_string())
         .filter(|l| !l.is_empty())
         .collect();
     eprintln!("loading {model} … (langs {allowed:?})");
-    let mut engine = lpt_whisper::WhisperEngine::load(&model, &allowed)?;
-    let vad_model = std::env::var("LPT_VAD_MODEL")
+    let mut engine = kkm_whisper::WhisperEngine::load(&model, &allowed)?;
+    let vad_model = std::env::var("KKM_VAD_MODEL")
         .unwrap_or_else(|_| "models/ggml-silero-v5.1.2.bin".into());
-    let mut vad = lpt_whisper::SileroVad::load(&vad_model)?;
+    let mut vad = kkm_whisper::SileroVad::load(&vad_model)?;
     eprintln!("capturing {secs}s from default input (lang={lang:?})");
 
     let pending: Arc<Mutex<Vec<f32>>> = Arc::new(Mutex::new(Vec::new()));
@@ -89,7 +89,7 @@ fn capture(running: &AtomicBool, pending: Arc<Mutex<Vec<f32>>>) -> anyhow::Resul
 
     let mut raw_count = 0usize;
     let mut last_report = std::time::Instant::now();
-    let mut resampler = lpt_core::resample::StreamResampler::new(src_rate)?;
+    let mut resampler = kkm_core::resample::StreamResampler::new(src_rate)?;
     let stream = device.build_input_stream(
         config.into(),
         move |data: &[f32], _info| {

@@ -1,4 +1,4 @@
-# LivePolyTrans v2 再構築プラン
+# Kikimimic v2 再構築プラン
 
 技術選定の背景と根拠は `docs/ADR/` を参照。v1の実装は `v1` ブランチに保存されており、必要なファイルは都度持ってくる。
 
@@ -46,7 +46,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 1: マイク → ASR → 画面表示
 
-- [x] ワークスペース初期化（Tauri 2＋Svelte 5、コアはcrateとして分離: lpt-core / lpt-whisper / src-tauri）
+- [x] ワークスペース初期化（Tauri 2＋Svelte 5、コアはcrateとして分離: kkm-core / kkm-whisper / src-tauri）
 - [x] cpalでマイク取得 → リサンプリング（16kHz mono f32、線形補間・TDD済み）
 - [x] `AsrEngine` trait＋whisper-rs実装、LocalAgreementによるpartial/final確定（文字単位LCP・TDD済み、テスト11本）
 - [x] `transcript` イベント（committedDelta / volatile）をUIへ ※lane/start_msはStep 3のスピーカーレーン追加時に拡張
@@ -54,12 +54,12 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] 無音ゲート（-50dBFS未満はデコードスキップ。無音時のWhisper幻覚対策、Step 0で実測確認）→ その後Silero VADに置換
 - [x] 2026-08-18 レビュー指摘の全面対応（plans/review-fixes.md）: 常駐パイプラインワーカー化（レース・再ロード解消）、`utterance_final`イベント（Step 2翻訳レーンの入力単位）、スライド時の音声持ち越し＋発話頭ガード、rubatoリサンプラ、RT安全なキャプチャ、UIのstatus同期・自動スクロール
 - [x] 2026-08-18 2回目レビュー対応（plans/review-fixes-2.md）: EmitGate（volatile取り消しイベントの配送）、Stop時の未デコード音声救済（ring/resampler/schedulerの畳み込み）、`get_status`同期＋楽観更新、キャプチャエラーのセッション伝播、レーン配管（`lane`フィールド・LaneRuntime）、空仮説の言語ピン抑止、翻訳cdylib強化（catch_unwind・context再利用・chat template・切り詰めの可視化）、追尾スクロールの一時停止、overrun表示のms化
-- [x] 実発話での動作確認（Recordを押して日本語で話す→confirm。`LPT_LANG=en`で英語も確認）
+- [x] 実発話での動作確認（Recordを押して日本語で話す→confirm。`KKM_LANG=en`で英語も確認）
 
 ### Step 2: 確定文の翻訳レーン
 
-- [x] `Translator` trait＋組み込みllama.cpp実装 — cdylib（`lpt-translate-ggml`）をdlopenする`lpt-translate`＋専用スレッド。キュー上限8文、溢れたら**最古を捨てる**（会議で価値があるのは画面に出ている最新の文）
-- [x] モデル管理（`lpt-core::models`）: ASR・VAD・翻訳LLMを共通の探索順（env override → アプリデータ → チェックアウトの`models/`）で解決。ダウンロードUIは後続
+- [x] `Translator` trait＋組み込みllama.cpp実装 — cdylib（`kkm-translate-ggml`）をdlopenする`kkm-translate`＋専用スレッド。キュー上限8文、溢れたら**最古を捨てる**（会議で価値があるのは画面に出ている最新の文）
+- [x] モデル管理（`kkm-core::models`）: ASR・VAD・翻訳LLMを共通の探索順（env override → アプリデータ → チェックアウトの`models/`）で解決。ダウンロードUIは後続
 - [x] finalイベント→翻訳→UIの確定文に訳文を後付け表示 — 発話にID採番、`translation`イベントでID照合。`transcript.jsonl`は`{"type":"utterance"|"translation"}`の2種
 - [x] 言語設定: **Main/Sub廃止**。「話される言語（最大2）」と「翻訳先（なし可）」を分離し、相互翻訳フラグを追加（`mockups/feature-language-picker.html`案A、設計は`plans/step2-translation.md`）。録音中の変更はモデル再ロードなしで次の発話から反映
 - [ ] 実発話での確認（`./scripts/build-app.sh --open`）
@@ -75,7 +75,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 4: 録音
 
-- [x] ゲート等の加工前の生音声をレーン別ファイルに保存（v1の設計を踏襲）— `~/Music/live-poly-trans/<yyyyMMddHHmmss>/{mic,speaker,mix}.wav`（48kHz/mono/16bit）。`record.rs`＋`lpt-core::mix`
+- [x] ゲート等の加工前の生音声をレーン別ファイルに保存（v1の設計を踏襲）— `~/Music/kikimimic/<yyyyMMddHHmmss>/{mic,speaker,mix}.wav`（48kHz/mono/16bit）。`record.rs`＋`kkm-core::mix`
 - [x] 実録音での確認（2026-08-19, `.app`起動で58秒）— mic peak 0.157・全区間連続、speaker peak 0.909・先頭10秒無音、mixは両者の和（10秒毎RMSで確認）
 - [x] タイムスタンプとトランスクリプトの整合 — schedulerがストリーム絶対位置で`Utterance{text,start_ms,end_ms}`を返し、`LaneTimeline`が録音時間へ変換。`transcript.jsonl`に追記＋UIは各行を`mm:ss`付きで表示
 - [x] レーン間の厳密な同期 — cpalの`capture`タイムスタンプとProcess Tapの`mHostTime`（どちらもmach host time）でバッファごとの録音位置を決定。`capture::Anchor`＋`SessionClock`。overrunで落ちた分も時間の穴として正しく残る（設計: plans/lane-sync.md）

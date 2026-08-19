@@ -141,7 +141,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
         )
     };
     unsafe {
-        desc.setName(&NSString::from_str("LivePolyTrans"));
+        desc.setName(&NSString::from_str("Kikimimic"));
         desc.setPrivate(true);
     }
     let mut tap_id: AudioObjectID = 0;
@@ -200,7 +200,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
     );
     // A nil queue reportedly fails to register the block on macOS 26, so
     // always hand the HAL an explicit one.
-    let queue = dispatch2::DispatchQueue::new("dev.wagomu.lpt.speaker-io", None);
+    let queue = dispatch2::DispatchQueue::new("dev.wagomu.kkm.speaker-io", None);
     let mut proc_id: AudioDeviceIOProcID = None;
     check(
         unsafe {
@@ -277,12 +277,12 @@ fn create_aggregate(desc: &CATapDescription) -> Result<AudioObjectID> {
         set(
             &agg,
             kAudioAggregateDeviceNameKey,
-            &NSString::from_str("LivePolyTrans speaker lane"),
+            &NSString::from_str("Kikimimic speaker lane"),
         );
         set(
             &agg,
             kAudioAggregateDeviceUIDKey,
-            &NSString::from_str("dev.wagomu.live-poly-trans.speaker-lane"),
+            &NSString::from_str("dev.wagomu.kikimimic.speaker-lane"),
         );
         set(
             &agg,

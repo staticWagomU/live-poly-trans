@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>LivePolyTrans transcribes your speech in real time.</string>
+  <string>Kikimimic transcribes your speech in real time.</string>
   <!-- Required for the speaker lane's Process Tap. Without this key macOS
        withholds the permission silently: the tap still runs and its buffers
        are simply zero-filled (docs/step0-tap-results.md). -->
   <key>NSAudioCaptureUsageDescription</key>
-  <string>LivePolyTrans transcribes what the other participants say.</string>
+  <string>Kikimimic transcribes what the other participants say.</string>
 </dict>
 </plist>

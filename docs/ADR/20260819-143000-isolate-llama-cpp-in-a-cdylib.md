@@ -30,11 +30,11 @@ ASRと翻訳の両方をローカル推論で行う以上（ADR-153801 / ADR-153
 
 ## Decision Outcome
 
-**Chosen option: 1（cdylib分離）**。`crates/lpt-translate-ggml`をcdylibとしてビルドし、ホスト側`crates/lpt-translate`が`dlopen`＋C ABIで呼ぶ。
+**Chosen option: 1（cdylib分離）**。`crates/kkm-translate-ggml`をcdylibとしてビルドし、ホスト側`crates/kkm-translate`が`dlopen`＋C ABIで呼ぶ。
 
 dylibは自分専用のggmlのコピーを持ち、macOSのtwo-level namespace（Windowsは DLLごとのシンボル解決）によってホスト側のggmlとは別物として解決される。プロセスは1つのままなので、ADR-153800を破らずに衝突だけを解消できる。
 
-C ABIは4関数に絞る: `lpt_translate_init` / `lpt_translate` / `lpt_translate_free` / `lpt_translate_shutdown`。
+C ABIは4関数に絞る: `kkm_translate_init` / `kkm_translate` / `kkm_translate_free` / `kkm_translate_shutdown`。
 
 ### Consequences
 
@@ -45,7 +45,7 @@ C ABIは4関数に絞る: `lpt_translate_init` / `lpt_translate` / `lpt_translat
 
 **Negative:**
 * ビルドが1コマンドで済まない。cdylibを先に作ってから`.app`に同梱する必要がある（`scripts/build-app.sh`、`tauri.conf.json`の`macOS.frameworks`）
-* dylibの探索パスが実行形態で変わる（`.app/Contents/Frameworks` / `target/<profile>`）。`lpt_translate::dylib_candidates`が引き受け、単体テストで固定している
+* dylibの探索パスが実行形態で変わる（`.app/Contents/Frameworks` / `target/<profile>`）。`kkm_translate::dylib_candidates`が引き受け、単体テストで固定している
 * FFI境界の安全性を自前で持つ。`extern "C"`からのunwindはプロセスごと落とすため、cdylibの全エクスポートが`catch_unwind`で受ける
 * 型安全がC ABIの幅（ポインタと文字列）まで落ちる
 
@@ -55,7 +55,7 @@ C ABIは4関数に絞る: `lpt_translate_init` / `lpt_translate` / `lpt_translat
 ### Confirmation
 
 * `cargo run -p spike --bin cdylib-check`（`--no-default-features --features asr`）: ASRデコードと翻訳の並走でSIGABRTが出ないこと
-* `cargo test -p lpt-translate -- --ignored`: 実モデルを読んで実際に訳せること
+* `cargo test -p kkm-translate -- --ignored`: 実モデルを読んで実際に訳せること
 * アプリを`.app`として起動し、マイク／スピーカー両レーンで訳文が出ること
 
 ## Pros and Cons of the Options
@@ -85,4 +85,4 @@ C ABIは4関数に絞る: `lpt_translate_init` / `lpt_translate` / `lpt_translat
 
 ## More Information
 
-前提: [単一プロセス構成](20260810-153800-rebuild-v2-as-single-process-rust-core.md) / [組み込みローカルLLM翻訳](20260810-153804-embedded-local-llm-translation.md)。実測は[docs/step0-results.md](../step0-results.md)。実装は`crates/lpt-translate-ggml`（cdylib）と`crates/lpt-translate`（ホスト側ローダ）。
+前提: [単一プロセス構成](20260810-153800-rebuild-v2-as-single-process-rust-core.md) / [組み込みローカルLLM翻訳](20260810-153804-embedded-local-llm-translation.md)。実測は[docs/step0-results.md](../step0-results.md)。実装は`crates/kkm-translate-ggml`（cdylib）と`crates/kkm-translate`（ホスト側ローダ）。

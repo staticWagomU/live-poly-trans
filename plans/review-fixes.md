@@ -20,8 +20,8 @@ TDD（Red-Green-Refactor）で進め、構造変更と振る舞い変更のコ�
 1. **リサンプラは rubato を採用**（手書き線形補間の廃止）。
    チャンク境界の位相リセット（正しさのバグ）と、ローパスなし線形補間の
    エイリアシング（品質のバグ）を一挙に解消する。rubatoは純Rustで
-   プラットフォーム非依存 → lpt-coreの「headlessでテスト可能」原則を保てる。
-   lpt-core側は可変長チャンクを固定ブロックに整えて渡す薄いラッパー
+   プラットフォーム非依存 → kkm-coreの「headlessでテスト可能」原則を保てる。
+   kkm-core側は可変長チャンクを固定ブロックに整えて渡す薄いラッパー
    `StreamResampler` を持ち、チャンク分割==一括のプロパティテストで検証する。
 2. **セッション管理は常駐パイプラインワーカーに再設計**（フラグ共有の廃止）。
    単一の長寿命ワーカースレッドがエンジン（Whisper/VAD）とスケジューラを
@@ -33,7 +33,7 @@ TDD（Red-Green-Refactor）で進め、構造変更と振る舞い変更のコ�
    - キャプチャスレッドはセッション毎に生成し、デバイス設定
      (rate/channels)とリング消費側をチャネルでワーカーへ渡す
 
-## Phase 1: lpt-core（TDD）
+## Phase 1: kkm-core（TDD）
 
 - [x] LocalAgreement: `flush()` — 保留中のvolatileを確定として取り出す（境界フラッシュ/停止時フラッシュの共通化）
 - [x] LocalAgreement: 確定済み領域と食い違う仮説が来たらvolatileを空にする防御
@@ -45,10 +45,10 @@ TDD（Red-Green-Refactor）で進め、構造変更と振る舞い変更のコ�
 - [x] Resampler: rubatoベースの `StreamResampler`（可変長チャンク対応、手書き線形補間を置換）
 - [x] Resampler: チャンク分割処理==一括処理のプロパティテスト（44.1kHz等）
 
-## Phase 2: lpt-whisper
+## Phase 2: kkm-whisper
 
 - [x] tests modをファイル末尾へ（clippy: items after a test module）
-- [x] `SpeechDetector` に `Send` 境界（lpt-core側）
+- [x] `SpeechDetector` に `Send` 境界（kkm-core側）
 - [x] VADパラメータをload時に一度だけenvからパースして保持
 - [x] `WhisperState` をエンジンに保持して再利用（毎decodeのcreate_state廃止）
 
@@ -67,7 +67,7 @@ TDD（Red-Green-Refactor）で進め、構造変更と振る舞い変更のコ�
 
 ## Phase 4: ドキュメント
 
-- [x] README: LPT_* 環境変数一覧とmodelsディレクトリの準備手順
+- [x] README: KKM_* 環境変数一覧とmodelsディレクトリの準備手順
 - [x] plan.md: Step 1残項目の更新
 
 ## Phase 5: ggml cdylib分離スパイク（Step 2最大リスクの前倒し検証）

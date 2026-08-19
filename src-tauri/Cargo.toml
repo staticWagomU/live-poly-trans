@@ -1,12 +1,12 @@
 [package]
-name = "live-poly-trans"
+name = "kikimimic"
 version = "0.1.0"
 description = "Realtime multilingual transcription and translation"
 authors = ["staticWagomU"]
 edition = "2021"
 
 [lib]
-name = "live_poly_trans_lib"
+name = "kikimimic_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
@@ -17,11 +17,11 @@ anyhow = "1"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 cpal = "0.18.1"
 hound = "3.5"
-lpt-core = { path = "../crates/lpt-core" }
-# The dlopen host side only. lpt-translate-ggml is NOT a dependency: linking
+kkm-core = { path = "../crates/kkm-core" }
+# The dlopen host side only. kkm-translate-ggml is NOT a dependency: linking
 # it would put llama's ggml next to whisper's (docs/step0-results.md).
-lpt-translate = { path = "../crates/lpt-translate" }
-lpt-whisper = { path = "../crates/lpt-whisper" }
+kkm-translate = { path = "../crates/kkm-translate" }
+kkm-whisper = { path = "../crates/kkm-whisper" }
 rtrb = "0.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

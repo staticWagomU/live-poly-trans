@@ -7,9 +7,9 @@
 //! Windows) keep it separate from the host's — so the app remains a
 //! single process (ADR-153800).
 //!
-//! C ABI: `lpt_translate_init` once, `lpt_translate` per sentence
-//! (blocking; call from a queue thread), `lpt_translate_free` per result,
-//! `lpt_translate_shutdown` at the end. Every export catches panics:
+//! C ABI: `kkm_translate_init` once, `kkm_translate` per sentence
+//! (blocking; call from a queue thread), `kkm_translate_free` per result,
+//! `kkm_translate_shutdown` at the end. Every export catches panics:
 //! unwinding out of `extern "C"` aborts the whole process — host app,
 //! whisper and all — which would forfeit the isolation this cdylib
 //! exists to provide.
@@ -62,7 +62,7 @@ impl Drop for Translator {
 /// # Safety
 /// `model_path` must be a valid NUL-terminated UTF-8 path.
 #[no_mangle]
-pub unsafe extern "C" fn lpt_translate_init(
+pub unsafe extern "C" fn kkm_translate_init(
     model_path: *const c_char,
     n_gpu_layers: u32,
 ) -> *mut Translator {
@@ -70,12 +70,12 @@ pub unsafe extern "C" fn lpt_translate_init(
     catch_unwind(AssertUnwindSafe(|| match init(&path, n_gpu_layers) {
         Ok(t) => Box::into_raw(Box::new(t)),
         Err(e) => {
-            eprintln!("lpt-translate init: {e:#}");
+            eprintln!("kkm-translate init: {e:#}");
             std::ptr::null_mut()
         }
     }))
     .unwrap_or_else(|_| {
-        eprintln!("lpt-translate init: panicked");
+        eprintln!("kkm-translate init: panicked");
         std::ptr::null_mut()
     })
 }
@@ -100,7 +100,7 @@ fn init(path: &str, n_gpu_layers: u32) -> Result<Translator> {
     };
     let template = model.chat_template(None).ok();
     if template.is_none() {
-        eprintln!("lpt-translate init: model has no chat template, using ChatML");
+        eprintln!("kkm-translate init: model has no chat template, using ChatML");
     }
     Ok(Translator {
         backend,
@@ -111,13 +111,13 @@ fn init(path: &str, n_gpu_layers: u32) -> Result<Translator> {
 }
 
 /// Translate one sentence. Returns a heap CString (free with
-/// [`lpt_translate_free`]) or null on error.
+/// [`kkm_translate_free`]) or null on error.
 ///
 /// # Safety
-/// `handle` must come from [`lpt_translate_init`]; the strings must be
+/// `handle` must come from [`kkm_translate_init`]; the strings must be
 /// valid NUL-terminated UTF-8. Not thread-safe per handle: serialize calls.
 #[no_mangle]
-pub unsafe extern "C" fn lpt_translate(
+pub unsafe extern "C" fn kkm_translate(
     handle: *mut Translator,
     sentence: *const c_char,
     source_lang: *const c_char,
@@ -133,31 +133,31 @@ pub unsafe extern "C" fn lpt_translate(
         || match translate(translator, &sentence, &source, &target) {
             Ok(out) => CString::new(out).map_or(std::ptr::null_mut(), CString::into_raw),
             Err(e) => {
-                eprintln!("lpt-translate: {e:#}");
+                eprintln!("kkm-translate: {e:#}");
                 std::ptr::null_mut()
             }
         },
     ))
     .unwrap_or_else(|_| {
-        eprintln!("lpt-translate: panicked");
+        eprintln!("kkm-translate: panicked");
         std::ptr::null_mut()
     })
 }
 
 /// # Safety
-/// `s` must be a pointer returned by [`lpt_translate`] (or null).
+/// `s` must be a pointer returned by [`kkm_translate`] (or null).
 #[no_mangle]
-pub unsafe extern "C" fn lpt_translate_free(s: *mut c_char) {
+pub unsafe extern "C" fn kkm_translate_free(s: *mut c_char) {
     if !s.is_null() {
         let _ = catch_unwind(|| drop(CString::from_raw(s)));
     }
 }
 
 /// # Safety
-/// `handle` must come from [`lpt_translate_init`] (or be null) and must
+/// `handle` must come from [`kkm_translate_init`] (or be null) and must
 /// not be used afterwards.
 #[no_mangle]
-pub unsafe extern "C" fn lpt_translate_shutdown(handle: *mut Translator) {
+pub unsafe extern "C" fn kkm_translate_shutdown(handle: *mut Translator) {
     if !handle.is_null() {
         let _ = catch_unwind(|| drop(Box::from_raw(handle)));
     }
@@ -168,7 +168,7 @@ pub unsafe extern "C" fn lpt_translate_shutdown(handle: *mut Translator) {
 /// a last resort.
 fn build_prompt(t: &Translator, sentence: &str, source: &str, target: &str) -> Result<String> {
     // An empty source means detection was unconfident about this window
-    // (lpt_core::language). Naming a language we are not sure of is worse
+    // (kkm_core::language). Naming a language we are not sure of is worse
     // than naming none: told the wrong one, the model "corrects" the
     // sentence into it instead of translating what was actually said.
     let from = if source.is_empty() {
@@ -190,7 +190,7 @@ fn build_prompt(t: &Translator, sentence: &str, source: &str, target: &str) -> R
         match t.model.apply_chat_template(template, &messages, true) {
             Ok(prompt) => return Ok(prompt),
             Err(e) => {
-                eprintln!("lpt-translate: chat template failed ({e}), falling back to ChatML")
+                eprintln!("kkm-translate: chat template failed ({e}), falling back to ChatML")
             }
         }
     }
@@ -234,7 +234,7 @@ fn translate(t: &mut Translator, sentence: &str, source: &str, target: &str) -> 
         }
         if generated >= MAX_OUTPUT_TOKENS {
             eprintln!(
-                "lpt-translate: hit the {MAX_OUTPUT_TOKENS}-token output cap, \
+                "kkm-translate: hit the {MAX_OUTPUT_TOKENS}-token output cap, \
                  translation may be truncated: {sentence}"
             );
             break;

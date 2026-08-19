@@ -1,10 +1,10 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/lpt-core",
-    "crates/lpt-translate",
-    "crates/lpt-translate-ggml",
-    "crates/lpt-whisper",
+    "crates/kkm-core",
+    "crates/kkm-translate",
+    "crates/kkm-translate-ggml",
+    "crates/kkm-whisper",
     "crates/spike",
     "src-tauri",
 ]

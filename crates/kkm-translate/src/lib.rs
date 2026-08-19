@@ -1,4 +1,4 @@
-//! [`Translator`] over the llama.cpp backend in the `lpt-translate-ggml`
+//! [`Translator`] over the llama.cpp backend in the `kkm-translate-ggml`
 //! cdylib, reached by `dlopen` rather than by linking.
 //!
 //! Linking it would defeat the isolation: llama-cpp-2 and whisper-rs each
@@ -14,13 +14,13 @@ use std::ffi::{c_char, c_void, CStr, CString};
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use lpt_core::Translator;
+use kkm_core::Translator;
 
 /// Points at a specific build of the backend, for development and bisecting.
-const DYLIB_ENV: &str = "LPT_TRANSLATE_DYLIB";
+const DYLIB_ENV: &str = "KKM_TRANSLATE_DYLIB";
 
 /// Offload everything to the GPU by default; whisper leaves room and Step 0
-/// measured the pair fitting comfortably. `LPT_LLM_GPU_LAYERS=0` forces CPU.
+/// measured the pair fitting comfortably. `KKM_LLM_GPU_LAYERS=0` forces CPU.
 const DEFAULT_GPU_LAYERS: u32 = 1_000_000;
 
 type InitFn = unsafe extern "C" fn(*const c_char, u32) -> *mut c_void;
@@ -33,15 +33,15 @@ type ShutdownFn = unsafe extern "C" fn(*mut c_void);
 pub const fn dylib_name() -> &'static str {
     #[cfg(target_os = "macos")]
     {
-        "liblpt_translate_ggml.dylib"
+        "libkkm_translate_ggml.dylib"
     }
     #[cfg(target_os = "windows")]
     {
-        "lpt_translate_ggml.dll"
+        "kkm_translate_ggml.dll"
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        "liblpt_translate_ggml.so"
+        "libkkm_translate_ggml.so"
     }
 }
 
@@ -93,7 +93,7 @@ pub fn find_dylib() -> Result<PathBuf> {
         .cloned()
         .with_context(|| {
             format!(
-                "no {} in {} (build it with `cargo build --release -p lpt-translate-ggml`)",
+                "no {} in {} (build it with `cargo build --release -p kkm-translate-ggml`)",
                 dylib_name(),
                 candidates
                     .iter()
@@ -128,7 +128,7 @@ impl GgmlTranslator {
     /// disk): call it off the UI thread, and only once.
     pub fn load(model_path: &Path) -> Result<Self> {
         let dylib = find_dylib()?;
-        let gpu_layers = std::env::var("LPT_LLM_GPU_LAYERS")
+        let gpu_layers = std::env::var("KKM_LLM_GPU_LAYERS")
             .ok()
             .and_then(|v| v.parse().ok())
             .unwrap_or(DEFAULT_GPU_LAYERS);
@@ -137,11 +137,11 @@ impl GgmlTranslator {
         unsafe {
             let lib = libloading::Library::new(&dylib)
                 .with_context(|| format!("dlopen {}", dylib.display()))?;
-            let init: InitFn = *lib.get(b"lpt_translate_init")?;
+            let init: InitFn = *lib.get(b"kkm_translate_init")?;
             let api = Api {
-                translate: *lib.get(b"lpt_translate")?,
-                free: *lib.get(b"lpt_translate_free")?,
-                shutdown: *lib.get(b"lpt_translate_shutdown")?,
+                translate: *lib.get(b"kkm_translate")?,
+                free: *lib.get(b"kkm_translate_free")?,
+                shutdown: *lib.get(b"kkm_translate_shutdown")?,
             };
             let handle = init(model.as_ptr(), gpu_layers);
             anyhow::ensure!(
@@ -190,11 +190,11 @@ mod tests {
 
     #[test]
     fn a_bundled_app_finds_the_backend_in_its_frameworks() {
-        let exe = Path::new("/Applications/LivePolyTrans.app/Contents/MacOS/LivePolyTrans");
+        let exe = Path::new("/Applications/Kikimimic.app/Contents/MacOS/Kikimimic");
         let candidates = dylib_candidates(exe);
         assert!(
             candidates.contains(&PathBuf::from(format!(
-                "/Applications/LivePolyTrans.app/Contents/Frameworks/{}",
+                "/Applications/Kikimimic.app/Contents/Frameworks/{}",
                 dylib_name()
             ))),
             "{candidates:?}"
@@ -203,7 +203,7 @@ mod tests {
 
     #[test]
     fn a_checkout_finds_the_backend_beside_the_executable_first() {
-        let candidates = dylib_candidates(Path::new("/repo/target/release/live-poly-trans"));
+        let candidates = dylib_candidates(Path::new("/repo/target/release/kikimimic"));
         assert_eq!(
             candidates[0],
             PathBuf::from(format!("/repo/target/release/{}", dylib_name()))
@@ -214,7 +214,7 @@ mod tests {
     fn a_debug_shell_can_use_a_release_built_backend() {
         // The backend takes minutes to compile, so it is built once in
         // release while `tauri dev` rebuilds the shell in debug.
-        let candidates = dylib_candidates(Path::new("/repo/target/debug/live-poly-trans"));
+        let candidates = dylib_candidates(Path::new("/repo/target/debug/kikimimic"));
         assert!(
             candidates.contains(&PathBuf::from(format!("/repo/target/release/{}", dylib_name()))),
             "{candidates:?}"
@@ -226,9 +226,9 @@ mod tests {
     /// of RAM, so it is opt-in:
     ///
     /// ```sh
-    /// cargo build --release -p lpt-translate-ggml
-    /// LPT_TRANSLATE_DYLIB="$PWD/target/release/liblpt_translate_ggml.dylib" \
-    ///   cargo test -p lpt-translate -- --ignored --nocapture
+    /// cargo build --release -p kkm-translate-ggml
+    /// KKM_TRANSLATE_DYLIB="$PWD/target/release/libkkm_translate_ggml.dylib" \
+    ///   cargo test -p kkm-translate -- --ignored --nocapture
     /// ```
     ///
     /// The override is needed because a test binary lives in
@@ -237,12 +237,12 @@ mod tests {
     #[test]
     #[ignore = "loads a multi-gigabyte model"]
     fn translates_with_and_without_a_stated_source_language() {
-        let models = lpt_core::models::ModelManager::new(vec![PathBuf::from(concat!(
+        let models = kkm_core::models::ModelManager::new(vec![PathBuf::from(concat!(
             env!("CARGO_MANIFEST_DIR"),
             "/../../models"
         ))]);
         let model = models
-            .resolve(lpt_core::models::Model::Translator)
+            .resolve(kkm_core::models::Model::Translator)
             .expect("translation model");
         let mut translator = GgmlTranslator::load(&model).expect("load backend");
 
@@ -263,7 +263,7 @@ mod tests {
 
     #[test]
     fn the_same_directory_is_never_searched_twice() {
-        let candidates = dylib_candidates(Path::new("/repo/target/release/live-poly-trans"));
+        let candidates = dylib_candidates(Path::new("/repo/target/release/kikimimic"));
         let mut sorted = candidates.clone();
         sorted.sort();
         sorted.dedup();

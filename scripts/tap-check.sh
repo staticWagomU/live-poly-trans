@@ -11,7 +11,7 @@ set -euo pipefail
 secs="${1:-6}"
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 app="/tmp/TapCheck.app"
-report="/tmp/lpt-tap-check.txt"
+report="/tmp/kkm-tap-check.txt"
 
 cargo build -q -p spike --bin tap-check --no-default-features --manifest-path "$root/Cargo.toml"
 
@@ -28,7 +28,7 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
   <key>LSMinimumSystemVersion</key><string>14.2</string>
-  <key>NSAudioCaptureUsageDescription</key><string>LivePolyTrans spike: capture system audio to verify the CoreAudio Process Tap path.</string>
+  <key>NSAudioCaptureUsageDescription</key><string>Kikimimic spike: capture system audio to verify the CoreAudio Process Tap path.</string>
 </dict>
 </plist>
 PLIST

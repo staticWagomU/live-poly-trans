@@ -7,7 +7,7 @@
 //! symbol collision is resolved (docs/step0-results.md).
 
 use anyhow::{Context, Result};
-use lpt_core::{AsrEngine, Hypothesis, SpeechDetector};
+use kkm_core::{AsrEngine, Hypothesis, SpeechDetector};
 
 /// Segments whisper itself considers likely non-speech (coughs, breaths,
 /// keyboard noise) hallucinate text; drop them above this probability.
@@ -19,7 +19,7 @@ const NO_SPEECH_THRESHOLD: f32 = 0.6;
 /// of a window sees as little as 1s of audio, where ja/en detection is close
 /// to a coin flip — and whisper forced to the wrong language does not
 /// misrecognize, it silently *translates* (Japanese speech comes out as
-/// fluent English). Override with LPT_LANG_PIN_THRESHOLD.
+/// fluent English). Override with KKM_LANG_PIN_THRESHOLD.
 const LANG_PIN_THRESHOLD: f32 = 0.6;
 
 pub struct WhisperEngine {
@@ -38,8 +38,8 @@ pub struct WhisperEngine {
 /// whisper decode for GPU time.
 ///
 /// Tuning (all optional, whisper.cpp defaults otherwise):
-/// LPT_VAD_THRESHOLD (0..1, default 0.5), LPT_VAD_MIN_SPEECH_MS,
-/// LPT_VAD_MIN_SILENCE_MS, LPT_VAD_PAD_MS.
+/// KKM_VAD_THRESHOLD (0..1, default 0.5), KKM_VAD_MIN_SPEECH_MS,
+/// KKM_VAD_MIN_SILENCE_MS, KKM_VAD_PAD_MS.
 pub struct SileroVad {
     ctx: whisper_rs::WhisperVadContext,
     /// Tuning resolved from the environment once at load time.
@@ -54,16 +54,16 @@ impl SileroVad {
         let ctx = whisper_rs::WhisperVadContext::new(model_path, ctx_params)
             .with_context(|| format!("load VAD model {model_path}"))?;
         let mut params = whisper_rs::WhisperVadParams::new();
-        if let Some(v) = env_parse::<f32>("LPT_VAD_THRESHOLD") {
+        if let Some(v) = env_parse::<f32>("KKM_VAD_THRESHOLD") {
             params.set_threshold(v);
         }
-        if let Some(v) = env_parse::<i32>("LPT_VAD_MIN_SPEECH_MS") {
+        if let Some(v) = env_parse::<i32>("KKM_VAD_MIN_SPEECH_MS") {
             params.set_min_speech_duration(v);
         }
-        if let Some(v) = env_parse::<i32>("LPT_VAD_MIN_SILENCE_MS") {
+        if let Some(v) = env_parse::<i32>("KKM_VAD_MIN_SILENCE_MS") {
             params.set_min_silence_duration(v);
         }
-        if let Some(v) = env_parse::<i32>("LPT_VAD_PAD_MS") {
+        if let Some(v) = env_parse::<i32>("KKM_VAD_PAD_MS") {
             params.set_speech_pad(v);
         }
         Ok(Self { ctx, params })
@@ -109,7 +109,7 @@ impl WhisperEngine {
         Ok(Self {
             state,
             allowed_lang_ids,
-            lang_pin_threshold: env_parse("LPT_LANG_PIN_THRESHOLD").unwrap_or(LANG_PIN_THRESHOLD),
+            lang_pin_threshold: env_parse("KKM_LANG_PIN_THRESHOLD").unwrap_or(LANG_PIN_THRESHOLD),
         })
     }
 

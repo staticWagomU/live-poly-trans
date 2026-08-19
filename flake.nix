@@ -1,5 +1,5 @@
 {
-  description = "LivePolyTrans development environment";
+  description = "Kikimimic development environment";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -39,7 +39,7 @@
             ];
 
             shellHook = ''
-              echo "LivePolyTrans dev shell: bun $(bun --version), cargo $(cargo --version | awk '{print $2}'), flamegraph $(cargo flamegraph --version | awk '{print $2}')"
+              echo "Kikimimic dev shell: bun $(bun --version), cargo $(cargo --version | awk '{print $2}'), flamegraph $(cargo flamegraph --version | awk '{print $2}')"
             '';
           };
         }

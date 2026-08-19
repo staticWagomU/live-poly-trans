@@ -44,7 +44,7 @@ Tidy First: 構造変更（refactor:）と挙動変更（fix:/feat:）はコミ�
       （表示分離はStep 3で）
 - [x] B8. 【小言】overrunメッセージ: サンプル数 → ミリ秒表記
       （dropped / (channels × src_rate)）、最後のdropから5秒で自動クリア
-- [x] B9. 【#8】lpt-translate-ggml の強化:
+- [x] B9. 【#8】kkm-translate-ggml の強化:
       - 全 `extern "C"` を catch_unwind で包む（panic→abort をnull返却に）
       - `tokens.len()-1` の空トークン列panicガード
       - contextを init 時に1回だけ作り `clear_kv_cache()` で再利用
@@ -73,5 +73,5 @@ Tidy First: 構造変更（refactor:）と挙動変更（fix:/feat:）はコミ�
 - [x] cargo test --workspace 全緑
 - [x] cargo clippy --workspace
 - [x] svelte autofixer / bun run check
-- [x] cargo build -p lpt-translate-ggml（cdylibはビルド確認。実機確認は
+- [x] cargo build -p kkm-translate-ggml（cdylibはビルド確認。実機確認は
       spike cdylib-check で可能）

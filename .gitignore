@@ -3,6 +3,8 @@ build/
 .svelte-kit/
 
 src-tauri/target/
+# v1 build artifacts. These keep their old names on purpose: they are what
+# the v1 branch actually produces, and they are still sitting in the worktree.
 src-tauri/binaries/helper-*
 src-tauri/binaries/lpt-whisper-engine-*
 src-tauri/binaries/liblpt_whisper_backend.*

@@ -1,20 +1,20 @@
 //! Step 2 risk spike: whisper-rs statically linked into this binary while
-//! llama-cpp-2 lives in a dlopen'd cdylib (lpt-translate-ggml).
+//! llama-cpp-2 lives in a dlopen'd cdylib (kkm-translate-ggml).
 //!
 //! Success criterion: windowed ASR decodes and sentence translations run
 //! concurrently with correct output and no ggml symbol-collision SIGABRT
 //! (the failure mode documented in docs/step0-results.md).
 //!
 //! Usage:
-//!   cargo build --release -p lpt-translate-ggml
+//!   cargo build --release -p kkm-translate-ggml
 //!   cargo run --release -p spike --bin cdylib-check \
-//!     --no-default-features --features asr [-- path/to/liblpt_translate_ggml.dylib]
+//!     --no-default-features --features asr [-- path/to/libkkm_translate_ggml.dylib]
 
 use std::ffi::{c_char, c_void, CStr, CString};
 use std::time::Instant;
 
 use anyhow::{Context, Result};
-use lpt_core::AsrEngine;
+use kkm_core::AsrEngine;
 
 const WHISPER_MODEL: &str = "models/ggml-large-v3-turbo-q8_0.bin";
 const LLM_MODEL: &str = "models/Qwen3-4B-Instruct-2507-Q4_K_M.gguf";
@@ -37,14 +37,14 @@ type ShutdownFn = unsafe extern "C" fn(*mut c_void);
 fn main() -> Result<()> {
     let dylib_path = std::env::args()
         .nth(1)
-        .unwrap_or_else(|| "target/release/liblpt_translate_ggml.dylib".into());
+        .unwrap_or_else(|| "target/release/libkkm_translate_ggml.dylib".into());
 
     // ASR under load on its own thread, like the app's pipeline worker:
     // re-decode a growing window for every second of audio, no idle time.
     let asr = std::thread::spawn(|| -> Result<(String, u128)> {
         let audio = read_wav(AUDIO_JA)?;
         let mut engine =
-            lpt_whisper::WhisperEngine::load(WHISPER_MODEL, &["ja".into(), "en".into()])?;
+            kkm_whisper::WhisperEngine::load(WHISPER_MODEL, &["ja".into(), "en".into()])?;
         let mut worst = 0u128;
         let mut text = String::new();
         for end_s in 1..=audio.len().div_ceil(SAMPLE_RATE) {
@@ -57,7 +57,7 @@ fn main() -> Result<()> {
         Ok((text, worst))
     });
 
-    let gpu_layers: u32 = if std::env::var("LPT_SPIKE_CPU").is_ok() {
+    let gpu_layers: u32 = if std::env::var("KKM_SPIKE_CPU").is_ok() {
         0
     } else {
         1_000_000
@@ -66,14 +66,14 @@ fn main() -> Result<()> {
     unsafe {
         let lib = libloading::Library::new(&dylib_path)
             .with_context(|| format!("dlopen {dylib_path}"))?;
-        let init: libloading::Symbol<InitFn> = lib.get(b"lpt_translate_init")?;
-        let translate: libloading::Symbol<TranslateFn> = lib.get(b"lpt_translate")?;
-        let free: libloading::Symbol<FreeFn> = lib.get(b"lpt_translate_free")?;
-        let shutdown: libloading::Symbol<ShutdownFn> = lib.get(b"lpt_translate_shutdown")?;
+        let init: libloading::Symbol<InitFn> = lib.get(b"kkm_translate_init")?;
+        let translate: libloading::Symbol<TranslateFn> = lib.get(b"kkm_translate")?;
+        let free: libloading::Symbol<FreeFn> = lib.get(b"kkm_translate_free")?;
+        let shutdown: libloading::Symbol<ShutdownFn> = lib.get(b"kkm_translate_shutdown")?;
 
         let model = CString::new(LLM_MODEL)?;
         let handle = init(model.as_ptr(), gpu_layers);
-        anyhow::ensure!(!handle.is_null(), "lpt_translate_init failed");
+        anyhow::ensure!(!handle.is_null(), "kkm_translate_init failed");
 
         for sentence in SENTENCES {
             let (source, target) = if sentence.is_ascii() {

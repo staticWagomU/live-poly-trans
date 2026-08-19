@@ -25,9 +25,9 @@ impl Model {
     /// measurement run swaps in a different model size.
     pub fn env_var(self) -> &'static str {
         match self {
-            Model::Asr => "LPT_WHISPER_MODEL",
-            Model::Vad => "LPT_VAD_MODEL",
-            Model::Translator => "LPT_LLM_MODEL",
+            Model::Asr => "KKM_WHISPER_MODEL",
+            Model::Vad => "KKM_VAD_MODEL",
+            Model::Translator => "KKM_LLM_MODEL",
         }
     }
 
@@ -130,7 +130,7 @@ mod tests {
         let found = manager()
             .resolve_with(
                 Model::Translator,
-                |name| (name == "LPT_LLM_MODEL").then(|| "/tmp/other.gguf".to_string()),
+                |name| (name == "KKM_LLM_MODEL").then(|| "/tmp/other.gguf".to_string()),
                 |_| true,
             )
             .unwrap();
@@ -149,7 +149,7 @@ mod tests {
             )
             .unwrap_err()
             .to_string();
-        assert!(err.contains("LPT_WHISPER_MODEL"), "{err}");
+        assert!(err.contains("KKM_WHISPER_MODEL"), "{err}");
         assert!(err.contains("/tmp/missing.bin"), "{err}");
     }
 

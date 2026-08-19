@@ -21,7 +21,7 @@
 //! Usage:
 //!   scripts/tap-check.sh [seconds]    # bundles, signs, plays audio, runs
 //! `tap-check out` bisects: same IO path on the plain output device, no tap.
-//! Writes /tmp/lpt-tap-check.wav for listening back.
+//! Writes /tmp/kkm-tap-check.wav for listening back.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -51,10 +51,10 @@ use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, Audio
 use objc2_core_foundation::CFDictionary;
 use objc2_foundation::{NSArray, NSMutableDictionary, NSNumber, NSString};
 
-const WAV_PATH: &str = "/tmp/lpt-tap-check.wav";
+const WAV_PATH: &str = "/tmp/kkm-tap-check.wav";
 /// `open`-launched bundles have no terminal to print to, so the verdict is
 /// also written here for the runner script to show.
-const REPORT_PATH: &str = "/tmp/lpt-tap-check.txt";
+const REPORT_PATH: &str = "/tmp/kkm-tap-check.txt";
 
 /// Shared with the IO block. A Mutex in an audio callback is fine for a
 /// spike; the production lane will reuse the rtrb ring from capture.rs.
@@ -120,7 +120,7 @@ fn main() -> Result<()> {
         )
     };
     unsafe {
-        desc.setName(&NSString::from_str("lpt-tap-check"));
+        desc.setName(&NSString::from_str("kkm-tap-check"));
         desc.setPrivate(true);
     }
 
@@ -180,11 +180,11 @@ fn run_with_tap(desc: &CATapDescription, tap_id: AudioObjectID, secs: u64) -> Re
     };
     let agg_desc = NSMutableDictionary::<NSString, AnyObject>::new();
     unsafe {
-        set(&agg_desc, kAudioAggregateDeviceNameKey, &NSString::from_str("lpt-tap-check"));
+        set(&agg_desc, kAudioAggregateDeviceNameKey, &NSString::from_str("kkm-tap-check"));
         set(
             &agg_desc,
             kAudioAggregateDeviceUIDKey,
-            &NSString::from_str("dev.wagomu.lpt-tap-check"),
+            &NSString::from_str("dev.wagomu.kkm-tap-check"),
         );
         set(&agg_desc, kAudioAggregateDeviceIsPrivateKey, &NSNumber::new_bool(true));
         set(&agg_desc, kAudioAggregateDeviceTapAutoStartKey, &NSNumber::new_bool(true));
@@ -230,7 +230,7 @@ fn capture(agg_id: AudioObjectID, asbd: &AudioStreamBasicDescription, secs: u64)
             block_sink.consume(in_data);
         },
     );
-    let queue = dispatch2::DispatchQueue::new("lpt-tap-check-io", None);
+    let queue = dispatch2::DispatchQueue::new("kkm-tap-check-io", None);
     let mut proc_id: objc2_core_audio::AudioDeviceIOProcID = None;
     let status = unsafe {
         AudioDeviceCreateIOProcIDWithBlock(

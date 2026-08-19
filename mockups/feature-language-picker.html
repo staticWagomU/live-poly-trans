@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>LivePolyTrans — 録音中の言語選択UI 提案</title>
+<title>Kikimimic — 録音中の言語選択UI 提案</title>
 <style>
   :root {
     --accent: #0068d8;
@@ -220,7 +220,7 @@
   }
   .chip-main:hover { background: var(--accent-soft); }
   .chip-main .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-  /* 表示しているコードは LPT_LANGS にそのまま入る値。等幅数字＋わずかな字間で記号として読ませる */
+  /* 表示しているコードは KKM_LANGS にそのまま入る値。等幅数字＋わずかな字間で記号として読ませる */
   .code {
     flex: 0 0 auto;
     color: var(--muted);
@@ -415,7 +415,7 @@
 <header class="prop-head">
   <h1>録音中の言語選択UI — 3案</h1>
   <p>
-    現状 <code>desktop-prototype.html</code> の録音中画面は「日本語 ⇄ English」を<strong>ただのテキスト</strong>として出しており、変更手段がない（実体は <code>LPT_LANGS</code> 環境変数）。
+    現状 <code>desktop-prototype.html</code> の録音中画面は「日本語 ⇄ English」を<strong>ただのテキスト</strong>として出しており、変更手段がない（実体は <code>KKM_LANGS</code> 環境変数）。
     <strong>「話される言語」と「翻訳先」を別の設定として分け</strong>、単一言語（最多ケース）から日英混在までを1つのUIで扱う。
   </p>
   <div class="vtabs" role="tablist">
@@ -561,7 +561,7 @@
     <ul>
       <li class="good"><b>「話される言語」と「翻訳先」を分離した。</b> 両者を Main/Sub という1語に潰すと、単一言語の会議が表現できない。分けたことで下表の4状態がすべて素直に出る</li>
       <li class="good"><b>最多ケースが最短経路になる。</b> 単一言語・訳なしは「話される言語1つ」＋「訳さない」で、ピルの表示も言語名だけ。装飾も矢印も出ない</li>
-      <li class="good"><b>単一言語は速くて正確。</b> <code>transcribe(_, Some(lang))</code> は <code>lang_detect</code> を丸ごと飛ばす（<code>crates/lpt-whisper/src/lib.rs:132</code>）。UIでもそれを利点として明示する</li>
+      <li class="good"><b>単一言語は速くて正確。</b> <code>transcribe(_, Some(lang))</code> は <code>lang_detect</code> を丸ごと飛ばす（<code>crates/kkm-whisper/src/lib.rs:132</code>）。UIでもそれを利点として明示する</li>
       <li class="good">録音中でも変更できる。<code>allowed_lang_ids</code> は <code>WhisperEngine</code> のフィールドを <code>transcribe()</code> が毎回読むだけなので、<strong>モデル再ロードが要らない</strong></li>
       <li class="good">切り替え位置に<strong>しおり行</strong>を残す。<code>transcript.jsonl</code> は発話ごとに言語を持つので、後で読み返したときに画面と実データの境界が一致する</li>
       <li class="good"><b>国旗は使わない。</b> 言語と国は一対一でない（English は米国だけのものではないし、アラビア語をサウジの旗で代表させるのは乱暴）。Apple も System Settings の言語一覧で国旗を使わず<strong>各言語をその言語自身の表記で</strong>出す。空いた場所は装飾ではなく ISO コードと日本語名という情報で埋めた</li>
@@ -703,7 +703,7 @@
       <li><b>話される言語は最大2つ。</b> 候補を狭く保つのは制限ではなく精度機能で、<code>lib.rs:127</code> のコメント通り「ja/en の会議が zh/ko に流れない」ためのフィルタ。3言語目は <code>Vec</code> に1要素足すだけだが <code>lang_detect</code> の誤判定が増え、<code>plan.md:14</code> がスコープ外とした N言語＋アービターの領域に入る。UIでは<strong>2つ埋まった時点で「追加」を消し</strong>、理由を1行で説明する</li>
       <li><b>翻訳先は話される言語と独立。</b> 英語の会議を日本語で読む場合、話される言語は English 1つで、翻訳先だけが日本語。この組み合わせは Main/Sub モデルでは書けなかった</li>
       <li><b>変更は次の発話から。</b> 確定済みの発話は言語も訳文もそのまま。UI側で「ここから」のしおりを残し、あとで <code>transcript.jsonl</code> を読んだときと食い違わないようにする</li>
-      <li><b>実装フック</b>: 候補セット差し替えは <code>WhisperEngine</code> に setter を足すだけ（<code>load()</code> 時に固定している <code>allowed_lang_ids</code> を可変にする）。単一言語とレーン固定は <code>transcribe(_, Some(lang))</code> で既に通る。<code>LPT_LANGS</code> / <code>LPT_LANG</code> は<strong>初期値の供給元</strong>として残し、UIの設定が優先する</li>
+      <li><b>実装フック</b>: 候補セット差し替えは <code>WhisperEngine</code> に setter を足すだけ（<code>load()</code> 時に固定している <code>allowed_lang_ids</code> を可変にする）。単一言語とレーン固定は <code>transcribe(_, Some(lang))</code> で既に通る。<code>KKM_LANGS</code> / <code>KKM_LANG</code> は<strong>初期値の供給元</strong>として残し、UIの設定が優先する</li>
     </ul>
   </div>
 </section>

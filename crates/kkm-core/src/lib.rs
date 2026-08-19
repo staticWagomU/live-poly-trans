@@ -1,4 +1,4 @@
-//! LivePolyTrans core: engine-agnostic domain types and traits.
+//! Kikimimic core: engine-agnostic domain types and traits.
 //!
 //! UI shells and inference backends depend on this crate; it depends on
 //! nothing platform-specific so it stays testable headless (ADR-153800).
