@@ -509,6 +509,229 @@
     background: var(--accent);
     animation: blink 1s steps(1) infinite;
   }
+  /* 言語設定を変えた位置に残すしおり。transcript.jsonl は発話ごとに言語を
+     持つので、後から読み返したときに画面と実データの境界が一致する */
+  .lang-marker {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 10px 0 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .lang-marker::before, .lang-marker::after { content: ""; height: 1px; flex: 1; background: var(--separator); }
+  .lang-marker::before { flex: 0 0 82px; }
+
+  /* 言語ピル: 録音中の言語設定を開くボタン */
+  .lang-anchor { position: relative; display: inline-flex; }
+  .lang-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 3px 8px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .lang-pill:hover { border-color: rgba(0, 104, 216, 0.4); background: var(--accent-soft); }
+  .lang-pill[aria-expanded="true"] { color: #fff; border-color: var(--accent); background: var(--accent); }
+  /* 記号がモードを語る（なし=単一 / ⇄=相互 / ·=複数だが訳さない）が、読むのは言語名 */
+  .lang-pill .glyph { color: var(--muted); font-weight: 400; }
+  .lang-pill .chev { color: var(--muted); font-size: 9px; }
+  .lang-pill[aria-expanded="true"] .glyph,
+  .lang-pill[aria-expanded="true"] .chev { color: rgba(255, 255, 255, 0.72); }
+
+  .lang-pop {
+    position: absolute;
+    left: 0;
+    top: 32px;
+    z-index: 40;
+    width: 330px;
+    display: none;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-menu);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+  .lang-pop.open { display: block; animation: appear 150ms ease-out; }
+  .pop-page { display: none; }
+  .pop-page.active { display: block; }
+  .pop-section { padding: 12px 14px; }
+  .pop-section + .pop-section { border-top: 1px solid var(--separator); }
+  .pop-title { font-size: 12.5px; font-weight: 700; }
+  .pop-lead { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  .pop-foot {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid var(--separator);
+  }
+  .pop-hint { min-width: 0; flex: 1; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+  .btn {
+    min-height: 28px;
+    padding: 0 12px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .btn:hover { background: rgba(120, 120, 128, 0.1); }
+  .btn.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+  .btn.primary:hover { background: #005dbf; }
+
+  /* レーン × 言語の対応表。1つの音声に複数言語が乗るのが常態なので、
+     レーンは言語1つではなく候補の集合を持つ */
+  .matrix { margin-top: 10px; }
+  .matrix-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 66px 66px 26px;
+    align-items: center;
+    gap: 6px;
+  }
+  .matrix-row + .matrix-row { border-top: 1px solid var(--separator); }
+  .matrix-head { padding-bottom: 6px; border-bottom: 1px solid var(--separator); }
+  .matrix-col {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-weight: 650;
+  }
+  .matrix-lang {
+    min-width: 0;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 9px 8px 9px 2px;
+    border-radius: 7px;
+    text-align: left;
+  }
+  .matrix-lang:hover { background: var(--accent-soft); }
+  .matrix-lang .name {
+    min-width: 0;
+    flex: 1;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .matrix-cell { display: grid; place-items: center; padding: 8px 0; cursor: pointer; }
+  .matrix-cell input { width: 17px; height: 17px; accent-color: var(--accent); }
+  .matrix-cell input:disabled { cursor: default; }
+  .matrix-remove {
+    width: 24px;
+    height: 24px;
+    display: grid;
+    place-items: center;
+    border-radius: 6px;
+    color: var(--muted);
+    font-size: 14px;
+    line-height: 1;
+  }
+  .matrix-remove:hover { color: #fff; background: var(--record); }
+  .matrix-remove[disabled] { opacity: 0; cursor: default; }
+
+  /* 表示しているコードは LPT_LANGS にそのまま入る値 */
+  .code {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em;
+  }
+  .slot {
+    width: 100%;
+    min-height: 36px;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-top: 9px;
+    padding: 8px 10px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    background: #fff;
+    text-align: left;
+  }
+  .slot:hover { border-color: rgba(0, 104, 216, 0.45); background: var(--accent-soft); }
+  .slot .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .slot[disabled] { opacity: 0.42; cursor: default; }
+  .slot[disabled]:hover { border-color: var(--separator); background: #fff; }
+
+  .add-lang {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    margin-top: 8px;
+    padding: 0 10px;
+    border: 1px dashed rgba(0, 104, 216, 0.4);
+    border-radius: 8px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .add-lang:hover { background: var(--accent-soft); }
+  .cap-hint { margin-top: 8px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+  /* 候補が1つのレーンは lang_detect を飛ばせる。利点として明示する */
+  .fast-hint {
+    display: flex;
+    align-items: baseline;
+    gap: 6px;
+    margin-top: 9px;
+    color: #116d31;
+    font-size: 10.5px;
+    line-height: 1.5;
+  }
+  .fast-hint::before { content: "▸"; font-size: 8px; }
+
+  .picker-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+  .picker-back { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--secondary); font-size: 20px; }
+  .picker-back:hover { background: rgba(120, 120, 128, 0.12); }
+  .picker-title { font-size: 12.5px; font-weight: 700; }
+  .picker-search { padding: 0 12px 8px; }
+  .picker-search input {
+    width: 100%;
+    height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    background: #fff;
+    font-size: 12.5px;
+  }
+  .picker-list { max-height: 244px; overflow: auto; padding: 0 8px 8px; }
+  .picker-item {
+    width: 100%;
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    text-align: left;
+  }
+  .picker-item:hover { color: #fff; background: var(--accent); }
+  .picker-item .name { min-width: 0; flex: 1; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  /* 各言語はその言語自身の表記が主。日本語名は走査用に一段落とす */
+  .picker-item .jp { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+  .picker-item .code { width: 26px; text-align: right; }
+  .picker-item .tick { width: 12px; flex: 0 0 12px; color: var(--accent); font-size: 11px; }
+  .picker-item:hover .jp, .picker-item:hover .code { color: rgba(255, 255, 255, 0.76); }
+  .picker-item:hover .tick { color: #fff; }
+  .picker-item[disabled] { opacity: 0.4; cursor: default; }
+  .picker-item[disabled]:hover { color: inherit; background: none; }
+  .picker-item[disabled]:hover .jp, .picker-item[disabled]:hover .code { color: var(--muted); }
+  .picker-empty { padding: 14px 10px; color: var(--muted); font-size: 12px; text-align: center; }
 
   .session-ask {
     min-height: 67px;
@@ -788,6 +1011,45 @@
               <div class="session-meta">
                 <span id="sessionDate">2026/08/18 14:00 · 42分</span>
                 <span class="state-badge" id="sessionState"><span aria-hidden="true">✓</span>文字起こし完了</span>
+
+                <!-- 録音中だけ出る、このセッションの言語設定 -->
+                <span class="lang-anchor hidden" id="langAnchor">
+                  <button class="lang-pill" id="langPill" type="button"
+                          aria-haspopup="dialog" aria-expanded="false"
+                          aria-label="言語と翻訳の設定を変更">
+                    <span id="langPillBody">日本語</span>
+                    <span class="chev" aria-hidden="true">▾</span>
+                  </button>
+
+                  <div class="lang-pop" id="langPop" role="dialog" aria-label="言語と翻訳">
+                    <div class="pop-page active" data-page="main">
+                      <div class="pop-section">
+                        <div class="pop-title">どの音声で、どの言語が話されるか</div>
+                        <div class="pop-lead">1つの音声に複数の言語が混ざってもかまいません。該当するものにチェックを入れてください。</div>
+                        <div class="matrix" id="langMatrix"></div>
+                        <button class="add-lang" id="langAdd" type="button"><span aria-hidden="true">＋</span>言語を追加</button>
+                        <div class="cap-hint hidden" id="langCapHint">会議全体で2言語まで。3つ以上は判定が不安定になるため設けていません。</div>
+                        <div class="fast-hint hidden" id="langFastHint">どの音声も1言語なので、言語判定を行いません。その分だけ速く、取り違えも起きません。</div>
+                      </div>
+
+                      <div class="pop-section">
+                        <div class="pop-title">訳して表示</div>
+                        <button class="slot" id="langTarget" type="button">
+                          <span class="name" data-name>訳さない</span><span class="code" data-code></span>
+                        </button>
+                        <div class="cap-hint hidden" id="langNoTranslate">候補が1言語のときは、訳す相手がいないため翻訳はありません。</div>
+                      </div>
+
+                      <div class="pop-foot">
+                        <span class="pop-hint">変更は次の発話から反映されます。</span>
+                        <button class="btn" type="button" data-lang-close>キャンセル</button>
+                        <button class="btn primary" id="langApply" type="button">適用</button>
+                      </div>
+                    </div>
+                    <div class="pop-page" data-page="picker"></div>
+                  </div>
+                </span>
+
                 <span class="capture-badges hidden" id="captureBadges">
                   <span class="capture-badge" aria-label="マイク音声を認識中">
                     <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク
@@ -854,8 +1116,8 @@
                 <span aria-hidden="true">⧉</span><span class="copy-all-label">ここまでをコピー</span>
               </button>
             </div>
-            <div class="transcript-line"><span class="speaker mic">マイク</span><span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。<span class="translation">Got it. I'll arrange the schedule and put it on the calendar.</span></span></div>
-            <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+            <div class="transcript-line"><span class="speaker mic">マイク</span><span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。<span class="translation" data-tr="en">Got it. I'll arrange the schedule and put it on the calendar.</span></span></div>
+            <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation" data-tr="ja">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
             <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance partial">Can you also draft the announcement</span></div>
           </div>
 
@@ -937,7 +1199,8 @@
     return qsa('.transcript-line', container).map((line) => {
       const time = line.querySelector('.timestamp')?.textContent.trim();
       const speaker = line.querySelector('.speaker')?.textContent.trim();
-      const translation = line.querySelector('.translation')?.textContent.trim() ?? '';
+      // 「訳さない」設定で画面から消えている訳文は、コピーにも含めない
+      const translation = line.querySelector('.translation:not(.hidden)')?.textContent.trim() ?? '';
       const utterance = line.querySelector('.utterance');
       const original = utterance
         ? Array.from(utterance.childNodes)
@@ -1033,7 +1296,12 @@
     const live = mode === 'live';
     qs('#sessionTitle').textContent = live ? '新しい録音' : title;
     qs('#windowTitle').textContent = qs('#sessionTitle').textContent;
-    qs('#sessionDate').textContent = live ? '日本語 ⇄ English' : '2026/08/18 14:00 · 42分';
+    // 録音中は日時ではなく言語ピルを出す。言語は録音中にだけ変えられる設定なので、
+    // 停止後の録音では履歴として扱い、ここには出さない。
+    qs('#sessionDate').classList.toggle('hidden', live);
+    qs('#sessionDate').textContent = live ? '' : '2026/08/18 14:00 · 42分';
+    qs('#langAnchor').classList.toggle('hidden', !live);
+    if (!live) closeLangPop();
     qs('#sessionState').classList.toggle('live', live);
     qs('#sessionState').innerHTML = live ? '<span aria-hidden="true">●</span>録音中' : '<span aria-hidden="true">✓</span>文字起こし完了';
     qs('#sessionMain').classList.toggle('live-mode', live);
@@ -1044,6 +1312,370 @@
     qs('#liveTranscript').classList.toggle('hidden', !live);
     showView('session');
   }
+
+  // ===============================================================
+  // 言語設定（レーン × 言語の対応表）
+  //
+  // エンジンの実体は候補セット（WhisperEngine の allowed_lang_ids）で、
+  // 1つのレーンに複数言語が乗るのが常態。レーンは言語1つではなく集合を持つ。
+  // 候補が1つに絞れたレーンは lang_detect を飛ばせる。
+  // ===============================================================
+  const LANGS = [
+    { code: 'ja', name: '日本語', jp: '日本語', en: 'Japanese' },
+    { code: 'en', name: 'English', jp: '英語', en: 'English' },
+    { code: 'zh', name: '中文（简体）', jp: '中国語（簡体）', en: 'Chinese' },
+    { code: 'yue', name: '粤語', jp: '広東語', en: 'Cantonese' },
+    { code: 'ko', name: '한국어', jp: '韓国語', en: 'Korean' },
+    { code: 'es', name: 'Español', jp: 'スペイン語', en: 'Spanish' },
+    { code: 'fr', name: 'Français', jp: 'フランス語', en: 'French' },
+    { code: 'de', name: 'Deutsch', jp: 'ドイツ語', en: 'German' },
+    { code: 'pt', name: 'Português', jp: 'ポルトガル語', en: 'Portuguese' },
+    { code: 'it', name: 'Italiano', jp: 'イタリア語', en: 'Italian' },
+    { code: 'ru', name: 'Русский', jp: 'ロシア語', en: 'Russian' },
+    { code: 'vi', name: 'Tiếng Việt', jp: 'ベトナム語', en: 'Vietnamese' },
+    { code: 'th', name: 'ไทย', jp: 'タイ語', en: 'Thai' },
+    { code: 'id', name: 'Bahasa Indonesia', jp: 'インドネシア語', en: 'Indonesian' },
+    { code: 'hi', name: 'हिन्दी', jp: 'ヒンディー語', en: 'Hindi' },
+    { code: 'ar', name: 'العربية', jp: 'アラビア語', en: 'Arabic' },
+    { code: 'nl', name: 'Nederlands', jp: 'オランダ語', en: 'Dutch' },
+    { code: 'pl', name: 'Polski', jp: 'ポーランド語', en: 'Polish' },
+    { code: 'tr', name: 'Türkçe', jp: 'トルコ語', en: 'Turkish' },
+    { code: 'uk', name: 'Українська', jp: 'ウクライナ語', en: 'Ukrainian' },
+  ];
+  const LANE_LABELS = { mic: 'マイク', speaker: 'スピーカー' };
+  const MAX_LANGS = 2; // 候補セットの上限（plan.md: Main/Subの2言語ペア）
+  const langName = (code) => LANGS.find((l) => l.code === code).name;
+
+  const langPop = qs('#langPop');
+  const langPill = qs('#langPill');
+
+  // applied = いま認識に使われている値 / draft = ポップオーバー内の編集中の値。
+  // 既定はマイク=日本語のみ、スピーカー=日本語と英語の両方。相手側に複数言語の
+  // 話者が同席する会議を初期状態で示しておく。
+  let appliedLangs = {
+    langs: ['ja', 'en'],
+    lanes: { mic: ['ja'], speaker: ['ja', 'en'] },
+    target: 'mutual',
+  };
+  let draftLangs = structuredClone(appliedLangs);
+
+  // 記号がモードを語る: なし=単一 / ⇄=相互 / ·=複数だが訳さない
+  function describeLangs(state) {
+    const names = state.langs.map(langName);
+    if (state.target === 'mutual' && names.length === 2) return `${names[0]} ⇄ ${names[1]}`;
+    return names.join(' · ');
+  }
+
+  function renderLangPill() {
+    const body = qs('#langPillBody');
+    body.replaceChildren();
+    describeLangs(appliedLangs).split(/(\s[⇄·]\s)/).forEach((part) => {
+      if (/^\s[⇄·]\s$/.test(part)) {
+        const glyph = document.createElement('span');
+        glyph.className = 'glyph';
+        glyph.textContent = part;
+        body.append(glyph);
+        return;
+      }
+      if (part) body.append(document.createTextNode(part));
+    });
+  }
+
+  // 設定の効果をその場で見せる。訳文は相互翻訳のときだけ出る。
+  function renderLiveTranslations() {
+    qsa('#liveTranscript .translation').forEach((node) => {
+      const shown = appliedLangs.target === 'mutual' && appliedLangs.langs.includes(node.dataset.tr);
+      node.classList.toggle('hidden', !shown);
+    });
+  }
+
+  // 言語カタログのピッカー。onlyExtras のときは言語一覧も検索欄も出さない。
+  function openLangPicker(options) {
+    const page = qs('[data-page="picker"]', langPop);
+    page.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'picker-head';
+    const back = document.createElement('button');
+    back.type = 'button';
+    back.className = 'picker-back';
+    back.setAttribute('aria-label', '戻る');
+    back.textContent = '‹';
+    back.addEventListener('click', () => showLangPage('main'));
+    const title = document.createElement('span');
+    title.className = 'picker-title';
+    title.textContent = options.title;
+    head.append(back, title);
+    page.append(head);
+
+    const list = document.createElement('div');
+    list.className = 'picker-list';
+    list.setAttribute('role', 'listbox');
+
+    let search;
+    if (!options.onlyExtras) {
+      const searchWrap = document.createElement('div');
+      searchWrap.className = 'picker-search';
+      search = document.createElement('input');
+      search.type = 'search';
+      search.placeholder = '言語を検索（例: Spanish, es, スペイン）';
+      search.setAttribute('aria-label', '言語を検索');
+      searchWrap.append(search);
+      page.append(searchWrap);
+    }
+    page.append(list);
+
+    function row({ label, sub, code, chosen, disabled, onPick }) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'picker-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(Boolean(chosen)));
+      if (disabled) item.disabled = true;
+
+      const tick = document.createElement('span');
+      tick.className = 'tick';
+      tick.textContent = chosen ? '✓' : '';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = label;
+      const jp = document.createElement('span');
+      jp.className = 'jp';
+      jp.textContent = disabled ? '選択済み' : (sub ?? '');
+      const codeEl = document.createElement('span');
+      codeEl.className = 'code';
+      codeEl.textContent = code ?? '';
+      item.append(tick, name, jp, codeEl);
+      item.addEventListener('click', () => { onPick(); showLangPage('main'); });
+      return item;
+    }
+
+    function render(term = '') {
+      const needle = term.trim().toLocaleLowerCase();
+      list.replaceChildren();
+
+      // extras は検索していないときだけ先頭に出す（探し物の邪魔をしない）
+      if (!needle && options.extras?.length) {
+        options.extras.forEach((extra) => list.append(row({
+          label: extra.label,
+          sub: extra.sub,
+          chosen: options.current === extra.value,
+          onPick: () => options.onPick(extra.value),
+        })));
+        if (options.onlyExtras) return;
+      }
+
+      const matches = LANGS.filter((lang) =>
+        !needle || `${lang.code} ${lang.name} ${lang.jp} ${lang.en}`.toLocaleLowerCase().includes(needle));
+      if (!matches.length) {
+        const empty = document.createElement('div');
+        empty.className = 'picker-empty';
+        empty.textContent = '該当する言語はありません';
+        list.append(empty);
+        return;
+      }
+      matches.forEach((lang) => list.append(row({
+        label: lang.name,
+        sub: lang.jp === lang.name ? '' : lang.jp,
+        code: lang.code,
+        chosen: options.current === lang.code,
+        disabled: (options.blocked ?? []).includes(lang.code),
+        onPick: () => options.onPick(lang.code),
+      })));
+    }
+
+    search?.addEventListener('input', (event) => render(event.target.value));
+    render();
+    showLangPage('picker');
+    search?.focus();
+  }
+
+  function showLangPage(page) {
+    qsa('.pop-page', langPop).forEach((p) => p.classList.toggle('active', p.dataset.page === page));
+  }
+
+  // 候補から言語を外す。その言語しか持っていなかったレーンは空になるので、
+  // 残った言語で埋め直す（レーンが1つも言語を持たない状態を作らない）。
+  function removeDraftLang(code) {
+    if (draftLangs.langs.length === 1) return;
+    draftLangs.langs = draftLangs.langs.filter((c) => c !== code);
+    Object.keys(draftLangs.lanes).forEach((lane) => {
+      const kept = draftLangs.lanes[lane].filter((c) => c !== code);
+      draftLangs.lanes[lane] = kept.length ? kept : [...draftLangs.langs];
+    });
+    renderLangDraft();
+  }
+
+  function renderLangDraft() {
+    // 候補が1言語に戻ったら相互翻訳は意味を失う
+    if (draftLangs.target === 'mutual' && draftLangs.langs.length !== 2) draftLangs.target = null;
+
+    const host = qs('#langMatrix');
+    host.replaceChildren();
+
+    const head = document.createElement('div');
+    head.className = 'matrix-row matrix-head';
+    head.append(document.createElement('span'));
+    Object.values(LANE_LABELS).forEach((label) => {
+      const cell = document.createElement('span');
+      cell.className = 'matrix-col';
+      const meter = document.createElement('span');
+      meter.className = 'level-meter';
+      meter.setAttribute('aria-hidden', 'true');
+      meter.append(document.createElement('i'), document.createElement('i'), document.createElement('i'));
+      const text = document.createElement('span');
+      text.textContent = label;
+      cell.append(meter, text);
+      head.append(cell);
+    });
+    head.append(document.createElement('span')); // 削除列の見出しは空
+    host.append(head);
+
+    draftLangs.langs.forEach((code) => {
+      const row = document.createElement('div');
+      row.className = 'matrix-row';
+
+      const label = document.createElement('button');
+      label.type = 'button';
+      label.className = 'matrix-lang';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = langName(code);
+      const codeEl = document.createElement('span');
+      codeEl.className = 'code';
+      codeEl.textContent = code;
+      label.append(name, codeEl);
+      label.addEventListener('click', () => openLangPicker({
+        title: '言語を変更',
+        current: code,
+        blocked: draftLangs.langs.filter((c) => c !== code),
+        onPick: (picked) => {
+          draftLangs.langs = draftLangs.langs.map((c) => (c === code ? picked : c));
+          Object.keys(draftLangs.lanes).forEach((lane) => {
+            draftLangs.lanes[lane] = draftLangs.lanes[lane].map((c) => (c === code ? picked : c));
+          });
+          renderLangDraft();
+        },
+      }));
+      row.append(label);
+
+      Object.keys(LANE_LABELS).forEach((lane) => {
+        const cell = document.createElement('label');
+        cell.className = 'matrix-cell';
+        const box = document.createElement('input');
+        box.type = 'checkbox';
+        box.checked = draftLangs.lanes[lane].includes(code);
+        box.setAttribute('aria-label', `${LANE_LABELS[lane]}で${langName(code)}が話される`);
+        // 各レーンは最低1言語を持つ。最後の1つは外させない
+        box.disabled = box.checked && draftLangs.lanes[lane].length === 1;
+        box.addEventListener('change', () => {
+          const set = draftLangs.lanes[lane];
+          draftLangs.lanes[lane] = set.includes(code)
+            ? set.filter((c) => c !== code)
+            : [...set, code];
+          renderLangDraft();
+        });
+        cell.append(box);
+        row.append(cell);
+      });
+
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'matrix-remove';
+      remove.textContent = '×';
+      remove.setAttribute('aria-label', `${langName(code)} を候補から外す`);
+      // 候補が1つだけのときは外させない（0言語では認識が成立しない）
+      remove.disabled = draftLangs.langs.length === 1;
+      remove.addEventListener('click', () => removeDraftLang(code));
+      row.append(remove);
+
+      host.append(row);
+    });
+
+    const bilingual = draftLangs.langs.length === MAX_LANGS;
+    qs('#langAdd').classList.toggle('hidden', bilingual);
+    qs('#langCapHint').classList.toggle('hidden', !bilingual);
+    // どのレーンも候補が1つなら、どこでも言語判定が要らない
+    const everyLanePinned = Object.values(draftLangs.lanes).every((set) => set.length === 1);
+    qs('#langFastHint').classList.toggle('hidden', !everyLanePinned);
+
+    // 候補が1言語なら訳す相手がいない。選択肢を出さず、理由を書く。
+    const target = qs('#langTarget');
+    target.disabled = !bilingual;
+    qs('[data-name]', target).textContent = draftLangs.target === 'mutual' ? 'おたがいの言語へ' : '訳さない';
+    qs('#langNoTranslate').classList.toggle('hidden', bilingual);
+  }
+
+  function openLangPop() {
+    draftLangs = structuredClone(appliedLangs);
+    renderLangDraft();
+    showLangPage('main');
+    langPop.classList.add('open');
+    langPill.setAttribute('aria-expanded', 'true');
+  }
+
+  function closeLangPop() {
+    langPop.classList.remove('open');
+    langPill.setAttribute('aria-expanded', 'false');
+  }
+
+  langPill.addEventListener('click', () => {
+    if (langPop.classList.contains('open')) closeLangPop();
+    else openLangPop();
+  });
+  qsa('[data-lang-close]', langPop).forEach((b) => b.addEventListener('click', closeLangPop));
+
+  qs('#langAdd').addEventListener('click', () => openLangPicker({
+    title: '追加する言語',
+    current: null,
+    blocked: draftLangs.langs,
+    onPick: (code) => {
+      draftLangs.langs = [...draftLangs.langs, code];
+      // 足した言語は、まずスピーカー側で起こるものとして扱う（相手が別言語の想定が最多）
+      draftLangs.lanes.speaker = [...draftLangs.lanes.speaker, code];
+      // 2言語目を足したなら翻訳が要るはず。既定で有効にし、不要なら外してもらう
+      draftLangs.target = 'mutual';
+      renderLangDraft();
+    },
+  }));
+
+  // 訳す向きは表から導出できる（各発話を、それ以外の候補言語へ訳す）ので、
+  // 訳す先の言語は聞き直さない。残るのは訳すか訳さないかだけ。
+  qs('#langTarget').addEventListener('click', () => openLangPicker({
+    title: '訳して表示',
+    current: draftLangs.target,
+    onlyExtras: true,
+    extras: [
+      { label: '訳さない', sub: '文字起こしのみ', value: null },
+      { label: 'おたがいの言語へ', sub: '各発話をもう一方の言語に訳す', value: 'mutual' },
+    ],
+    onPick: (value) => { draftLangs.target = value; renderLangDraft(); },
+  }));
+
+  qs('#langApply').addEventListener('click', () => {
+    const before = describeLangs(appliedLangs);
+    const changed = JSON.stringify(appliedLangs) !== JSON.stringify(draftLangs);
+    appliedLangs = structuredClone(draftLangs);
+    renderLangPill();
+    renderLiveTranslations();
+    closeLangPop();
+
+    if (!changed) {
+      showToast('設定は変更されていません');
+      return;
+    }
+    const after = describeLangs(appliedLangs);
+    if (before !== after) {
+      // 切り替えた位置をしおりとして残す。あとで transcript.jsonl を読み直したときに
+      // 言語が変わった境界が画面と一致する。
+      const marker = document.createElement('div');
+      marker.className = 'lang-marker';
+      marker.textContent = `ここから ${after}`;
+      qs('#liveTranscript').append(marker);
+      qs('#liveTranscript').scrollTop = qs('#liveTranscript').scrollHeight;
+    }
+    showToast(`次の発話から「${after}」で認識します`);
+  });
 
   function updateRecordingControls() {
     startRecordingButton.classList.toggle('hidden', recording);
@@ -1226,7 +1858,14 @@
   });
 
   document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') closeActionsMenu();
+    if (event.key === 'Escape') {
+      closeActionsMenu();
+      // ピッカーを開いているときは、まず1階層だけ戻す
+      if (langPop.classList.contains('open')) {
+        if (qs('[data-page="picker"]', langPop).classList.contains('active')) showLangPage('main');
+        else { closeLangPop(); langPill.focus(); }
+      }
+    }
     if (event.metaKey && event.altKey && event.key.toLocaleLowerCase() === 'r') {
       event.preventDefault();
       if (recording) stopRecording();
@@ -1245,7 +1884,12 @@
 
   document.addEventListener('click', (event) => {
     if (!actionsMenu.contains(event.target) && event.target !== actionsButton) closeActionsMenu();
+    if (!langPop.contains(event.target) && !langPill.contains(event.target)) closeLangPop();
   });
+
+  renderLangPill();
+  renderLiveTranslations();
+  renderLangDraft();
 
   setInterval(() => {
     if (!recording || paused) return;

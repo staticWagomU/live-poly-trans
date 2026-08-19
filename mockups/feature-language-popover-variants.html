@@ -1,0 +1,1341 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — 言語ポップオーバーの中身 4案</title>
+<style>
+  :root {
+    --accent: #0068d8;
+    --accent-soft: rgba(0, 104, 216, 0.12);
+    --record: #d70015;
+    --record-soft: rgba(215, 0, 21, 0.1);
+    --success: #16823b;
+    --text: #1d1d1f;
+    --secondary: #5b5c63;
+    --muted: #686970;
+    --separator: rgba(30, 30, 36, 0.12);
+    --surface: #fbfbfd;
+    --surface-raised: rgba(255, 255, 255, 0.96);
+    --shadow-menu: 0 18px 52px rgba(0, 0, 0, 0.18);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0 0 70px;
+    color: var(--text);
+    background: #eceef3;
+    font-family: var(--font);
+  }
+
+  button, input { font: inherit; color: inherit; }
+  button { border: 0; background: none; cursor: pointer; }
+  button:focus-visible, input:focus-visible {
+    outline: 3px solid rgba(0, 104, 216, 0.62);
+    outline-offset: 2px;
+  }
+  .hidden { display: none !important; }
+
+  .prop-head {
+    padding: 22px 30px 18px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(252, 252, 253, 0.94);
+  }
+  .prop-head h1 { margin: 0 0 6px; font-size: 20px; }
+  .prop-head p { max-width: 86ch; margin: 0 0 6px; color: var(--secondary); font-size: 13px; line-height: 1.65; }
+  .prop-head strong { color: var(--text); }
+
+  /* 共有する殻の説明 */
+  .shell-demo {
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+    max-width: 1400px;
+    margin: 22px auto 0;
+    padding: 14px 18px;
+    border: 1px solid var(--separator); border-radius: 12px;
+    background: #fff;
+  }
+  .shell-demo .cap { color: var(--muted); font-size: 12px; }
+  .session-meta-demo {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 8px 12px;
+    border: 1px dashed var(--separator); border-radius: 9px;
+    background: var(--surface);
+  }
+  .state-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 7px; border-radius: 6px;
+    color: var(--record); background: var(--record-soft);
+    font-size: 11px; font-weight: 650;
+  }
+  .capture-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 24px; padding: 3px 8px;
+    border: 1px solid rgba(22, 130, 59, 0.2); border-radius: 6px;
+    color: #116d31; background: rgba(22, 130, 59, 0.08);
+    font-size: 11px; font-weight: 650;
+  }
+  .level-meter { height: 12px; display: inline-flex; align-items: end; gap: 2px; color: var(--success); }
+  .level-meter i { width: 2px; border-radius: 2px; background: currentColor; transform-origin: bottom; animation: input-level 850ms ease-in-out infinite alternate; }
+  .level-meter i:nth-child(1) { height: 5px; }
+  .level-meter i:nth-child(2) { height: 11px; animation-delay: 140ms; }
+  .level-meter i:nth-child(3) { height: 8px; animation-delay: 260ms; }
+
+  /* 言語ピル（4案で完全に共通） */
+  .lang-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 24px; padding: 3px 8px;
+    border: 1px solid var(--accent); border-radius: 6px;
+    color: #fff; background: var(--accent);
+    font-size: 11px; font-weight: 650;
+  }
+  .lang-pill .glyph { color: rgba(255, 255, 255, 0.72); font-weight: 400; }
+  .lang-pill .chev { color: rgba(255, 255, 255, 0.72); font-size: 9px; }
+  .pin-dot { width: 5px; height: 5px; border-radius: 50%; background: #fff; }
+
+  /* 比較グリッド */
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+    gap: 20px;
+    max-width: 1400px;
+    margin: 22px auto 0;
+    padding: 0 30px;
+  }
+  .card {
+    display: flex; flex-direction: column;
+    padding: 18px;
+    border: 1px solid var(--separator); border-radius: 14px;
+    background: #fff;
+  }
+  .card > h2 { margin: 0 0 3px; font-size: 15px; }
+  .card > .tagline { margin: 0 0 14px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+  .pill-preview {
+    display: flex; align-items: center; gap: 9px;
+    margin-bottom: 12px; padding: 9px 11px;
+    border-radius: 9px;
+    background: var(--surface);
+    border: 1px solid var(--separator);
+  }
+  .pill-preview .cap { color: var(--muted); font-size: 10.5px; font-weight: 650; }
+
+  /* ポップオーバー本体（案ごとに中身だけ差し替わる） */
+  .pop {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-menu);
+  }
+  .pop-page { display: none; }
+  .pop-page.active { display: block; }
+  .pop-section { padding: 12px 14px 12px; }
+  .pop-section + .pop-section { border-top: 1px solid var(--separator); }
+  .pop-title { font-size: 12.5px; font-weight: 700; }
+  .pop-lead { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+  .pop-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid var(--separator);
+  }
+  .pop-hint { min-width: 0; flex: 1; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+  .btn {
+    min-height: 28px; padding: 0 12px;
+    border: 1px solid var(--separator); border-radius: 7px;
+    background: #fff; font-size: 12.5px; font-weight: 600;
+  }
+  .btn.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+  .btn:hover { background: rgba(120, 120, 128, 0.1); }
+  .btn.primary:hover { background: #005dbf; }
+
+  /* 共通パーツ: 言語スロット */
+  .code {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em;
+  }
+  .slot {
+    width: 100%;
+    min-height: 36px;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 10px;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff;
+    text-align: left;
+  }
+  .slot:hover { border-color: rgba(0, 104, 216, 0.45); background: var(--accent-soft); }
+  .slot .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .slot[disabled] { opacity: 0.42; cursor: default; }
+  .slot[disabled]:hover { border-color: var(--separator); background: #fff; }
+
+  /* 共通パーツ: ピッカーページ */
+  .picker-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+  .picker-back { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--secondary); font-size: 20px; }
+  .picker-back:hover { background: rgba(120, 120, 128, 0.12); }
+  .picker-title { font-size: 12.5px; font-weight: 700; }
+  .picker-search { padding: 0 12px 8px; }
+  .picker-search input {
+    width: 100%; height: 30px; padding: 0 10px;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff; font-size: 12.5px;
+  }
+  .picker-list { max-height: 250px; overflow: auto; padding: 0 8px 8px; }
+  .picker-item {
+    width: 100%;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 7px 8px; border-radius: 7px; text-align: left;
+  }
+  .picker-item:hover { color: #fff; background: var(--accent); }
+  .picker-item .name { min-width: 0; flex: 1; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  .picker-item .jp { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+  .picker-item .code { width: 26px; text-align: right; }
+  .picker-item .tick { width: 12px; flex: 0 0 12px; color: var(--accent); font-size: 11px; }
+  .picker-item:hover .jp, .picker-item:hover .code { color: rgba(255, 255, 255, 0.76); }
+  .picker-item:hover .tick { color: #fff; }
+  .picker-item[disabled] { opacity: 0.4; cursor: default; }
+  .picker-item[disabled]:hover { color: inherit; background: none; }
+  .picker-item[disabled]:hover .jp, .picker-item[disabled]:hover .code { color: var(--muted); }
+  .picker-sep { padding: 9px 10px 4px; color: var(--muted); font-size: 10.5px; font-weight: 650; }
+  .picker-empty { padding: 14px 10px; color: var(--muted); font-size: 12px; text-align: center; }
+  .picker-note {
+    padding: 9px 14px 11px;
+    border-top: 1px solid var(--separator);
+    color: var(--muted); font-size: 10.5px; line-height: 1.5;
+  }
+
+  /* ---------- 案1: シナリオ ---------- */
+  .scenario {
+    display: block;
+    margin-top: 8px;
+    border: 1px solid var(--separator); border-radius: 10px;
+    background: #fff;
+    cursor: pointer;
+    overflow: hidden;
+  }
+  .scenario:hover { border-color: rgba(0, 104, 216, 0.4); }
+  .scenario.on { border-color: var(--accent); box-shadow: 0 0 0 2.5px var(--accent-soft); }
+  .scenario-head { display: flex; align-items: start; gap: 9px; padding: 11px 12px; }
+  .scenario-head input { width: 15px; height: 15px; margin: 1px 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+  .scenario-title { font-size: 13px; font-weight: 650; }
+  .scenario-desc { margin-top: 2px; color: var(--muted); font-size: 11px; line-height: 1.5; }
+  .scenario-body { padding: 0 12px 12px 36px; }
+  .scenario-body .row { display: flex; align-items: center; gap: 8px; margin-top: 7px; }
+  .scenario-body .row .role { flex: 0 0 42px; color: var(--muted); font-size: 11px; font-weight: 650; }
+  .scenario-body .arrow { color: var(--muted); font-size: 12px; text-align: center; }
+
+  /* ---------- 案2′: レーン × 言語の対応表 ---------- */
+  .matrix { margin-top: 10px; }
+  .matrix-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 66px 66px 26px;
+    align-items: center;
+    gap: 6px;
+  }
+  .matrix-remove {
+    width: 24px; height: 24px;
+    display: grid; place-items: center;
+    border-radius: 6px;
+    color: var(--muted); font-size: 14px; line-height: 1;
+  }
+  .matrix-remove:hover { color: #fff; background: var(--record); }
+  .matrix-remove[disabled] { opacity: 0; cursor: default; }
+  .matrix-row + .matrix-row { border-top: 1px solid var(--separator); }
+  .matrix-head { padding-bottom: 6px; border-bottom: 1px solid var(--separator); }
+  .matrix-col {
+    display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+    color: var(--muted); font-size: 10.5px; font-weight: 650;
+  }
+  .matrix-lang {
+    min-width: 0;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 9px 8px 9px 2px;
+    border-radius: 7px;
+    text-align: left;
+  }
+  .matrix-lang:hover { background: var(--accent-soft); }
+  .matrix-lang .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .matrix-lang .code {
+    color: var(--muted); font-size: 10.5px;
+    font-variant-numeric: tabular-nums; letter-spacing: 0.06em;
+  }
+  .matrix-cell { display: grid; place-items: center; padding: 8px 0; cursor: pointer; }
+  .matrix-cell input { width: 17px; height: 17px; accent-color: var(--accent); }
+  .matrix-cell input:disabled { cursor: default; }
+
+  /* ---------- 案2（旧）のレーン表示: 参考用に残す ---------- */
+  .lane { margin-top: 10px; }
+  .lane-head { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .lane-name { font-size: 12px; font-weight: 700; }
+  .lane-who { color: var(--muted); font-size: 11px; }
+  .lane-meter { height: 11px; display: inline-flex; align-items: end; gap: 2px; color: var(--success); }
+  .lane-meter i { width: 2px; border-radius: 2px; background: currentColor; transform-origin: bottom; animation: input-level 850ms ease-in-out infinite alternate; }
+  .lane-meter i:nth-child(1) { height: 4px; }
+  .lane-meter i:nth-child(2) { height: 10px; animation-delay: 140ms; }
+  .lane-meter i:nth-child(3) { height: 7px; animation-delay: 260ms; }
+  .lane-sub {
+    display: flex; align-items: center; gap: 7px;
+    margin: 7px 0 0 12px; padding-left: 11px;
+    border-left: 2px solid var(--separator);
+  }
+  .lane-sub .cap { color: var(--muted); font-size: 10.5px; }
+  .same-note {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-top: 9px; color: #116d31; font-size: 10.5px; line-height: 1.5;
+  }
+  .same-note::before { content: "▸"; font-size: 8px; }
+
+  /* ---------- 案3: 文章 ---------- */
+  .sentence { margin-top: 6px; font-size: 13.5px; line-height: 2.5; }
+  .sentence .lead-in { color: var(--muted); font-size: 12px; }
+  .inline-slot {
+    display: inline-flex; align-items: baseline; gap: 6px;
+    min-height: 28px; padding: 3px 9px;
+    border: 1px solid var(--separator); border-radius: 7px;
+    background: #fff;
+    font-size: 13px; font-weight: 650;
+    vertical-align: baseline;
+  }
+  .inline-slot:hover { border-color: rgba(0, 104, 216, 0.5); background: var(--accent-soft); }
+  .inline-slot .chev { color: var(--muted); font-size: 9px; }
+  .inline-slot.off { color: var(--muted); font-weight: 600; }
+  .sentence-line + .sentence-line { margin-top: 2px; }
+  .sentence-line.muted { opacity: 0.45; }
+
+  /* ---------- 案0: セクション ---------- */
+  .lang-slots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .lang-chip {
+    min-width: 0; flex: 1 1 130px;
+    display: flex; align-items: stretch;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff; overflow: hidden;
+  }
+  .lang-chip:hover { border-color: rgba(0, 104, 216, 0.45); }
+  .chip-main {
+    min-width: 0; flex: 1;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 4px 8px 10px; text-align: left;
+  }
+  .chip-main:hover { background: var(--accent-soft); }
+  .chip-main .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .chip-remove { width: 26px; flex: 0 0 26px; display: grid; place-items: center; color: var(--muted); font-size: 13px; }
+  .chip-remove:hover { color: #fff; background: var(--record); }
+  .add-lang {
+    min-height: 30px;
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 8px; padding: 0 10px;
+    border: 1px dashed rgba(0, 104, 216, 0.4); border-radius: 8px;
+    color: var(--accent); font-size: 12px; font-weight: 600;
+  }
+  .add-lang:hover { background: var(--accent-soft); }
+  .cap-hint { margin-top: 8px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+  .radio-row { display: flex; align-items: center; gap: 9px; margin-top: 9px; cursor: pointer; }
+  .radio-row input { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--accent); }
+  .radio-row .label { font-size: 12.5px; font-weight: 600; }
+  .pop-option { display: flex; align-items: start; gap: 9px; margin-top: 10px; cursor: pointer; }
+  .pop-option input { width: 15px; height: 15px; margin: 1px 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+  .pop-option .opt-title { font-size: 12px; font-weight: 600; }
+  .pop-option .opt-desc { margin-top: 2px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+  .pop-option.nested { margin-left: 24px; }
+  .indent { margin-left: 24px; margin-top: 8px; }
+
+  /* カード内の評価メモ */
+  .verdict {
+    margin-top: 14px; padding-top: 13px;
+    border-top: 1px solid var(--separator);
+    font-size: 12.5px; line-height: 1.65;
+  }
+  .verdict ul { margin: 6px 0 0; padding-left: 18px; }
+  .verdict li { margin-bottom: 3px; }
+  .verdict .good { color: #116d31; }
+  .verdict .bad { color: #a00012; }
+  .verdict code { padding: 1px 5px; border-radius: 4px; background: rgba(120, 120, 128, 0.14); font-size: 11.5px; }
+  .taps {
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 10px; padding: 3px 9px;
+    border-radius: 20px;
+    background: rgba(120, 120, 128, 0.12);
+    font-size: 11px; font-weight: 650;
+  }
+
+  .note {
+    max-width: 1400px;
+    margin: 24px auto 0;
+    padding: 16px 20px;
+    border: 1px solid var(--separator);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    background: #fff;
+    font-size: 13px; line-height: 1.75;
+  }
+  .note ul { margin: 8px 0 0; padding-left: 20px; }
+  .note li { margin-bottom: 5px; }
+  .note code { padding: 1px 5px; border-radius: 4px; background: rgba(120, 120, 128, 0.14); font-size: 12px; }
+  .note table { width: 100%; margin: 10px 0 0; border-collapse: collapse; font-size: 12.5px; }
+  .note th, .note td { padding: 7px 12px 7px 0; text-align: left; vertical-align: top; border-bottom: 1px solid var(--separator); }
+  .note th { color: var(--muted); font-size: 11px; font-weight: 650; }
+  .note td:first-child, .note th:first-child { white-space: nowrap; }
+
+  @keyframes input-level { from { transform: scaleY(0.48); } to { transform: scaleY(1); } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="prop-head">
+  <h1>言語ポップオーバーの中身 — 4案</h1>
+  <p>
+    「言語ピル＋ポップオーバー」という<strong>殻は4案とも同一</strong>。違うのは<strong>ポップオーバーを開いた先で、ユーザーに何を考えさせるか</strong>だけ。
+    扱うモデルも共通で、<strong>話される言語（1〜2）</strong>と<strong>翻訳先（1つ、または訳さない）</strong>を独立に持つ。
+  </p>
+  <p>
+    4案とも実際に操作できる。上のピルは各案の設定から<strong>同じ関数で</strong>導出しているので、
+    「同じ状態にたどり着くまでに何を聞かれるか」を横に並べて比べられる。
+  </p>
+</header>
+
+<div class="shell-demo">
+  <span class="cap">共通の殻（録音中の session-meta 行）:</span>
+  <span class="session-meta-demo">
+    <span class="state-badge"><span aria-hidden="true">●</span>録音中</span>
+    <span class="lang-pill"><span>日本語</span><span class="chev" aria-hidden="true">▾</span></span>
+    <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク</span>
+    <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>スピーカー</span>
+  </span>
+</div>
+
+<div class="grid">
+
+  <!-- ============ 案1: シナリオ ============ -->
+  <section class="card" id="card-scenario">
+    <h2>案1 — シナリオ選択</h2>
+    <p class="tagline">設定ではなく「どう使うか」を選ばせる。言語スロットは選んだシナリオの分だけ出る。</p>
+    <div class="pill-preview"><span class="cap">ピル</span><span class="lang-pill" data-pill><span class="chev" aria-hidden="true">▾</span></span></div>
+
+    <div class="pop">
+      <div class="pop-page active" data-page="main">
+        <div class="pop-section">
+          <div class="pop-title">この録音の使いかた</div>
+          <div class="pop-lead">当てはまるものを1つ選んでください。</div>
+          <div data-scenarios></div>
+        </div>
+        <div class="pop-foot">
+          <span class="pop-hint">変更は次の発話から反映されます。</span>
+          <button class="btn" type="button">キャンセル</button>
+          <button class="btn primary" type="button">適用</button>
+        </div>
+      </div>
+      <div class="pop-page" data-page="picker"></div>
+    </div>
+
+    <div class="verdict">
+      <b>評価</b>
+      <ul>
+        <li class="good">モデルを理解しなくていい。<strong>自分の状況を選ぶだけ</strong>で、翻訳の向きも候補言語も自動で決まる</li>
+        <li class="good">「訳さない」が独立した選択肢ではなく<strong>1つ目のシナリオそのもの</strong>なので、最多ケースが最上段の1タップで終わる</li>
+        <li class="bad">シナリオに載っていない組み合わせが作れない（例: 話される言語が2つで訳さない）。<strong>網羅性と引き換え</strong></li>
+        <li class="bad">縦に長い。選択肢を読む時間が4案でいちばん長く、<strong>2回目以降は冗長</strong>に感じる</li>
+      </ul>
+      <span class="taps">最短 1タップ</span>
+    </div>
+  </section>
+
+  <!-- ============ 案2: レーン ============ -->
+  <section class="card" id="card-lane">
+    <h2>案2′ — レーン × 言語の対応表</h2>
+    <p class="tagline">レーンごとに「起こりうる言語」を複数選べる表。1レーンに複数言語の話者がいる会議を正面から扱う。</p>
+    <div class="pill-preview"><span class="cap">ピル</span><span class="lang-pill" data-pill><span class="chev" aria-hidden="true">▾</span></span></div>
+
+    <div class="pop">
+      <div class="pop-page active" data-page="main">
+        <div class="pop-section">
+          <div class="pop-title">どの音声で、どの言語が話されるか</div>
+          <div class="pop-lead">1つの音声に複数の言語が混ざってもかまいません。該当するものにチェックを入れてください。</div>
+
+          <div class="matrix" data-matrix></div>
+
+          <button class="add-lang" type="button" data-add><span aria-hidden="true">＋</span>言語を追加</button>
+          <div class="cap-hint hidden" data-cap>会議全体で2言語まで。3つ以上は判定が不安定になるため設けていません。</div>
+          <div class="same-note hidden" data-same-note>どの音声も1言語なので、言語判定を行いません。その分だけ速く、取り違えも起きません。</div>
+        </div>
+
+        <div class="pop-section">
+          <div class="pop-title">訳して表示</div>
+          <button class="slot" style="margin-top:9px" type="button" data-target>
+            <span class="name" data-name>訳さない</span><span class="code" data-code></span>
+          </button>
+          <div class="cap-hint hidden" data-no-translate>候補が1言語のときは、訳す相手がいないため翻訳はありません。</div>
+        </div>
+
+        <div class="pop-foot">
+          <span class="pop-hint">変更は次の発話から反映されます。</span>
+          <button class="btn" type="button">キャンセル</button>
+          <button class="btn primary" type="button">適用</button>
+        </div>
+      </div>
+      <div class="pop-page" data-page="picker"></div>
+    </div>
+
+    <div class="verdict">
+      <b>評価</b>
+      <ul>
+        <li class="good">録音中の <code>capture-badge</code>（マイク／スピーカー）と<strong>同じ語</strong>を列見出しに使うので、画面のどこの設定かが一目で分かる</li>
+        <li class="good"><strong>あらゆる組み合わせが1画面で表現できる。</strong> 相手側にja/en両方の話者、自分がバイリンガル、全員同じ言語 — すべてチェックの入れ方の違いでしかない</li>
+        <li class="good">列が1言語だけのレーンは <code>transcribe(_, Some(lang))</code> で<strong>判定を飛ばせる</strong>。表がそのまま最適化の指示になる（<code>lib.rs:132</code>）</li>
+        <li class="good"><b>訳す向きは表から導出する。</b> どの発話も「それ以外の候補言語」へ訳せばよいので、訳す先の言語を聞き直さない。設定は<strong>訳すか訳さないかの2択</strong>だけになり、候補が1言語のときは選択肢ごと消える</li>
+        <li class="good">行末の <code>×</code> で候補から外せる。外した言語しか持たなかったレーンは<strong>残った言語で埋め直す</strong>ので、「どのレーンにも属さない言語」「言語が1つもないレーン」という無意味な状態を作れない</li>
+        <li class="bad"><strong>表は事務的で、初見の圧がある。</strong> 「なぜ2軸あるのか」を理解しないと埋められない</li>
+        <li class="bad">2択にしたことで<strong>単方向翻訳ができない</strong>。日本語話者が自分の日本語まで英訳させることになり、その分の推論と表示は無駄になる。必要なら「自分の発話の訳文を隠す」という<strong>表示側の設定</strong>で足すのが筋で、翻訳先の設定に戻すべきではない</li>
+        <li class="bad">レーンごとの候補セットを engine に渡すには <code>allowed_lang_ids</code> を<strong>呼び出し引数にする変更が要る</strong>（現状は <code>WhisperEngine</code> のフィールドで全レーン共有 — <code>pipeline.rs:246</code>）</li>
+      </ul>
+      <span class="taps">最短 0タップ（既定のまま）</span>
+    </div>
+  </section>
+
+  <!-- ============ 案3: 文章 ============ -->
+  <section class="card" id="card-sentence">
+    <h2>案3′ — 文章に埋め込む</h2>
+    <p class="tagline">設定を1つの文として読ませる。ラベルも説明文も要らず、読めばそのまま意味になる。各サイドは複数言語を持てる。</p>
+    <div class="pill-preview"><span class="cap">ピル</span><span class="lang-pill" data-pill><span class="chev" aria-hidden="true">▾</span></span></div>
+
+    <div class="pop">
+      <div class="pop-page active" data-page="main">
+        <div class="pop-section">
+          <div class="sentence">
+            <div class="sentence-line">
+              <span class="lead-in">あなたは</span>
+              <button class="inline-slot" type="button" data-role="mic"><span data-name>日本語</span><span class="chev" aria-hidden="true">▾</span></button>
+              <span class="lead-in">を話す。</span>
+            </div>
+            <div class="sentence-line">
+              <span class="lead-in">相手は</span>
+              <button class="inline-slot" type="button" data-role="speaker"><span data-name>日本語</span><span class="chev" aria-hidden="true">▾</span></button>
+              <span class="lead-in">を話す。</span>
+            </div>
+            <div class="sentence-line" data-target-line>
+              <span class="lead-in">訳文は</span>
+              <button class="inline-slot" type="button" data-role="target"><span data-name>表示しない</span><span class="chev" aria-hidden="true">▾</span></button>
+              <span class="lead-in" data-target-tail>。</span>
+            </div>
+          </div>
+          <div class="same-note hidden" data-same-note>ふたりとも同じ言語なので、言語判定も翻訳も行いません。</div>
+        </div>
+
+        <div class="pop-foot">
+          <span class="pop-hint">変更は次の発話から反映されます。</span>
+          <button class="btn" type="button">キャンセル</button>
+          <button class="btn primary" type="button">適用</button>
+        </div>
+      </div>
+      <div class="pop-page" data-page="picker"></div>
+    </div>
+
+    <div class="verdict">
+      <b>評価</b>
+      <ul>
+        <li class="good">4案で<strong>最小の面積</strong>。説明文がゼロで、読むだけで何が起きるか分かる</li>
+        <li class="good">「あなた／相手」という語が主語になるので、Main/Sub のような<strong>用語を覚える必要がない</strong></li>
+        <li class="good"><strong>複数言語が日本語の文に自然に収まる。</strong>「相手は English と 日本語 を話す。」は表や設定項目より読みやすく、混在が例外に見えない</li>
+        <li class="good">上限に達すると、ピッカー側で理由（<code>上限</code> / <code>外せません</code>）を添えて選べなくする。<strong>2言語までという制約を文の外で説明せずに済む</strong></li>
+        <li class="bad">インラインのボタンは押せる場所が本文に埋もれ、<strong>タップ領域として見つけにくい</strong>（アクセシビリティ上も不利。下線や背景で押下可能性を明示する必要がある）</li>
+        <li class="bad">「あなた」「相手」の2者しか文に登場しない。<strong>3レーン目が増えたら文ごと作り直し</strong>になる</li>
+        <li class="bad">日本語は語順が固定的なので、将来オプションを足すと<strong>文の途中に差し込めず</strong>、結局は箇条書きに戻りやすい</li>
+      </ul>
+      <span class="taps">最短 0タップ（既定のまま）</span>
+    </div>
+  </section>
+
+  <!-- ============ 案0: セクション（前回） ============ -->
+  <section class="card" id="card-section">
+    <h2>案0 — セクション分割（前回の案）</h2>
+    <p class="tagline">「話される言語」と「翻訳」を別セクションに分け、部品を組み立てさせる。比較の基準として残す。</p>
+    <div class="pill-preview"><span class="cap">ピル</span><span class="lang-pill" data-pill><span class="chev" aria-hidden="true">▾</span></span></div>
+
+    <div class="pop">
+      <div class="pop-page active" data-page="main">
+        <div class="pop-section">
+          <div class="pop-title">話される言語</div>
+          <div class="pop-lead">この会議で実際に話される言語。候補が少ないほど誤認識が減ります。</div>
+          <div class="lang-slots" data-slots></div>
+          <button class="add-lang" type="button" data-add><span aria-hidden="true">＋</span>言語を追加</button>
+          <div class="cap-hint hidden" data-cap>自動判定は2言語まで。</div>
+          <div class="same-note hidden" data-same-note>1言語なので言語判定を行いません。</div>
+          <label class="pop-option hidden" data-pin-row>
+            <input type="checkbox" data-pin />
+            <span>
+              <span class="opt-title">マイクは<span data-pin-lang>日本語</span>に固定する</span>
+              <span class="opt-desc">自分の発話は判定せず決め打ちします。</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="pop-section">
+          <div class="pop-title">翻訳</div>
+          <label class="radio-row"><input type="radio" data-tr-off /><span class="label">訳さない</span></label>
+          <label class="radio-row"><input type="radio" data-tr-on /><span class="label">次の言語へ訳す</span></label>
+          <button class="slot indent" type="button" data-target style="width:calc(100% - 24px)">
+            <span class="name" data-name>日本語</span><span class="code" data-code>ja</span>
+          </button>
+          <label class="pop-option nested hidden" data-mutual-row>
+            <input type="checkbox" data-mutual />
+            <span>
+              <span class="opt-title">もう一方の言語にも訳す</span>
+              <span class="opt-desc">画面を相手にも見せるときに使います。</span>
+            </span>
+          </label>
+        </div>
+
+        <div class="pop-foot">
+          <span class="pop-hint">変更は次の発話から反映されます。</span>
+          <button class="btn" type="button">キャンセル</button>
+          <button class="btn primary" type="button">適用</button>
+        </div>
+      </div>
+      <div class="pop-page" data-page="picker"></div>
+    </div>
+
+    <div class="verdict">
+      <b>評価</b>
+      <ul>
+        <li class="good"><strong>作れない組み合わせがない。</strong> モデルをそのまま露出しているので表現力は最大</li>
+        <li class="good">「話される言語」と「翻訳先」が独立だと構造で示せる</li>
+        <li class="bad"><strong>モデルの理解をユーザーに要求する。</strong> 部品（チップ・ラジオ・チェックボックス2つ）から状態を自分で組み立てる必要がある</li>
+        <li class="bad">条件付きで現れる要素が3つ（追加ボタン・マイク固定・相互翻訳）あり、<strong>UIが伸び縮みして落ち着かない</strong></li>
+        <li class="bad">「相互翻訳」は前提を理解していないと何のことか分からない</li>
+      </ul>
+      <span class="taps">最短 2タップ</span>
+    </div>
+  </section>
+
+</div>
+
+<div class="note">
+  <b>修正: 「1レーン＝1言語」という前提が誤りだった</b>
+  <p style="margin:8px 0 0">
+    前版の案2は、レーンごとに言語を1つ割り当て、混在は「自動判定」という逃げ道に追いやっていました。これは前提が逆です。
+    <code>src-tauri/src/pipeline.rs:246</code> で <code>run_capture_loop</code> に渡る <code>engines</code> は<strong>全レーン共有の1つ</strong>で、
+    レーンは音声の出所を分ける単位であって言語を分ける単位ではありません。
+    エンジンが <code>allowed_lang_ids</code> という<strong>候補セット</strong>を持つのは、まさに1つのレーンに複数言語が乗るのが常態だからです。
+    Zoom越しに相手が複数人いれば ja/en 混在は例外ではなく普通のケースで、それを例外扱いする設計は誤りでした。
+  </p>
+  <p style="margin:8px 0 0">
+    案3も同じ誤りを共有していた（「相手は [English] を話す。」が相手＝1人1言語を前提にしていた）ため、両案とも
+    <strong>各サイドが「言語の集合」を持つ</strong>形に直しました。案1・案0はもともと候補セットのモデルなので変更していません。
+  </p>
+  <table>
+    <thead><tr><th>観点</th><th>案1 シナリオ</th><th>案2′ 対応表</th><th>案3′ 文章</th><th>案0 セクション</th></tr></thead>
+    <tbody>
+      <tr><td>初見の分かりやすさ</td><td>◎</td><td>△</td><td>◎</td><td>△</td></tr>
+      <tr><td>2回目以降の速さ</td><td>△</td><td>○</td><td>◎</td><td>○</td></tr>
+      <tr><td>表現できる範囲</td><td>△</td><td>◎</td><td>○</td><td>○</td></tr>
+      <tr><td>1レーンに複数言語</td><td>○</td><td>◎</td><td>◎</td><td>◎</td></tr>
+      <tr><td>レーン別の最適化に使えるか</td><td>×</td><td>◎</td><td>◎</td><td>△</td></tr>
+      <tr><td>単一言語（最多ケース）の扱い</td><td>1タップ</td><td>既定のまま</td><td>既定のまま</td><td>2タップ</td></tr>
+    </tbody>
+  </table>
+  <ul style="margin-top:12px">
+    <li><b>案3′ は修正後も成立します。</b>「相手は English と 日本語 を話す。」は表や設定項目より読みやすく、混在が<strong>例外に見えない</strong>のが利点です。2言語という上限もピッカー側で理由つきに示せるので、文の外に注意書きを足さずに済みます</li>
+    <li><b>案3′ の残る弱点</b>は、インラインのボタンが本文に埋もれてタップ領域として見つけにくいこと。下線か薄い背景で押下可能性を明示する必要があります</li>
+    <li><b>案2′ は表現力では最も強い</b>ものの、2軸の表は初見の圧が大きく、日常的に開く場所には重いと考えます。設定画面側の詳細ペインならこちらが向きます</li>
+    <li><b>レーン別の候補セットを実装に渡すなら</b>、<code>allowed_lang_ids</code> を <code>WhisperEngine</code> のフィールドから <code>transcribe</code> の引数に移す変更が要ります（現状は全レーン共有）。1レーンの候補が1つに絞れた場合は <code>lang_detect</code> を丸ごと飛ばせるので、この変更は精度と速度の両方に効きます</li>
+  </ul>
+</div>
+
+<script>
+  const qs = (s, r = document) => r.querySelector(s);
+  const qsa = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  // name = その言語自身の表記、jp = 日本語名（走査用）、en = 英語名（検索用）
+  const LANGS = [
+    { code: 'ja', name: '日本語', jp: '日本語', en: 'Japanese' },
+    { code: 'en', name: 'English', jp: '英語', en: 'English' },
+    { code: 'zh', name: '中文（简体）', jp: '中国語（簡体）', en: 'Chinese' },
+    { code: 'yue', name: '粤語', jp: '広東語', en: 'Cantonese' },
+    { code: 'ko', name: '한국어', jp: '韓国語', en: 'Korean' },
+    { code: 'es', name: 'Español', jp: 'スペイン語', en: 'Spanish' },
+    { code: 'fr', name: 'Français', jp: 'フランス語', en: 'French' },
+    { code: 'de', name: 'Deutsch', jp: 'ドイツ語', en: 'German' },
+    { code: 'pt', name: 'Português', jp: 'ポルトガル語', en: 'Portuguese' },
+    { code: 'it', name: 'Italiano', jp: 'イタリア語', en: 'Italian' },
+    { code: 'ru', name: 'Русский', jp: 'ロシア語', en: 'Russian' },
+    { code: 'vi', name: 'Tiếng Việt', jp: 'ベトナム語', en: 'Vietnamese' },
+    { code: 'th', name: 'ไทย', jp: 'タイ語', en: 'Thai' },
+    { code: 'id', name: 'Bahasa Indonesia', jp: 'インドネシア語', en: 'Indonesian' },
+    { code: 'hi', name: 'हिन्दी', jp: 'ヒンディー語', en: 'Hindi' },
+    { code: 'ar', name: 'العربية', jp: 'アラビア語', en: 'Arabic' },
+    { code: 'nl', name: 'Nederlands', jp: 'オランダ語', en: 'Dutch' },
+    { code: 'pl', name: 'Polski', jp: 'ポーランド語', en: 'Polish' },
+    { code: 'tr', name: 'Türkçe', jp: 'トルコ語', en: 'Turkish' },
+    { code: 'uk', name: 'Українська', jp: 'ウクライナ語', en: 'Ukrainian' },
+  ];
+  const byCode = (code) => LANGS.find((l) => l.code === code);
+  const nameOf = (code) => byCode(code).name;
+
+  // ---------------------------------------------------------------
+  // 4案が共有する正準形。どの案もここに落としてからピルを描く。
+  //   langs  : 話される言語 1〜2
+  //   target : 翻訳先（null なら訳さない）
+  //   mutual : もう一方の言語にも訳すか
+  // ---------------------------------------------------------------
+  function describe(canonical) {
+    const names = canonical.langs.map(nameOf);
+    if (!canonical.target) return names.join(' · ');
+    if (canonical.mutual && canonical.langs.length === 2) return `${names[0]} ⇄ ${names[1]}`;
+    const sources = canonical.langs.filter((l) => l !== canonical.target).map(nameOf);
+    if (!sources.length) return names.join(' · ');
+    return `${sources.join(' · ')} → ${nameOf(canonical.target)}`;
+  }
+
+  // 記号だけ一段軽くしたいので、文字列を分解して組み直す
+  function renderPill(pillEl, canonical, pinned = false) {
+    const text = describe(canonical);
+    pillEl.replaceChildren();
+    text.split(/(\s[⇄→·]\s)/).forEach((part) => {
+      if (/^\s[⇄→·]\s$/.test(part)) {
+        const glyph = document.createElement('span');
+        glyph.className = 'glyph';
+        glyph.textContent = part;
+        pillEl.append(glyph);
+      } else if (part) {
+        pillEl.append(document.createTextNode(part));
+      }
+    });
+    if (pinned) {
+      const dot = document.createElement('span');
+      dot.className = 'pin-dot';
+      pillEl.append(dot);
+    }
+    const chev = document.createElement('span');
+    chev.className = 'chev';
+    chev.setAttribute('aria-hidden', 'true');
+    chev.textContent = '▾';
+    pillEl.append(chev);
+  }
+
+  // ---------------------------------------------------------------
+  // 共有ピッカー。案ごとに page を差し替えるだけで中身は同じ。
+  // extras で「自動判定」「訳さない」のような言語以外の選択肢を先頭に足せる。
+  // ---------------------------------------------------------------
+  function createPicker(card) {
+    const pages = qsa('.pop-page', card);
+    const pickerPage = qs('[data-page="picker"]', card);
+    let session = null;
+
+    pickerPage.innerHTML = `
+      <div class="picker-head">
+        <button class="picker-back" type="button" aria-label="戻る">‹</button>
+        <span class="picker-title"></span>
+        <span style="flex:1"></span>
+        <button class="btn primary picker-done hidden" type="button" style="min-height:25px;padding:0 10px;font-size:11.5px">完了</button>
+      </div>
+      <div class="picker-search">
+        <input type="search" placeholder="言語を検索（例: Spanish, es, スペイン）" aria-label="言語を検索" />
+      </div>
+      <div class="picker-list" role="listbox" aria-label="言語一覧"></div>
+      <div class="picker-note hidden"></div>`;
+
+    const titleEl = qs('.picker-title', pickerPage);
+    const searchEl = qs('input', pickerPage);
+    const listEl = qs('.picker-list', pickerPage);
+    const doneEl = qs('.picker-done', pickerPage);
+    const noteEl = qs('.picker-note', pickerPage);
+    doneEl.addEventListener('click', () => show('main'));
+
+    function show(page) {
+      pages.forEach((p) => p.classList.toggle('active', p.dataset.page === page));
+    }
+
+    function row({ label, sub, code, chosen, disabled, note, onPick }) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'picker-item';
+      item.setAttribute('role', 'option');
+      item.setAttribute('aria-selected', String(Boolean(chosen)));
+      if (disabled) item.disabled = true;
+
+      const tick = document.createElement('span');
+      tick.className = 'tick';
+      // 複数選択のときは、選べる余地があることが分かるよう空欄にも枠を出す
+      tick.textContent = chosen ? '✓' : (session.multi && !disabled ? '' : '');
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = label;
+      const jp = document.createElement('span');
+      jp.className = 'jp';
+      jp.textContent = note ?? (sub ?? '');
+      const codeEl = document.createElement('span');
+      codeEl.className = 'code';
+      codeEl.textContent = code ?? '';
+      item.append(tick, name, jp, codeEl);
+      item.addEventListener('click', () => {
+        onPick();
+        // 複数選択は選ぶたびに閉じない。続けて選べるほうが自然
+        if (session.multi) render(searchEl.value);
+        else show('main');
+      });
+      return item;
+    }
+
+    function render(term = '') {
+      const needle = term.trim().toLocaleLowerCase();
+      listEl.replaceChildren();
+      doneEl.classList.toggle('hidden', !session.multi);
+      noteEl.classList.toggle('hidden', !session.note);
+      if (session.note) noteEl.textContent = session.note;
+      // 言語カタログを出さない用途（2択など）では検索欄も意味がない
+      qs('.picker-search', pickerPage).classList.toggle('hidden', Boolean(session.onlyExtras));
+
+      // extras は検索していないときだけ先頭に出す（探し物の邪魔をしない）
+      if (!needle && session.extras?.length) {
+        session.extras.forEach((extra) => listEl.append(row({
+          label: extra.label,
+          sub: extra.sub,
+          chosen: session.current === extra.value,
+          onPick: () => session.onPick(extra.value),
+        })));
+        if (session.onlyExtras) return;
+        const sep = document.createElement('div');
+        sep.className = 'picker-sep';
+        sep.textContent = '言語';
+        listEl.append(sep);
+      }
+
+      const matches = LANGS.filter((lang) =>
+        !needle || `${lang.code} ${lang.name} ${lang.jp} ${lang.en}`.toLocaleLowerCase().includes(needle));
+
+      if (!matches.length) {
+        const empty = document.createElement('div');
+        empty.className = 'picker-empty';
+        empty.textContent = '該当する言語はありません';
+        listEl.append(empty);
+        return;
+      }
+
+      matches.forEach((lang) => {
+        if (session.multi) {
+          const selected = session.selected.includes(lang.code);
+          // 外せない（最後の1つ）／足せない（候補が上限）を、理由つきで示す
+          const blocked = selected
+            ? session.selected.length === 1
+            : !session.canAdd(lang.code);
+          listEl.append(row({
+            label: lang.name,
+            sub: lang.jp === lang.name ? '' : lang.jp,
+            code: lang.code,
+            chosen: selected,
+            disabled: blocked,
+            note: blocked ? (selected ? '外せません' : '上限') : undefined,
+            onPick: () => session.onToggle(lang.code),
+          }));
+          return;
+        }
+        listEl.append(row({
+          label: lang.name,
+          sub: lang.jp === lang.name ? '' : lang.jp,
+          code: lang.code,
+          chosen: session.current === lang.code,
+          disabled: (session.blocked ?? []).includes(lang.code),
+          note: (session.blocked ?? []).includes(lang.code) ? '選択済み' : undefined,
+          onPick: () => session.onPick(lang.code),
+        }));
+      });
+    }
+
+    qs('.picker-back', pickerPage).addEventListener('click', () => show('main'));
+    searchEl.addEventListener('input', (event) => render(event.target.value));
+
+    return function open(options) {
+      session = options;
+      titleEl.textContent = options.title;
+      searchEl.value = '';
+      render();
+      show('picker');
+      searchEl.focus();
+    };
+  }
+
+  function setSlot(slot, { name, code }) {
+    qs('[data-name]', slot).textContent = name;
+    const codeEl = qs('[data-code]', slot);
+    if (codeEl) codeEl.textContent = code ?? '';
+  }
+
+  // ===============================================================
+  // 案1: シナリオ選択
+  // ===============================================================
+  (function scenarioVariant() {
+    const card = qs('#card-scenario');
+    const openPicker = createPicker(card);
+    const pill = qs('[data-pill]', card);
+
+    const SCENARIOS = [
+      {
+        id: 'solo',
+        title: '文字起こしだけ',
+        desc: '1つの言語で話される。翻訳しない。',
+        slots: [{ key: 'a', role: '言語' }],
+        toCanonical: (s) => ({ langs: [s.a], target: null, mutual: false }),
+      },
+      {
+        id: 'read',
+        title: '相手の言葉を自分の言語で読む',
+        desc: '相手の発話だけを訳す。訳文は自分が読む。',
+        slots: [{ key: 'b', role: '相手' }, { key: 'a', role: '自分' }],
+        toCanonical: (s) => ({ langs: [s.b], target: s.a, mutual: false }),
+      },
+      {
+        id: 'both',
+        title: 'おたがいの言葉を見せ合う',
+        desc: '両方向に訳す。画面を相手にも見せるとき。',
+        slots: [{ key: 'a', role: '自分' }, { key: 'b', role: '相手' }],
+        toCanonical: (s) => ({ langs: [s.a, s.b], target: s.a, mutual: true }),
+      },
+      {
+        id: 'mixed',
+        title: '2つの言語が入りまじる',
+        desc: '発話ごとに自動判定して、自分の言語に訳す。',
+        slots: [{ key: 'a', role: '自分' }, { key: 'b', role: 'もう1つ' }],
+        toCanonical: (s) => ({ langs: [s.a, s.b], target: s.a, mutual: false }),
+      },
+    ];
+
+    const state = { pick: 'solo', a: 'ja', b: 'en' };
+    const host = qs('[data-scenarios]', card);
+
+    function sync() {
+      const scenario = SCENARIOS.find((s) => s.id === state.pick);
+      renderPill(pill, scenario.toCanonical(state));
+    }
+
+    function render() {
+      host.replaceChildren();
+      SCENARIOS.forEach((scenario) => {
+        const on = state.pick === scenario.id;
+        const wrap = document.createElement('label');
+        wrap.className = `scenario${on ? ' on' : ''}`;
+
+        const head = document.createElement('span');
+        head.className = 'scenario-head';
+        const radio = document.createElement('input');
+        radio.type = 'radio';
+        radio.name = 'scenario';
+        radio.checked = on;
+        radio.addEventListener('change', () => { state.pick = scenario.id; render(); });
+        const texts = document.createElement('span');
+        const title = document.createElement('span');
+        title.className = 'scenario-title';
+        title.style.display = 'block';
+        title.textContent = scenario.title;
+        const desc = document.createElement('span');
+        desc.className = 'scenario-desc';
+        desc.style.display = 'block';
+        desc.textContent = scenario.desc;
+        texts.append(title, desc);
+        head.append(radio, texts);
+        wrap.append(head);
+
+        if (on) {
+          const body = document.createElement('span');
+          body.className = 'scenario-body';
+          body.style.display = 'block';
+          scenario.slots.forEach(({ key, role }) => {
+            const row = document.createElement('span');
+            row.className = 'row';
+            const roleEl = document.createElement('span');
+            roleEl.className = 'role';
+            roleEl.textContent = role;
+            const slot = document.createElement('button');
+            slot.type = 'button';
+            slot.className = 'slot';
+            slot.innerHTML = '<span class="name" data-name></span><span class="code" data-code></span>';
+            setSlot(slot, { name: nameOf(state[key]), code: state[key] });
+            slot.addEventListener('click', (event) => {
+              event.preventDefault();
+              openPicker({
+                title: `${role}の言語`,
+                current: state[key],
+                blocked: scenario.slots.length > 1
+                  ? scenario.slots.filter((s) => s.key !== key).map((s) => state[s.key])
+                  : [],
+                onPick: (code) => { state[key] = code; render(); },
+              });
+            });
+            row.append(roleEl, slot);
+            body.append(row);
+          });
+          wrap.append(body);
+        }
+        host.append(wrap);
+      });
+      sync();
+    }
+
+    render();
+  })();
+
+  // ===============================================================
+  // 案2: マイク／スピーカーに割り当て
+  // ===============================================================
+  (function laneVariant() {
+    const card = qs('#card-lane');
+    const openPicker = createPicker(card);
+    const pill = qs('[data-pill]', card);
+
+    // langs = 会議全体の候補（最大2）。lanes[lane] = そのレーンで起こりうる言語。
+    // 1レーンに複数言語の話者がいるのが普通なので、レーンは集合を持つ。
+    const state = {
+      langs: ['ja'],
+      lanes: { mic: ['ja'], speaker: ['ja'] },
+      target: null,
+    };
+    const LANE_LABELS = { mic: 'マイク', speaker: 'スピーカー' };
+    const MAX_LANGS = 2;
+
+    const spokenLangs = () => state.langs;
+
+    // 候補から言語を外す。その言語しか持っていなかったレーンは空になるので、
+    // 残った言語で埋め直す（レーンが1つも言語を持たない状態を作らない）。
+    function removeLang(code) {
+      if (state.langs.length === 1) return;
+      state.langs = state.langs.filter((c) => c !== code);
+      Object.keys(state.lanes).forEach((lane) => {
+        const kept = state.lanes[lane].filter((c) => c !== code);
+        state.lanes[lane] = kept.length ? kept : [...state.langs];
+      });
+      render();
+    }
+
+    // 相互翻訳はユーザーが明示的に選んだときだけ。訳す先を1つ指定した場合は、
+    // その言語への単方向であって、逆向きは勝手に足さない。
+    function canonical() {
+      const langs = spokenLangs();
+      if (state.target === 'mutual') return { langs, target: langs[0], mutual: true };
+      return { langs, target: state.target, mutual: false };
+    }
+
+    function render() {
+      const langs = spokenLangs();
+      // 候補が1つに戻ったら「おたがいの言語へ」は意味を失う
+      if (state.target === 'mutual' && langs.length !== 2) state.target = null;
+
+      const host = qs('[data-matrix]', card);
+      host.replaceChildren();
+
+      const head = document.createElement('div');
+      head.className = 'matrix-row matrix-head';
+      head.append(document.createElement('span'));
+      Object.entries(LANE_LABELS).forEach(([lane, label]) => {
+        const cell = document.createElement('span');
+        cell.className = 'matrix-col';
+        const meter = document.createElement('span');
+        meter.className = 'lane-meter';
+        meter.setAttribute('aria-hidden', 'true');
+        meter.innerHTML = '<i></i><i></i><i></i>';
+        const text = document.createElement('span');
+        text.textContent = label;
+        cell.append(meter, text);
+        head.append(cell);
+      });
+      head.append(document.createElement('span')); // 削除列の見出しは空
+      host.append(head);
+
+      state.langs.forEach((code) => {
+        const row = document.createElement('div');
+        row.className = 'matrix-row';
+
+        const label = document.createElement('button');
+        label.type = 'button';
+        label.className = 'matrix-lang';
+        label.innerHTML = '<span class="name"></span><span class="code"></span>';
+        qs('.name', label).textContent = nameOf(code);
+        qs('.code', label).textContent = code;
+        label.addEventListener('click', () => openPicker({
+          title: '言語を変更',
+          current: code,
+          blocked: state.langs.filter((c) => c !== code),
+          onPick: (picked) => {
+            state.langs = state.langs.map((c) => (c === code ? picked : c));
+            Object.keys(state.lanes).forEach((lane) => {
+              state.lanes[lane] = state.lanes[lane].map((c) => (c === code ? picked : c));
+            });
+            if (state.target === code) state.target = picked;
+            render();
+          },
+        }));
+        row.append(label);
+
+        Object.keys(LANE_LABELS).forEach((lane) => {
+          const cell = document.createElement('label');
+          cell.className = 'matrix-cell';
+          const box = document.createElement('input');
+          box.type = 'checkbox';
+          box.checked = state.lanes[lane].includes(code);
+          box.setAttribute('aria-label', `${LANE_LABELS[lane]}で${nameOf(code)}が話される`);
+          // 各レーンは最低1言語を持つ。最後の1つは外させない
+          box.disabled = box.checked && state.lanes[lane].length === 1;
+          box.addEventListener('change', () => {
+            const set = state.lanes[lane];
+            state.lanes[lane] = set.includes(code)
+              ? set.filter((c) => c !== code)
+              : [...set, code];
+            render();
+          });
+          cell.append(box);
+          row.append(cell);
+        });
+
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'matrix-remove';
+        remove.textContent = '×';
+        remove.setAttribute('aria-label', `${nameOf(code)} を候補から外す`);
+        // 候補が1つだけのときは外させない（0言語では認識が成立しない）
+        remove.disabled = state.langs.length === 1;
+        remove.addEventListener('click', () => removeLang(code));
+        row.append(remove);
+
+        host.append(row);
+      });
+
+      qs('[data-add]', card).classList.toggle('hidden', state.langs.length >= MAX_LANGS);
+      qs('[data-cap]', card).classList.toggle('hidden', state.langs.length < MAX_LANGS);
+      // どのレーンも候補が1つなら、どこでも言語判定が要らない
+      const everyLanePinned = Object.values(state.lanes).every((set) => set.length === 1);
+      qs('[data-same-note]', card).classList.toggle('hidden', !everyLanePinned);
+
+      // 候補が1言語なら訳す相手がいない。選択肢を出さず、理由を書く。
+      const translatable = langs.length === 2;
+      const targetSlot = qs('[data-target]', card);
+      targetSlot.disabled = !translatable;
+      setSlot(targetSlot, {
+        name: state.target === 'mutual' ? 'おたがいの言語へ' : '訳さない',
+        code: '',
+      });
+      qs('[data-no-translate]', card).classList.toggle('hidden', translatable);
+
+      renderPill(pill, canonical());
+    }
+
+    qs('[data-add]', card).addEventListener('click', () => openPicker({
+      title: '追加する言語',
+      current: null,
+      blocked: state.langs,
+      onPick: (code) => {
+        state.langs = [...state.langs, code];
+        // 足した言語は、まずスピーカー側で起こるものとして扱う（相手が別言語の想定が最多）
+        state.lanes.speaker = [...state.lanes.speaker, code];
+        // 2言語目を足したなら翻訳が要るはず。既定で有効にし、不要なら外してもらう
+        state.target = 'mutual';
+        render();
+      },
+    }));
+
+    // 訳す向きは表から導出できる（各発話を、それ以外の候補言語へ訳す）ので、
+    // 訳す先の言語を聞き直さない。残るのは「訳すか、訳さないか」だけ。
+    qs('[data-target]', card).addEventListener('click', () => openPicker({
+      title: '訳して表示',
+      current: state.target,
+      onlyExtras: true,
+      extras: [
+        { label: '訳さない', sub: '文字起こしのみ', value: null },
+        { label: 'おたがいの言語へ', sub: '各発話をもう一方の言語に訳す', value: 'mutual' },
+      ],
+      onPick: (value) => { state.target = value; render(); },
+    }));
+
+    render();
+  })();
+
+  // ===============================================================
+  // 案3: 文章に埋め込む
+  // ===============================================================
+  (function sentenceVariant() {
+    const card = qs('#card-sentence');
+    const openPicker = createPicker(card);
+    const pill = qs('[data-pill]', card);
+
+    // 各サイドは「言語1つ」ではなく「言語の集合」を持つ。相手側に日本語話者と
+    // 英語話者が同席する会議が普通にあるため、1つに決め打つと表現できない。
+    // target は null（表示しない）/ 言語コード / 'mutual'（おたがいの言語）
+    const state = { mic: ['ja'], speaker: ['ja'], target: null };
+    const MAX_LANGS = 2; // エンジンの候補セット上限（plan.md:14）
+
+    function spokenLangs() {
+      return [...new Set([...state.mic, ...state.speaker])];
+    }
+
+    function canonical() {
+      const langs = spokenLangs();
+      if (state.target === 'mutual') return { langs, target: langs[0], mutual: true };
+      return { langs, target: state.target, mutual: false };
+    }
+
+    // 「日本語 と English」。文の中に置くので読点ではなく「と」でつなぐ
+    const listNames = (codes) => codes.map(nameOf).join(' と ');
+
+    function render() {
+      const langs = spokenLangs();
+      const single = langs.length === 1;
+      // 話される言語が1つに戻ったら「おたがいの言語」は意味を失う
+      if (state.target === 'mutual' && single) state.target = null;
+
+      qsa('.inline-slot', card).forEach((slot) => {
+        const role = slot.dataset.role;
+        const label = qs('[data-name]', slot);
+        if (role === 'target') {
+          label.textContent = state.target === 'mutual' ? 'おたがいの言語'
+            : state.target ? nameOf(state.target) : '表示しない';
+          slot.classList.toggle('off', !state.target);
+        } else {
+          label.textContent = listNames(state[role]);
+        }
+      });
+
+      // 全員が同じ1言語なら訳す相手がいない。行を薄くして、文としても言い切る。
+      qs('[data-target-line]', card).classList.toggle('muted', single && !state.target);
+      qs('[data-target-tail]', card).textContent = state.target ? 'で表示する。' : '。';
+      qs('[data-same-note]', card).classList.toggle('hidden', !(single && !state.target));
+      renderPill(pill, canonical());
+    }
+
+    qsa('.inline-slot', card).forEach((slot) => {
+      slot.addEventListener('click', () => {
+        const role = slot.dataset.role;
+        if (role === 'target') {
+          openPicker({
+            title: '訳文の言語',
+            current: state.target,
+            extras: [
+              { label: '表示しない', sub: '文字起こしのみ', value: null },
+              ...(spokenLangs().length === 2
+                ? [{ label: 'おたがいの言語', sub: '両方向に訳す', value: 'mutual' }]
+                : []),
+            ],
+            onPick: (code) => { state.target = code; render(); },
+          });
+          return;
+        }
+        openPicker({
+          title: role === 'mic' ? 'あなたが話す言語' : '相手が話す言語',
+          multi: true,
+          selected: state[role],
+          note: `会議全体で ${MAX_LANGS} 言語まで。複数の話者がいる側は、まとめて選べます。`,
+          // 追加してよいのは、会議全体の異なり数が上限を超えないときだけ
+          canAdd: (code) => new Set([...spokenLangs(), code]).size <= MAX_LANGS,
+          onToggle: (code) => {
+            const set = state[role];
+            state[role] = set.includes(code)
+              ? set.filter((c) => c !== code)
+              : [...set, code];
+            render();
+          },
+        });
+      });
+    });
+
+    render();
+  })();
+
+  // ===============================================================
+  // 案0: セクション分割（前回の案）
+  // ===============================================================
+  (function sectionVariant() {
+    const card = qs('#card-section');
+    const openPicker = createPicker(card);
+    const pill = qs('[data-pill]', card);
+
+    const state = { langs: ['ja'], target: null, mutual: false, pinMic: false };
+
+    // 条件が崩れた修飾は黙って落とす（UIから消えただけで値が残る状態を作らない）
+    function normalize() {
+      const bilingual = state.langs.length === 2;
+      const targetIsSpoken = state.target && state.langs.includes(state.target);
+      if (!bilingual || !targetIsSpoken) { state.mutual = false; state.pinMic = false; }
+    }
+
+    function render() {
+      normalize();
+      const bilingual = state.langs.length === 2;
+      const targetIsSpoken = Boolean(state.target) && state.langs.includes(state.target);
+
+      const slots = qs('[data-slots]', card);
+      slots.replaceChildren();
+      state.langs.forEach((code, index) => {
+        const chip = document.createElement('div');
+        chip.className = 'lang-chip';
+        const main = document.createElement('button');
+        main.type = 'button';
+        main.className = 'chip-main';
+        main.innerHTML = '<span class="name" data-name></span><span class="code" data-code></span>';
+        setSlot(main, { name: nameOf(code), code });
+        main.addEventListener('click', () => openPicker({
+          title: '話される言語',
+          current: code,
+          blocked: state.langs.filter((_, i) => i !== index),
+          onPick: (picked) => { state.langs[index] = picked; render(); },
+        }));
+        chip.append(main);
+        if (bilingual) {
+          const remove = document.createElement('button');
+          remove.type = 'button';
+          remove.className = 'chip-remove';
+          remove.textContent = '×';
+          remove.setAttribute('aria-label', `${nameOf(code)} を外す`);
+          remove.addEventListener('click', () => {
+            state.langs = state.langs.filter((_, i) => i !== index);
+            render();
+          });
+          chip.append(remove);
+        }
+        slots.append(chip);
+      });
+
+      qs('[data-add]', card).classList.toggle('hidden', bilingual);
+      qs('[data-cap]', card).classList.toggle('hidden', !bilingual);
+      qs('[data-same-note]', card).classList.toggle('hidden', bilingual);
+      qs('[data-pin-row]', card).classList.toggle('hidden', !(bilingual && targetIsSpoken));
+      if (targetIsSpoken) qs('[data-pin-lang]', card).textContent = nameOf(state.target);
+      qs('[data-pin]', card).checked = state.pinMic;
+
+      qs('[data-tr-off]', card).checked = !state.target;
+      qs('[data-tr-on]', card).checked = Boolean(state.target);
+      const targetSlot = qs('[data-target]', card);
+      targetSlot.disabled = !state.target;
+      setSlot(targetSlot, state.target
+        ? { name: nameOf(state.target), code: state.target }
+        : { name: '—', code: '' });
+      qs('[data-mutual-row]', card).classList.toggle('hidden', !(bilingual && targetIsSpoken));
+      qs('[data-mutual]', card).checked = state.mutual;
+
+      renderPill(pill, { langs: state.langs, target: state.target, mutual: state.mutual }, state.pinMic);
+    }
+
+    qs('[data-add]', card).addEventListener('click', () => openPicker({
+      title: '追加する言語',
+      current: null,
+      blocked: state.langs,
+      onPick: (code) => { state.langs = [...state.langs, code]; render(); },
+    }));
+    qs('[data-target]', card).addEventListener('click', () => openPicker({
+      title: '翻訳先の言語',
+      current: state.target,
+      onPick: (code) => { state.target = code; render(); },
+    }));
+    qs('[data-tr-off]', card).addEventListener('change', () => { state.target = null; render(); });
+    qs('[data-tr-on]', card).addEventListener('change', () => {
+      // 訳す先が未定なら、話される言語に含まれないものを既定にする
+      state.target = state.target ?? (state.langs.includes('ja') && state.langs.length === 1 ? 'en' : 'ja');
+      render();
+    });
+    qs('[data-mutual]', card).addEventListener('change', (e) => { state.mutual = e.target.checked; render(); });
+    qs('[data-pin]', card).addEventListener('change', (e) => { state.pinMic = e.target.checked; render(); });
+
+    render();
+  })();
+</script>
+</body>
+</html>

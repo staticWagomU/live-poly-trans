@@ -1,0 +1,1075 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>LivePolyTrans — 録音中の言語選択UI 提案</title>
+<style>
+  :root {
+    --accent: #0068d8;
+    --accent-soft: rgba(0, 104, 216, 0.12);
+    --record: #d70015;
+    --record-soft: rgba(215, 0, 21, 0.1);
+    --speaker-a: #0068d8;
+    --speaker-b: #9a4f00;
+    --success: #16823b;
+    --text: #1d1d1f;
+    --secondary: #5b5c63;
+    --muted: #686970;
+    --separator: rgba(30, 30, 36, 0.12);
+    --surface: #fbfbfd;
+    --surface-raised: rgba(255, 255, 255, 0.94);
+    --shadow-window: 0 32px 90px rgba(0, 0, 0, 0.34);
+    --shadow-menu: 0 18px 52px rgba(0, 0, 0, 0.24);
+    --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Hiragino Sans", sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    padding: 0 0 60px;
+    color: var(--text);
+    background: #eceef3;
+    font-family: var(--font);
+  }
+
+  button, input { font: inherit; color: inherit; }
+  button { border: 0; background: none; cursor: pointer; }
+  button:focus-visible, input:focus-visible {
+    outline: 3px solid rgba(0, 104, 216, 0.62);
+    outline-offset: 2px;
+  }
+  .hidden { display: none !important; }
+
+  /* proposal chrome */
+  .prop-head {
+    position: sticky;
+    top: 0;
+    z-index: 90;
+    padding: 20px 30px 14px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+    background: rgba(252, 252, 253, 0.92);
+    backdrop-filter: blur(24px) saturate(180%);
+  }
+  .prop-head h1 { margin: 0 0 5px; font-size: 19px; }
+  .prop-head p { max-width: 78ch; margin: 0 0 12px; color: var(--secondary); font-size: 13px; line-height: 1.6; }
+  .vtabs { display: flex; flex-wrap: wrap; gap: 6px; }
+  .vtabs button {
+    min-height: 30px;
+    padding: 0 12px;
+    border: 1px solid var(--separator);
+    border-radius: 8px;
+    background: #fff;
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .vtabs button.active { color: #fff; border-color: var(--accent); background: var(--accent); }
+  .variant { display: none; padding: 26px 30px 0; }
+  .variant.active { display: block; }
+  .note {
+    max-width: 1080px;
+    margin: 18px 0 0;
+    padding: 14px 18px;
+    border: 1px solid var(--separator);
+    border-left: 3px solid var(--accent);
+    border-radius: 10px;
+    background: #fff;
+    font-size: 13px;
+    line-height: 1.7;
+  }
+  .note ul { margin: 8px 0 0; padding-left: 20px; }
+  .note li { margin-bottom: 4px; }
+  .note .bad { color: #a00012; }
+  .note .good { color: #116d31; }
+  .note code { padding: 1px 5px; border-radius: 4px; background: rgba(120, 120, 128, 0.14); font-size: 12px; }
+  .note table { margin: 8px 0 0; border-collapse: collapse; font-size: 12.5px; }
+  .note th, .note td { padding: 5px 12px 5px 0; text-align: left; vertical-align: top; }
+  .note th { color: var(--muted); font-size: 11px; font-weight: 650; border-bottom: 1px solid var(--separator); }
+  .note td:first-child { white-space: nowrap; font-weight: 650; }
+
+  /* app window (desktop-prototype と同じ語彙) */
+  .app-window {
+    position: relative;
+    width: min(1080px, 100%);
+    height: 540px;
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: 54px 1fr;
+    border: 1px solid rgba(30, 30, 40, 0.14);
+    border-radius: 14px;
+    background: var(--surface);
+    box-shadow: var(--shadow-window);
+  }
+  .window-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 0 14px;
+    border-bottom: 1px solid var(--separator);
+    background: rgba(252, 252, 253, 0.84);
+  }
+  .traffic { display: flex; gap: 7px; }
+  .traffic i { width: 11px; height: 11px; border-radius: 50%; }
+  .traffic i:nth-child(1) { background: #ff5f57; }
+  .traffic i:nth-child(2) { background: #febc2e; }
+  .traffic i:nth-child(3) { background: #28c840; }
+  .back-button { width: 30px; height: 30px; display: grid; place-items: center; border-radius: 7px; color: var(--secondary); font-size: 25px; }
+  .window-title { font-size: 13px; font-weight: 650; }
+  .toolbar-spacer { flex: 1; }
+  .toolbar-group { display: flex; align-items: center; gap: 8px; }
+  .toolbar-button {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 11px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 12.5px;
+    font-weight: 600;
+  }
+  .toolbar-button:hover { background: rgba(120, 120, 128, 0.1); }
+  .record-active { color: var(--record); border-color: rgba(215, 0, 21, 0.24); background: var(--record-soft); font-variant-numeric: tabular-nums; }
+  .stop-button { color: #fff; border-color: var(--record); background: var(--record); }
+  .icon-button { width: 30px; padding: 0; font-size: 15px; }
+
+  .session-main { min-height: 0; overflow: auto; display: grid; grid-template-rows: auto 1fr; }
+  .session-head { display: flex; align-items: start; gap: 12px; padding: 22px 24px 14px; }
+  .session-head h1 { margin: 0 0 6px; font-size: 20px; }
+  .session-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; color: var(--muted); font-size: 12px; }
+  .state-badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 7px; border-radius: 6px;
+    color: var(--record); background: var(--record-soft);
+    font-size: 11px; font-weight: 650;
+  }
+  .capture-badge {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 24px; padding: 3px 8px;
+    border: 1px solid rgba(22, 130, 59, 0.2); border-radius: 6px;
+    color: #116d31; background: rgba(22, 130, 59, 0.08);
+    font-size: 11px; font-weight: 650;
+  }
+  .level-meter { height: 12px; display: inline-flex; align-items: end; gap: 2px; color: var(--success); }
+  .level-meter i { width: 2px; border-radius: 2px; background: currentColor; transform-origin: bottom; animation: input-level 850ms ease-in-out infinite alternate; }
+  .level-meter i:nth-child(1) { height: 5px; }
+  .level-meter i:nth-child(2) { height: 11px; animation-delay: 140ms; }
+  .level-meter i:nth-child(3) { height: 8px; animation-delay: 260ms; }
+
+  /* ---- 言語ピル（案Aの中心） ---- */
+  .lang-anchor { position: relative; display: inline-flex; }
+  .lang-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    min-height: 24px; padding: 3px 8px;
+    border: 1px solid var(--separator); border-radius: 6px;
+    background: rgba(255, 255, 255, 0.82);
+    color: var(--text);
+    font-size: 11px; font-weight: 650;
+  }
+  .lang-pill:hover { border-color: rgba(0, 104, 216, 0.4); background: var(--accent-soft); }
+  .lang-pill[aria-expanded="true"] { color: #fff; border-color: var(--accent); background: var(--accent); }
+  /* 記号は言語名より一段軽く。モードは記号が担うが、読むのは言語名 */
+  .lang-pill .glyph { color: var(--muted); font-weight: 400; }
+  .lang-pill .chev { color: var(--muted); font-size: 9px; }
+  .lang-pill[aria-expanded="true"] .glyph,
+  .lang-pill[aria-expanded="true"] .chev { color: rgba(255, 255, 255, 0.72); }
+  .pin-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+  .lang-pill[aria-expanded="true"] .pin-dot { background: #fff; }
+
+  /* ---- ポップオーバー ---- */
+  .lang-pop {
+    position: absolute;
+    left: 0; top: 32px;
+    z-index: 60;
+    width: 322px;
+    display: none;
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: 12px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-menu);
+    backdrop-filter: blur(28px) saturate(180%);
+  }
+  .lang-pop.open { display: block; animation: appear 150ms ease-out; }
+  .pop-page { display: none; }
+  .pop-page.active { display: block; }
+
+  .pop-section { padding: 12px 14px 11px; }
+  .pop-section + .pop-section { border-top: 1px solid var(--separator); }
+  .pop-title { font-size: 12.5px; font-weight: 700; }
+  .pop-lead { margin-top: 3px; color: var(--muted); font-size: 11px; line-height: 1.55; }
+
+  /* 話される言語のスロット群 */
+  .lang-slots { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .lang-chip {
+    min-width: 0; flex: 1 1 128px;
+    display: flex; align-items: stretch;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .lang-chip:hover { border-color: rgba(0, 104, 216, 0.45); }
+  .chip-main {
+    min-width: 0; flex: 1;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 8px 4px 8px 10px;
+    text-align: left;
+  }
+  .chip-main:hover { background: var(--accent-soft); }
+  .chip-main .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  /* 表示しているコードは LPT_LANGS にそのまま入る値。等幅数字＋わずかな字間で記号として読ませる */
+  .code {
+    flex: 0 0 auto;
+    color: var(--muted);
+    font-size: 10.5px;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.06em;
+  }
+  .chip-remove {
+    width: 26px; flex: 0 0 26px;
+    display: grid; place-items: center;
+    color: var(--muted); font-size: 13px;
+  }
+  .chip-remove:hover { color: #fff; background: var(--record); }
+
+  .add-lang {
+    min-height: 30px;
+    display: inline-flex; align-items: center; gap: 5px;
+    margin-top: 8px; padding: 0 10px;
+    border: 1px dashed rgba(0, 104, 216, 0.4); border-radius: 8px;
+    color: var(--accent); font-size: 12px; font-weight: 600;
+  }
+  .add-lang:hover { background: var(--accent-soft); }
+  .cap-hint { margin-top: 8px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+  /* 単一言語のときだけ出る、速度・精度上の利点の告知 */
+  .fast-hint {
+    display: flex; align-items: baseline; gap: 6px;
+    margin-top: 9px;
+    color: #116d31; font-size: 10.5px; line-height: 1.5;
+  }
+  .fast-hint::before { content: "▸"; font-size: 8px; }
+
+  .pop-option {
+    display: flex; align-items: start; gap: 9px;
+    margin-top: 10px;
+    cursor: pointer;
+  }
+  .pop-option input { width: 15px; height: 15px; margin: 1px 0 0; flex: 0 0 auto; accent-color: var(--accent); }
+  .pop-option .opt-title { font-size: 12px; font-weight: 600; }
+  .pop-option .opt-desc { margin-top: 2px; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+  .pop-option.nested { margin-left: 24px; }
+
+  .radio-row { display: flex; align-items: center; gap: 9px; margin-top: 9px; cursor: pointer; }
+  .radio-row input { width: 15px; height: 15px; flex: 0 0 auto; accent-color: var(--accent); }
+  .radio-row .label { font-size: 12.5px; font-weight: 600; }
+  .target-slot {
+    min-width: 0; flex: 1;
+    display: flex; align-items: baseline; gap: 8px;
+    margin: 8px 0 0 24px;
+    padding: 8px 10px;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff;
+    text-align: left;
+  }
+  .target-slot:hover { border-color: rgba(0, 104, 216, 0.45); background: var(--accent-soft); }
+  .target-slot .name { min-width: 0; flex: 1; overflow: hidden; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+  .target-slot[disabled] { opacity: 0.4; cursor: default; }
+  .target-slot[disabled]:hover { border-color: var(--separator); background: #fff; }
+
+  .presets { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .presets button {
+    min-height: 25px; padding: 0 10px;
+    border: 1px solid var(--separator); border-radius: 20px;
+    background: #fff; font-size: 11.5px; font-weight: 600;
+  }
+  .presets button:hover { color: var(--accent); border-color: rgba(0, 104, 216, 0.4); background: var(--accent-soft); }
+
+  .pop-foot {
+    display: flex; align-items: center; gap: 8px;
+    padding: 10px 14px 12px;
+    border-top: 1px solid var(--separator);
+  }
+  .pop-hint { min-width: 0; flex: 1; color: var(--muted); font-size: 10.5px; line-height: 1.4; }
+  .btn {
+    min-height: 28px; padding: 0 12px;
+    border: 1px solid var(--separator); border-radius: 7px;
+    background: #fff; font-size: 12.5px; font-weight: 600;
+  }
+  .btn.primary { color: #fff; border-color: var(--accent); background: var(--accent); }
+  .btn:hover { background: rgba(120, 120, 128, 0.1); }
+  .btn.primary:hover { background: #005dbf; }
+
+  /* picker page */
+  .picker-head { display: flex; align-items: center; gap: 8px; padding: 10px 12px 8px; }
+  .picker-back { width: 26px; height: 26px; display: grid; place-items: center; border-radius: 6px; color: var(--secondary); font-size: 20px; }
+  .picker-back:hover { background: rgba(120, 120, 128, 0.12); }
+  .picker-title { font-size: 12.5px; font-weight: 700; }
+  .picker-search { padding: 0 12px 8px; }
+  .picker-search input {
+    width: 100%; height: 30px;
+    padding: 0 10px;
+    border: 1px solid var(--separator); border-radius: 8px;
+    background: #fff; font-size: 12.5px;
+  }
+  .picker-list { max-height: 264px; overflow: auto; padding: 0 8px 8px; }
+  .picker-item {
+    width: 100%;
+    display: flex; align-items: baseline; gap: 8px;
+    padding: 7px 8px;
+    border-radius: 7px;
+    text-align: left;
+  }
+  .picker-item:hover { color: #fff; background: var(--accent); }
+  .picker-item .name { min-width: 0; flex: 1; overflow: hidden; font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap; }
+  /* 各言語はその言語自身の表記が主。日本語名は走査用に一段落とす */
+  .picker-item .jp { flex: 0 0 auto; color: var(--muted); font-size: 10.5px; }
+  .picker-item .code { width: 26px; text-align: right; }
+  .picker-item .tick { width: 12px; flex: 0 0 12px; color: var(--accent); font-size: 11px; }
+  .picker-item:hover .jp, .picker-item:hover .code { color: rgba(255, 255, 255, 0.76); }
+  .picker-item:hover .tick { color: #fff; }
+  .picker-item[disabled] { opacity: 0.4; cursor: default; }
+  .picker-item[disabled]:hover { color: inherit; background: none; }
+  .picker-item[disabled]:hover .jp, .picker-item[disabled]:hover .code { color: var(--muted); }
+  .picker-empty { padding: 14px 10px; color: var(--muted); font-size: 12px; text-align: center; }
+
+  /* transcript */
+  .transcript { min-height: 0; overflow: auto; padding: 6px 24px 24px; }
+  .transcript-label { color: var(--muted); font-size: 11px; font-weight: 650; }
+  .transcript-line { display: grid; grid-template-columns: 92px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 7px 0; }
+  .speaker {
+    display: inline-flex; align-items: center; gap: 5px;
+    width: max-content; padding: 2px 7px; border-radius: 6px;
+    font-size: 12px; font-weight: 650;
+  }
+  .speaker::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+  .speaker.mic { color: var(--speaker-a); background: var(--accent-soft); }
+  .speaker.system { color: var(--speaker-b); background: rgba(154, 79, 0, 0.1); }
+  .utterance { font-size: 16px; font-weight: 600; line-height: 1.5; }
+  .translation { display: block; margin-top: 2px; color: var(--muted); font-size: 12.5px; font-weight: 400; }
+  .partial { color: var(--muted); font-weight: 400; }
+  .partial::after {
+    content: ""; display: inline-block;
+    width: 2px; height: 1em; margin-left: 3px;
+    vertical-align: -0.15em; background: var(--accent);
+    animation: blink 1s steps(1) infinite;
+  }
+  /* 設定を変えた位置に残すしおり */
+  .lang-marker {
+    display: flex; align-items: center; gap: 10px;
+    margin: 10px 0 4px;
+    color: var(--muted); font-size: 11px; font-weight: 650;
+  }
+  .lang-marker::before, .lang-marker::after { content: ""; height: 1px; flex: 1; background: var(--separator); }
+  .lang-marker::before { flex: 0 0 82px; }
+
+  /* 案B: ツールバー */
+  .toolbar-lang { gap: 5px; font-variant-numeric: tabular-nums; }
+  .toolbar-lang .chev { color: var(--muted); font-size: 9px; }
+
+  /* 案C: 開始シート */
+  .sheet-scrim {
+    position: absolute; inset: 0; z-index: 70;
+    display: grid; justify-items: center; align-items: start;
+    padding-top: 54px;
+    background: rgba(20, 20, 26, 0.28);
+    backdrop-filter: blur(2px);
+  }
+  .sheet {
+    width: 392px;
+    border-radius: 0 0 14px 14px;
+    background: var(--surface-raised);
+    box-shadow: 0 26px 60px rgba(0, 0, 0, 0.3);
+    animation: sheet-in 220ms ease-out;
+    overflow: hidden;
+  }
+  .sheet h2 { margin: 0 0 4px; font-size: 15px; }
+  .sheet .lead { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
+
+  .toast {
+    position: absolute; right: 20px; bottom: 20px; z-index: 80;
+    max-width: 320px;
+    display: none;
+    padding: 11px 14px;
+    border-radius: 10px;
+    color: #fff; background: rgba(24, 24, 30, 0.86);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
+    font-size: 12.5px; line-height: 1.5;
+  }
+  .toast.show { display: block; animation: appear 160ms ease-out; }
+
+  @keyframes appear { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes sheet-in { from { opacity: 0; transform: translateY(-12px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes input-level { from { transform: scaleY(0.48); } to { transform: scaleY(1); } }
+
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation: none !important; transition: none !important; }
+  }
+</style>
+</head>
+<body>
+
+<header class="prop-head">
+  <h1>録音中の言語選択UI — 3案</h1>
+  <p>
+    現状 <code>desktop-prototype.html</code> の録音中画面は「日本語 ⇄ English」を<strong>ただのテキスト</strong>として出しており、変更手段がない（実体は <code>LPT_LANGS</code> 環境変数）。
+    <strong>「話される言語」と「翻訳先」を別の設定として分け</strong>、単一言語（最多ケース）から日英混在までを1つのUIで扱う。
+  </p>
+  <div class="vtabs" role="tablist">
+    <button class="active" data-v="a" role="tab">案A 言語ピル + ポップオーバー（採用）</button>
+    <button data-v="b" role="tab">案B ツールバー常設ボタン</button>
+    <button data-v="c" role="tab">案C 録音開始シート</button>
+  </div>
+</header>
+
+<!-- ===================== 案A ===================== -->
+<section class="variant active" id="v-a">
+  <div class="app-window">
+    <header class="window-toolbar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <button class="back-button" type="button" aria-label="録音一覧に戻る">‹</button>
+      <span class="window-title">新しい録音</span>
+      <span class="toolbar-spacer"></span>
+      <div class="toolbar-group">
+        <button class="toolbar-button record-active" type="button"><span aria-hidden="true">●</span><span id="clockA">12:34</span></button>
+        <button class="toolbar-button icon-button" type="button" aria-label="録音を一時停止">Ⅱ</button>
+        <button class="toolbar-button stop-button" type="button"><span aria-hidden="true">■</span>停止</button>
+      </div>
+    </header>
+
+    <div class="session-main">
+      <div class="session-head">
+        <div>
+          <h1>新しい録音</h1>
+          <div class="session-meta">
+            <span class="state-badge"><span aria-hidden="true">●</span>録音中</span>
+
+            <!-- ここが提案の中心: 静的テキストだった言語表示をボタンにする -->
+            <span class="lang-anchor">
+              <button class="lang-pill" id="langPill" type="button"
+                      aria-haspopup="dialog" aria-expanded="false"
+                      aria-label="言語と翻訳の設定を変更">
+                <span id="pillBody">日本語</span>
+                <span class="pin-dot hidden" id="pillPin" title="マイクを固定中"></span>
+                <span class="chev" aria-hidden="true">▾</span>
+              </button>
+
+              <div class="lang-pop" id="langPop" role="dialog" aria-label="言語と翻訳">
+                <!-- page 1 -->
+                <div class="pop-page active" id="pageMain">
+                  <div class="pop-section">
+                    <div class="pop-title">話される言語</div>
+                    <div class="pop-lead">この会議で実際に話される言語。候補が少ないほど誤認識が減ります。</div>
+
+                    <div class="lang-slots" id="langSlots"></div>
+
+                    <button class="add-lang" id="addLang" type="button"><span aria-hidden="true">＋</span>言語を追加</button>
+                    <div class="cap-hint hidden" id="capHint">自動判定は2言語まで。3つ以上は判定が不安定になるため設けていません。</div>
+                    <div class="fast-hint hidden" id="fastHint">1言語なので言語判定を行いません。その分だけ速く、取り違えも起きません。</div>
+
+                    <label class="pop-option hidden" id="pinRow">
+                      <input type="checkbox" id="pinMic" />
+                      <span>
+                        <span class="opt-title">マイクは<span id="pinLangName">日本語</span>に固定する</span>
+                        <span class="opt-desc">自分の発話は判定せず決め打ちします。相手だけが別の言語のときに効きます。</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div class="pop-section">
+                    <div class="pop-title">翻訳</div>
+
+                    <label class="radio-row">
+                      <input type="radio" name="translate" value="off" id="translateOff" />
+                      <span class="label">訳さない</span>
+                    </label>
+                    <label class="radio-row">
+                      <input type="radio" name="translate" value="on" id="translateOn" />
+                      <span class="label">次の言語へ訳す</span>
+                    </label>
+                    <button class="target-slot" id="targetSlot" type="button" aria-label="翻訳先の言語">
+                      <span class="name" id="targetName">日本語</span>
+                      <span class="code" id="targetCode">ja</span>
+                    </button>
+
+                    <label class="pop-option nested hidden" id="mutualRow">
+                      <input type="checkbox" id="mutual" />
+                      <span>
+                        <span class="opt-title">もう一方の言語にも訳す</span>
+                        <span class="opt-desc" id="mutualDesc">自分の発話を相手の言語にも訳します。画面を相手に見せるときに使います。</span>
+                      </span>
+                    </label>
+                  </div>
+
+                  <div class="pop-section">
+                    <div class="pop-title">よく使う設定</div>
+                    <div class="presets" id="presets"></div>
+                  </div>
+
+                  <div class="pop-foot">
+                    <span class="pop-hint">変更は次の発話から反映されます。ここまでの文字起こしはそのまま残ります。</span>
+                    <button class="btn" type="button" data-close>キャンセル</button>
+                    <button class="btn primary" type="button" id="applyLang">適用</button>
+                  </div>
+                </div>
+
+                <!-- page 2: 言語ピッカー -->
+                <div class="pop-page" id="pagePicker">
+                  <div class="picker-head">
+                    <button class="picker-back" type="button" id="pickerBack" aria-label="戻る">‹</button>
+                    <span class="picker-title" id="pickerTitle">話される言語</span>
+                  </div>
+                  <div class="picker-search">
+                    <input id="pickerSearch" type="search" placeholder="言語を検索（例: Spanish, es, スペイン）" aria-label="言語を検索" />
+                  </div>
+                  <div class="picker-list" id="pickerList" role="listbox" aria-label="言語一覧"></div>
+                </div>
+              </div>
+            </span>
+
+            <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク</span>
+            <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>スピーカー</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="transcript" id="transcriptA" aria-live="polite">
+        <div class="transcript-label" style="margin-bottom:8px">リアルタイム文字起こし</div>
+        <div class="transcript-line">
+          <span class="speaker mic">マイク</span>
+          <span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。<span class="translation" data-tr="en">Got it. I'll arrange the schedule and put it on the calendar.</span></span>
+        </div>
+        <div class="transcript-line">
+          <span class="speaker system">スピーカー</span>
+          <span class="utterance">We should probably ship the beta by the end of this month.<span class="translation" data-tr="ja">ベータ版は今月末までにリリースした方がよさそうですね。</span></span>
+        </div>
+        <div class="transcript-line">
+          <span class="speaker system">スピーカー</span>
+          <span class="utterance partial">Can you also draft the announcement</span>
+        </div>
+      </div>
+    </div>
+    <div class="toast" id="toastA" role="status"></div>
+  </div>
+
+  <div class="note">
+    <b>案A「言語ピル + ポップオーバー」— 採用</b><br />
+    録音中の <code>session-meta</code> 行にすでに「日本語 ⇄ English」が出ている。<strong>置き場所は既に正しく、押せないことだけが問題</strong>なので、その静的テキストをそのままボタンに変える。新しい場所も新しい概念も増えない。
+    <ul>
+      <li class="good"><b>「話される言語」と「翻訳先」を分離した。</b> 両者を Main/Sub という1語に潰すと、単一言語の会議が表現できない。分けたことで下表の4状態がすべて素直に出る</li>
+      <li class="good"><b>最多ケースが最短経路になる。</b> 単一言語・訳なしは「話される言語1つ」＋「訳さない」で、ピルの表示も言語名だけ。装飾も矢印も出ない</li>
+      <li class="good"><b>単一言語は速くて正確。</b> <code>transcribe(_, Some(lang))</code> は <code>lang_detect</code> を丸ごと飛ばす（<code>crates/lpt-whisper/src/lib.rs:132</code>）。UIでもそれを利点として明示する</li>
+      <li class="good">録音中でも変更できる。<code>allowed_lang_ids</code> は <code>WhisperEngine</code> のフィールドを <code>transcribe()</code> が毎回読むだけなので、<strong>モデル再ロードが要らない</strong></li>
+      <li class="good">切り替え位置に<strong>しおり行</strong>を残す。<code>transcript.jsonl</code> は発話ごとに言語を持つので、後で読み返したときに画面と実データの境界が一致する</li>
+      <li class="good"><b>国旗は使わない。</b> 言語と国は一対一でない（English は米国だけのものではないし、アラビア語をサウジの旗で代表させるのは乱暴）。Apple も System Settings の言語一覧で国旗を使わず<strong>各言語をその言語自身の表記で</strong>出す。空いた場所は装飾ではなく ISO コードと日本語名という情報で埋めた</li>
+      <li class="bad">検討した弱点: ピルは録音中しか出ない。録音していないときの既定は設定画面（<code>feature-settings-plus.html</code> の「言語」ペイン）が持ち、ここはその<strong>セッション単位の上書き</strong>とする</li>
+    </ul>
+
+    <table>
+      <thead><tr><th>状況</th><th>話される言語</th><th>翻訳</th><th>ピルの表示</th></tr></thead>
+      <tbody>
+        <tr><td>日本語だけの会議</td><td>日本語</td><td>訳さない</td><td><code>日本語</code></td></tr>
+        <tr><td>英語の会議を日本語で読む</td><td>English</td><td>日本語へ</td><td><code>English → 日本語</code></td></tr>
+        <tr><td>日英混在・自分は読むだけ</td><td>日本語 / English</td><td>日本語へ</td><td><code>English → 日本語</code></td></tr>
+        <tr><td>日英混在・画面を相手にも見せる</td><td>日本語 / English</td><td>日本語へ ＋ 相互</td><td><code>日本語 ⇄ English</code></td></tr>
+      </tbody>
+    </table>
+    <div style="margin-top:8px">記号そのものが状態を語る（<code>なし</code>＝単一・訳なし / <code>→</code>＝単方向 / <code>⇄</code>＝相互 / <code>·</code>＝複数だが訳さない）ので、ピルにラベルを足す必要がない。</div>
+  </div>
+</section>
+
+<!-- ===================== 案B ===================== -->
+<section class="variant" id="v-b">
+  <div class="app-window">
+    <header class="window-toolbar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <button class="back-button" type="button" aria-label="録音一覧に戻る">‹</button>
+      <span class="window-title">新しい録音</span>
+      <span class="toolbar-spacer"></span>
+      <div class="toolbar-group">
+        <button class="toolbar-button toolbar-lang" type="button" aria-haspopup="dialog" aria-expanded="false">
+          <span>JA</span><span aria-hidden="true" style="color:var(--muted)">⇄</span><span>EN</span><span class="chev" aria-hidden="true">▾</span>
+        </button>
+        <button class="toolbar-button record-active" type="button"><span aria-hidden="true">●</span><span id="clockB">12:34</span></button>
+        <button class="toolbar-button icon-button" type="button" aria-label="録音を一時停止">Ⅱ</button>
+        <button class="toolbar-button stop-button" type="button"><span aria-hidden="true">■</span>停止</button>
+      </div>
+    </header>
+
+    <div class="session-main">
+      <div class="session-head">
+        <div>
+          <h1>新しい録音</h1>
+          <div class="session-meta">
+            <span class="state-badge"><span aria-hidden="true">●</span>録音中</span>
+            <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>マイク</span>
+            <span class="capture-badge"><span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>スピーカー</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="transcript">
+        <div class="transcript-label" style="margin-bottom:8px">リアルタイム文字起こし</div>
+        <div class="transcript-line"><span class="speaker mic">マイク</span><span class="utterance">承知しました。では日程を調整してカレンダーに入れておきます。</span></div>
+        <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance">We should probably ship the beta by the end of this month.<span class="translation">ベータ版は今月末までにリリースした方がよさそうですね。</span></span></div>
+        <div class="transcript-line"><span class="speaker system">スピーカー</span><span class="utterance partial">Can you also draft the announcement</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>案B「ツールバー常設ボタン」— 不採用</b><br />
+    ツールバーに <code>JA ⇄ EN</code> を常設し、押すと案Aと同じポップオーバーが開く。
+    <ul>
+      <li class="good">録音していないときも触れるので、「次の録音のための準備」がしやすい</li>
+      <li class="bad">ツールバー右側は録音制御（タイマー・一時停止・停止）で既に混んでいる。<strong>停止ボタンの隣に設定を置くと誤操作が怖い</strong></li>
+      <li class="bad">ツールバーはウィンドウ全体の操作を置く場所。言語は<strong>セッションの属性</strong>なので階層がずれる（録音一覧を見ているときに <code>JA ⇄ EN</code> が出ていても意味がない）</li>
+      <li class="bad">2文字表記では <code>zh</code> の簡体/繁体、<code>pt</code> の BR/PT が潰れる。さらに<strong>単一言語のときに何を出すのか決まらない</strong>（<code>JA</code> だけだと設定なのか状態なのか読めない）</li>
+    </ul>
+  </div>
+</section>
+
+<!-- ===================== 案C ===================== -->
+<section class="variant" id="v-c">
+  <div class="app-window">
+    <header class="window-toolbar">
+      <span class="traffic" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span class="window-title">録音</span>
+      <span class="toolbar-spacer"></span>
+      <button class="toolbar-button" type="button"><span style="color:var(--record)" aria-hidden="true">●</span>録音を開始</button>
+    </header>
+
+    <div class="session-main">
+      <div class="session-head">
+        <div>
+          <h1>すべての録音</h1>
+          <div class="session-meta"><span>3件</span></div>
+        </div>
+      </div>
+      <div class="transcript"></div>
+    </div>
+
+    <div class="sheet-scrim">
+      <div class="sheet" role="dialog" aria-labelledby="sheetTitle" aria-modal="true">
+        <div class="pop-section">
+          <h2 id="sheetTitle">この録音で使う言語</h2>
+          <p class="lead">あとから録音中でも変更できます。</p>
+        </div>
+
+        <div class="pop-section">
+          <div class="pop-title">話される言語</div>
+          <div class="lang-slots">
+            <div class="lang-chip">
+              <span class="chip-main"><span class="name">日本語</span><span class="code">ja</span></span>
+            </div>
+          </div>
+          <button class="add-lang" type="button"><span aria-hidden="true">＋</span>言語を追加</button>
+          <div class="fast-hint">1言語なので言語判定を行いません。その分だけ速く、取り違えも起きません。</div>
+        </div>
+
+        <div class="pop-section">
+          <div class="pop-title">翻訳</div>
+          <label class="radio-row"><input type="radio" name="translateC" checked /><span class="label">訳さない</span></label>
+          <label class="radio-row"><input type="radio" name="translateC" /><span class="label">次の言語へ訳す</span></label>
+          <span class="target-slot" style="opacity:0.4"><span class="name">日本語</span><span class="code">ja</span></span>
+        </div>
+
+        <div class="pop-foot">
+          <span class="pop-hint">次回から確認せず、この設定で開始する</span>
+          <button class="btn" type="button">キャンセル</button>
+          <button class="btn primary" type="button">録音を開始</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <b>案C「録音開始シート」— 条件付きで併用</b><br />
+    「録音を開始」の直後にシートで確認する。案Aと排他ではなく<strong>上に乗せる</strong>選択肢。
+    <ul>
+      <li class="good">言語を間違えたまま会議を丸ごと録る事故が構造的に起きない。誤った言語での認識は<strong>後から直せない</strong>（音声は残るが再認識が要る）ので実害が大きい</li>
+      <li class="good">初回起動時に既定を一度決めさせる導線としてそのまま使える</li>
+      <li class="bad">毎回同じ設定の人には純粋な摩擦。<strong>会議は始まってしまう</strong>のに録音開始が1タップ増える</li>
+      <li>結論: 既定は<strong>出さない</strong>。初回のみ、または前回と設定が違うときのみ出す。案Aがあれば録音中に直せる</li>
+    </ul>
+  </div>
+
+  <div class="note">
+    <b>3案共通の設計判断</b>
+    <ul>
+      <li><b>話される言語は最大2つ。</b> 候補を狭く保つのは制限ではなく精度機能で、<code>lib.rs:127</code> のコメント通り「ja/en の会議が zh/ko に流れない」ためのフィルタ。3言語目は <code>Vec</code> に1要素足すだけだが <code>lang_detect</code> の誤判定が増え、<code>plan.md:14</code> がスコープ外とした N言語＋アービターの領域に入る。UIでは<strong>2つ埋まった時点で「追加」を消し</strong>、理由を1行で説明する</li>
+      <li><b>翻訳先は話される言語と独立。</b> 英語の会議を日本語で読む場合、話される言語は English 1つで、翻訳先だけが日本語。この組み合わせは Main/Sub モデルでは書けなかった</li>
+      <li><b>変更は次の発話から。</b> 確定済みの発話は言語も訳文もそのまま。UI側で「ここから」のしおりを残し、あとで <code>transcript.jsonl</code> を読んだときと食い違わないようにする</li>
+      <li><b>実装フック</b>: 候補セット差し替えは <code>WhisperEngine</code> に setter を足すだけ（<code>load()</code> 時に固定している <code>allowed_lang_ids</code> を可変にする）。単一言語とレーン固定は <code>transcribe(_, Some(lang))</code> で既に通る。<code>LPT_LANGS</code> / <code>LPT_LANG</code> は<strong>初期値の供給元</strong>として残し、UIの設定が優先する</li>
+    </ul>
+  </div>
+</section>
+
+<script>
+  const qs = (s, r = document) => r.querySelector(s);
+  const qsa = (s, r = document) => Array.from(r.querySelectorAll(s));
+
+  // ---- variant tabs ----
+  qsa('.vtabs button').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      qsa('.vtabs button').forEach((b) => b.classList.toggle('active', b === tab));
+      qsa('.variant').forEach((v) => v.classList.toggle('active', v.id === `v-${tab.dataset.v}`));
+    });
+  });
+
+  // ---- 言語カタログ（Whisperがサポートする一部。実装では get_lang_id で検証する） ----
+  // name = その言語自身の表記、jp = 日本語名（走査用）、en = 英語名（検索用）
+  const LANGS = [
+    { code: 'ja', name: '日本語', jp: '日本語', en: 'Japanese' },
+    { code: 'en', name: 'English', jp: '英語', en: 'English' },
+    { code: 'zh', name: '中文（简体）', jp: '中国語（簡体）', en: 'Chinese' },
+    { code: 'yue', name: '粤語', jp: '広東語', en: 'Cantonese' },
+    { code: 'ko', name: '한국어', jp: '韓国語', en: 'Korean' },
+    { code: 'es', name: 'Español', jp: 'スペイン語', en: 'Spanish' },
+    { code: 'fr', name: 'Français', jp: 'フランス語', en: 'French' },
+    { code: 'de', name: 'Deutsch', jp: 'ドイツ語', en: 'German' },
+    { code: 'pt', name: 'Português', jp: 'ポルトガル語', en: 'Portuguese' },
+    { code: 'it', name: 'Italiano', jp: 'イタリア語', en: 'Italian' },
+    { code: 'ru', name: 'Русский', jp: 'ロシア語', en: 'Russian' },
+    { code: 'vi', name: 'Tiếng Việt', jp: 'ベトナム語', en: 'Vietnamese' },
+    { code: 'th', name: 'ไทย', jp: 'タイ語', en: 'Thai' },
+    { code: 'id', name: 'Bahasa Indonesia', jp: 'インドネシア語', en: 'Indonesian' },
+    { code: 'hi', name: 'हिन्दी', jp: 'ヒンディー語', en: 'Hindi' },
+    { code: 'ar', name: 'العربية', jp: 'アラビア語', en: 'Arabic' },
+    { code: 'nl', name: 'Nederlands', jp: 'オランダ語', en: 'Dutch' },
+    { code: 'pl', name: 'Polski', jp: 'ポーランド語', en: 'Polish' },
+    { code: 'tr', name: 'Türkçe', jp: 'トルコ語', en: 'Turkish' },
+    { code: 'uk', name: 'Українська', jp: 'ウクライナ語', en: 'Ukrainian' },
+  ];
+  const byCode = (code) => LANGS.find((l) => l.code === code);
+  const nameOf = (code) => byCode(code).name;
+
+  const PRESETS = [
+    { label: '日本語のみ', state: { langs: ['ja'], target: null, mutual: false, pinMic: false } },
+    { label: 'English → 日本語', state: { langs: ['en'], target: 'ja', mutual: false, pinMic: false } },
+    { label: '日本語 ⇄ English', state: { langs: ['ja', 'en'], target: 'ja', mutual: true, pinMic: false } },
+  ];
+
+  // applied = いま認識に使われている値 / draft = ポップオーバー内の編集中の値。
+  // 「適用」を押すまで認識側は変わらない、を状態としても分けておく。
+  let applied = { langs: ['ja', 'en'], target: 'ja', mutual: true, pinMic: false };
+  let draft = structuredClone(applied);
+
+  const pop = qs('#langPop');
+  const pill = qs('#langPill');
+  const toast = qs('#toastA');
+  let toastTimer;
+  let editing = { kind: 'lang', index: 0 };
+
+  function showToast(message) {
+    toast.textContent = message;
+    toast.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.remove('show'), 3200);
+  }
+
+  // 相互翻訳とマイク固定は2言語かつ翻訳先が話される言語に含まれるときだけ意味を持つ。
+  // 条件が崩れたら黙って落とす（UIから消えるだけで値が残る状態を作らない）。
+  function normalize(state) {
+    const bilingual = state.langs.length === 2;
+    const targetIsSpoken = state.target && state.langs.includes(state.target);
+    if (!bilingual || !targetIsSpoken) state.mutual = false;
+    if (!bilingual || !targetIsSpoken) state.pinMic = false;
+    return state;
+  }
+
+  // 記号そのものがモードを語る: なし=単一・訳なし / →=単方向 / ⇄=相互 / ·=複数だが訳さない
+  function describe(state) {
+    const names = state.langs.map(nameOf);
+    if (!state.target) return { text: names.join(' · '), glyphs: names.length > 1 ? ['·'] : [] };
+    if (state.mutual) return { text: `${names[0]} ⇄ ${names[1]}`, glyphs: ['⇄'] };
+    const sources = state.langs.filter((l) => l !== state.target).map(nameOf);
+    if (!sources.length) return { text: names.join(' · '), glyphs: [] };
+    return { text: `${sources.join(' · ')} → ${nameOf(state.target)}`, glyphs: ['→'] };
+  }
+
+  function renderPill() {
+    // 記号だけ .glyph で一段軽くしたいので、文字列を分解して組み直す
+    const { text } = describe(applied);
+    const body = qs('#pillBody');
+    body.replaceChildren();
+    text.split(/(\s[⇄→·]\s)/).forEach((part) => {
+      if (/^\s[⇄→·]\s$/.test(part)) {
+        const glyph = document.createElement('span');
+        glyph.className = 'glyph';
+        glyph.textContent = part;
+        body.append(glyph);
+      } else if (part) {
+        body.append(document.createTextNode(part));
+      }
+    });
+    qs('#pillPin').classList.toggle('hidden', !applied.pinMic);
+  }
+
+  // 設定の効果をその場で見せる。訳文は「翻訳先の言語のもの」だけを出し、
+  // 相互翻訳のときだけ、もう一方の話される言語への訳も併せて出す。
+  function renderTranscript() {
+    qsa('#transcriptA .translation').forEach((node) => {
+      const lang = node.dataset.tr;
+      const shown = Boolean(applied.target)
+        && (lang === applied.target || (applied.mutual && applied.langs.includes(lang)));
+      node.classList.toggle('hidden', !shown);
+    });
+  }
+
+  function renderDraft() {
+    normalize(draft);
+    const bilingual = draft.langs.length === 2;
+
+    // 話される言語のチップ
+    const slots = qs('#langSlots');
+    slots.replaceChildren();
+    draft.langs.forEach((code, index) => {
+      const chip = document.createElement('div');
+      chip.className = 'lang-chip';
+
+      const main = document.createElement('button');
+      main.type = 'button';
+      main.className = 'chip-main';
+      main.setAttribute('aria-label', `話される言語 ${index + 1}: ${nameOf(code)}`);
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = nameOf(code);
+      const codeNode = document.createElement('span');
+      codeNode.className = 'code';
+      codeNode.textContent = code;
+      main.append(name, codeNode);
+      main.addEventListener('click', () => openPicker({ kind: 'lang', index }));
+      chip.append(main);
+
+      if (bilingual) {
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'chip-remove';
+        remove.textContent = '×';
+        remove.setAttribute('aria-label', `${nameOf(code)} を外す`);
+        remove.addEventListener('click', () => {
+          draft.langs = draft.langs.filter((_, i) => i !== index);
+          renderDraft();
+        });
+        chip.append(remove);
+      }
+      slots.append(chip);
+    });
+
+    qs('#addLang').classList.toggle('hidden', bilingual);
+    qs('#capHint').classList.toggle('hidden', !bilingual);
+    qs('#fastHint').classList.toggle('hidden', bilingual);
+
+    // マイク固定は2言語かつ翻訳先が話される言語のときだけ
+    const targetIsSpoken = draft.target && draft.langs.includes(draft.target);
+    qs('#pinRow').classList.toggle('hidden', !(bilingual && targetIsSpoken));
+    qs('#pinLangName').textContent = targetIsSpoken ? nameOf(draft.target) : '';
+    qs('#pinMic').checked = draft.pinMic;
+
+    // 翻訳
+    const translating = Boolean(draft.target);
+    qs('#translateOff').checked = !translating;
+    qs('#translateOn').checked = translating;
+    qs('#targetSlot').disabled = !translating;
+    qs('#targetName').textContent = translating ? nameOf(draft.target) : '—';
+    qs('#targetCode').textContent = translating ? draft.target : '';
+    qs('#mutualRow').classList.toggle('hidden', !(bilingual && targetIsSpoken));
+    qs('#mutual').checked = draft.mutual;
+    if (bilingual && targetIsSpoken) {
+      const other = draft.langs.find((l) => l !== draft.target);
+      qs('#mutualDesc').textContent = `${nameOf(draft.target)}の発話を${nameOf(other)}にも訳します。画面を相手に見せるときに使います。`;
+    }
+  }
+
+  function showPage(page) {
+    qsa('.pop-page', pop).forEach((p) => p.classList.toggle('active', p.id === page));
+  }
+
+  function openPop() {
+    draft = structuredClone(applied);
+    renderDraft();
+    showPage('pageMain');
+    pop.classList.add('open');
+    pill.setAttribute('aria-expanded', 'true');
+  }
+
+  function closePop() {
+    pop.classList.remove('open');
+    pill.setAttribute('aria-expanded', 'false');
+  }
+
+  pill.addEventListener('click', () => (pop.classList.contains('open') ? closePop() : openPop()));
+  qsa('[data-close]', pop).forEach((b) => b.addEventListener('click', closePop));
+
+  // ---- picker ----
+  function openPicker(next) {
+    editing = next;
+    const titles = {
+      lang: '話される言語',
+      add: '追加する言語',
+      target: '翻訳先の言語',
+    };
+    qs('#pickerTitle').textContent = titles[editing.kind];
+    qs('#pickerSearch').value = '';
+    renderPicker();
+    showPage('pagePicker');
+    qs('#pickerSearch').focus();
+  }
+
+  function renderPicker(term = '') {
+    const needle = term.trim().toLocaleLowerCase();
+    const matches = LANGS.filter((lang) =>
+      !needle || `${lang.code} ${lang.name} ${lang.jp} ${lang.en}`.toLocaleLowerCase().includes(needle));
+
+    const list = qs('#pickerList');
+    list.replaceChildren();
+
+    if (!matches.length) {
+      const empty = document.createElement('div');
+      empty.className = 'picker-empty';
+      empty.textContent = '該当する言語はありません';
+      list.append(empty);
+      return;
+    }
+
+    // 話される言語を選んでいるときは、もう一方に入っている言語を塞ぐ
+    const occupied = editing.kind === 'lang'
+      ? draft.langs.filter((_, i) => i !== editing.index)
+      : editing.kind === 'add' ? draft.langs : [];
+    const current = editing.kind === 'lang' ? draft.langs[editing.index]
+      : editing.kind === 'target' ? draft.target : null;
+
+    matches.forEach((lang) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'picker-item';
+      item.setAttribute('role', 'option');
+      const chosen = lang.code === current;
+      item.setAttribute('aria-selected', String(chosen));
+      if (occupied.includes(lang.code)) item.disabled = true;
+
+      const tick = document.createElement('span');
+      tick.className = 'tick';
+      tick.textContent = chosen ? '✓' : '';
+      const name = document.createElement('span');
+      name.className = 'name';
+      name.textContent = lang.name;
+      const jp = document.createElement('span');
+      jp.className = 'jp';
+      // 表記が日本語名と同じ言語（日本語自身）で同じ語を2度出さない
+      jp.textContent = item.disabled ? '選択済み' : (lang.jp === lang.name ? '' : lang.jp);
+      const code = document.createElement('span');
+      code.className = 'code';
+      code.textContent = lang.code;
+      item.append(tick, name, jp, code);
+
+      item.addEventListener('click', () => {
+        if (editing.kind === 'lang') draft.langs[editing.index] = lang.code;
+        if (editing.kind === 'add') draft.langs = [...draft.langs, lang.code];
+        if (editing.kind === 'target') draft.target = lang.code;
+        renderDraft();
+        showPage('pageMain');
+      });
+      list.append(item);
+    });
+  }
+
+  qs('#addLang').addEventListener('click', () => openPicker({ kind: 'add' }));
+  qs('#targetSlot').addEventListener('click', () => openPicker({ kind: 'target' }));
+  qs('#pickerBack').addEventListener('click', () => showPage('pageMain'));
+  qs('#pickerSearch').addEventListener('input', (event) => renderPicker(event.target.value));
+
+  // ---- 翻訳のオン・オフ ----
+  qs('#translateOff').addEventListener('change', () => {
+    draft.target = null;
+    renderDraft();
+  });
+  qs('#translateOn').addEventListener('change', () => {
+    // 訳す先が未定なら、話される言語に含まれないものを既定に選ぶ（含まれると訳が不要になるため）
+    draft.target = draft.target
+      ?? (draft.langs.includes('ja') && draft.langs.length === 1 ? 'en' : 'ja');
+    renderDraft();
+  });
+  qs('#mutual').addEventListener('change', (event) => {
+    draft.mutual = event.target.checked;
+  });
+  qs('#pinMic').addEventListener('change', (event) => {
+    draft.pinMic = event.target.checked;
+  });
+
+  // ---- presets ----
+  const presetRow = qs('#presets');
+  PRESETS.forEach((preset) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.textContent = preset.label;
+    button.addEventListener('click', () => {
+      draft = structuredClone(preset.state);
+      renderDraft();
+    });
+    presetRow.append(button);
+  });
+
+  // ---- apply ----
+  qs('#applyLang').addEventListener('click', () => {
+    normalize(draft);
+    const before = describe(applied).text;
+    const after = describe(draft).text;
+    const changed = JSON.stringify(applied) !== JSON.stringify(draft);
+    applied = structuredClone(draft);
+    renderPill();
+    renderTranscript();
+    closePop();
+
+    if (!changed) {
+      showToast('設定は変更されていません');
+      return;
+    }
+    if (before !== after) {
+      // 切り替えた位置をしおりとして残す。あとで transcript.jsonl を読み直したときに
+      // 言語が変わった境界が画面と一致する。
+      const marker = document.createElement('div');
+      marker.className = 'lang-marker';
+      marker.textContent = `ここから ${after}`;
+      qs('#transcriptA').append(marker);
+      qs('#transcriptA').scrollTop = qs('#transcriptA').scrollHeight;
+      showToast(`次の発話から「${after}」で認識します`);
+      return;
+    }
+    showToast(applied.pinMic ? 'マイクの言語を固定しました' : 'マイクの言語固定を解除しました');
+  });
+
+  document.addEventListener('keydown', (event) => {
+    if (event.key !== 'Escape' || !pop.classList.contains('open')) return;
+    // ピッカーを開いているときは、まず1階層だけ戻す
+    if (qs('#pagePicker').classList.contains('active')) {
+      showPage('pageMain');
+      return;
+    }
+    closePop();
+    pill.focus();
+  });
+
+  document.addEventListener('click', (event) => {
+    if (!pop.contains(event.target) && !pill.contains(event.target)) closePop();
+  });
+
+  renderPill();
+  renderTranscript();
+  renderDraft();
+
+  // 録音中らしさのための時計
+  let seconds = 12 * 60 + 34;
+  setInterval(() => {
+    seconds += 1;
+    const text = `${String(Math.floor(seconds / 60)).padStart(2, '0')}:${String(seconds % 60).padStart(2, '0')}`;
+    qs('#clockA').textContent = text;
+    qs('#clockB').textContent = text;
+  }, 1000);
+</script>
+</body>
+</html>
