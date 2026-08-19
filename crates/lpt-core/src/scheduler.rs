@@ -37,6 +37,10 @@ pub struct Utterance {
     /// same audio can line the two up (`pipeline::LaneTimeline`).
     pub start_ms: u64,
     pub end_ms: u64,
+    /// What it was recognised as — pinned by the caller, or detected for the
+    /// window it was spoken in. `None` when detection was unconfident, which
+    /// leaves the translator to infer it.
+    pub lang: Option<String>,
 }
 
 /// One decode step's outcome.
@@ -108,10 +112,16 @@ impl StreamScheduler {
         samples_to_ms(self.window_start)
     }
 
+    /// The language to stamp on an utterance ending now: what the caller
+    /// pinned, else what this window's detection settled on.
+    fn utterance_lang(&self, lang: Option<&str>) -> Option<String> {
+        lang.map(str::to_string).or_else(|| self.window_lang.clone())
+    }
+
     /// Commit the agreement's pending tail and take the finished utterance,
     /// which ended at `end_ms` (stream time). Returns (newly committed tail,
     /// whole utterance if any).
-    fn finalize_utterance(&mut self, end_ms: u64) -> (String, Option<Utterance>) {
+    fn finalize_utterance(&mut self, end_ms: u64, lang: Option<&str>) -> (String, Option<Utterance>) {
         let tail = self.agreement.flush();
         self.utterance_acc.push_str(&tail);
         let full = std::mem::take(&mut self.utterance_acc);
@@ -124,6 +134,7 @@ impl StreamScheduler {
             text: full.to_string(),
             start_ms,
             end_ms,
+            lang: lang.map(str::to_string),
         });
         (tail, utterance)
     }
@@ -151,6 +162,12 @@ impl StreamScheduler {
             }
             let effective_lang = lang.or(self.window_lang.as_deref());
             let hypothesis = engine.transcribe(&self.buffer, effective_lang)?;
+            // Pin from this decode as well: a session stopped inside its
+            // first window had no step to pin one, and its last sentence
+            // would reach the translator with no language at all.
+            if lang.is_none() && self.window_lang.is_none() && !hypothesis.text.is_empty() {
+                self.window_lang = hypothesis.lang.clone();
+            }
             self.note_utterance_start(&hypothesis);
             // Trust an earlier end (the speech stopped before the audio did)
             // but never a later one: whisper's loose last-segment timestamp
@@ -160,7 +177,8 @@ impl StreamScheduler {
             self.utterance_acc.push_str(&agreement.committed_delta);
             committed_delta.push_str(&agreement.committed_delta);
         }
-        let (tail, utterance_final) = self.finalize_utterance(end_ms);
+        let spoken_in = self.utterance_lang(lang);
+        let (tail, utterance_final) = self.finalize_utterance(end_ms, spoken_in.as_deref());
         committed_delta.push_str(&tail);
         let all = self.buffer.len();
         self.slide_keeping(all);
@@ -215,7 +233,9 @@ impl StreamScheduler {
         if at_utterance_boundary || window_len >= MAX_WINDOW_SAMPLES {
             // The hypothesis is as stable as it will get: commit its tail
             // and hand the whole utterance downstream.
-            let (tail, full) = self.finalize_utterance(self.window_start_ms() + hypothesis.end_ms);
+            let spoken_in = self.utterance_lang(lang);
+            let (tail, full) = self
+                .finalize_utterance(self.window_start_ms() + hypothesis.end_ms, spoken_in.as_deref());
             committed_delta.push_str(&tail);
             volatile.clear();
             utterance_final = full;
@@ -434,6 +454,55 @@ mod tests {
             engine.received_langs,
             vec![None, Some("en".into()), Some("en".into()), None]
         );
+    }
+
+    #[test]
+    fn an_utterance_reports_the_language_it_was_recognised_in() {
+        // The translation lane decides direction from this: a sentence
+        // already in the reader's language must not be translated back into
+        // it (`language::LanguagePolicy::target_for`).
+        let mut engine = FakeEngine::scripted_with_langs(&[
+            ("Hello", Some("en")),
+            ("Hello world", Some("en")),
+        ]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        sched.step(&mut engine, &mut vad, None).unwrap();
+        sched.push_audio(&vec![0.0; TARGET_RATE as usize]); // pause → boundary
+        let out = sched.step(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(
+            out.utterance_final.unwrap().lang.as_deref(),
+            Some("en"),
+            "the window's pinned language belongs to the utterance"
+        );
+    }
+
+    #[test]
+    fn a_pinned_language_is_what_the_utterance_reports() {
+        // Single-language mode: detection never ran, but the caller knows.
+        let mut engine = FakeEngine::scripted(&["こんにちは"]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        let out = sched
+            .finish(&mut engine, &mut vad, Some("ja"))
+            .unwrap()
+            .unwrap();
+        assert_eq!(out.utterance_final.unwrap().lang.as_deref(), Some("ja"));
+    }
+
+    #[test]
+    fn the_tail_utterance_reports_the_language_its_own_decode_detected() {
+        // Stop during the very first window: no step ever pinned a language,
+        // so the finish decode's own detection is all there is. Without it
+        // the last sentence of every short session goes out unlabelled.
+        let mut engine = FakeEngine::scripted_with_langs(&[("Hello", Some("en"))]);
+        let mut vad = AmplitudeVad;
+        let mut sched = StreamScheduler::new();
+        sched.push_audio(&seconds(2));
+        let out = sched.finish(&mut engine, &mut vad, None).unwrap().unwrap();
+        assert_eq!(out.utterance_final.unwrap().lang.as_deref(), Some("en"));
     }
 
     #[test]

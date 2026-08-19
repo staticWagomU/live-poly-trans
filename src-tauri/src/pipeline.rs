@@ -15,6 +15,9 @@ use tauri::{AppHandle, Emitter, Manager};
 
 use crate::capture;
 use crate::record;
+use crate::translate::{Outcome, Status, TranslateLane};
+use lpt_core::language::LanguagePolicy;
+use lpt_core::models::{Model, ModelManager};
 use lpt_core::Lane;
 
 /// Decode cadence, measured step-start to step-start: a slow decode eats
@@ -53,9 +56,28 @@ struct TranscriptPayload {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 struct UtterancePayload {
+    /// Session-unique; the translation arriving later names it.
+    id: u64,
     text: String,
     start_ms: u64,
     end_ms: u64,
+    /// What it was recognised as, when detection was confident.
+    lang: Option<String>,
+    /// Whether a translation is on its way, so the UI knows to leave room for
+    /// it rather than showing a placeholder that never resolves.
+    translating: bool,
+}
+
+/// A translation, or the news that there will not be one.
+#[derive(Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TranslationPayload {
+    id: u64,
+    lane: &'static str,
+    /// `None` means this utterance will never get a translation (the queue
+    /// overflowed, or the backend failed); the UI takes its placeholder down.
+    text: Option<String>,
+    lang: Option<String>,
 }
 
 /// `state` drives the UI (idle/loading/listening/error); `message` is
@@ -83,6 +105,40 @@ pub fn new_status_store() -> StatusStore {
     }))
 }
 
+/// The language settings, shared with the UI commands. Read at each utterance
+/// rather than at session start, so a change takes effect from the next
+/// sentence without stopping the recording: `allowed_lang_ids` is a field the
+/// engine reads per decode, not something baked into the loaded model.
+pub type PolicyStore = Arc<Mutex<LanguagePolicy>>;
+
+pub fn new_policy_store() -> PolicyStore {
+    Arc::new(Mutex::new(policy_from_env()))
+}
+
+/// The startup default, still honouring the environment variables the
+/// pipeline grew up with: `LPT_LANG` pins one spoken language, `LPT_LANGS`
+/// lists the candidates, `LPT_TARGET` (or `none`) sets the translation target.
+fn policy_from_env() -> LanguagePolicy {
+    let mut policy = LanguagePolicy::default();
+    if let Ok(langs) = std::env::var("LPT_LANGS") {
+        let spoken: Vec<String> = langs
+            .split(',')
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .collect();
+        if !spoken.is_empty() {
+            policy.spoken = spoken;
+        }
+    }
+    if let Ok(lang) = std::env::var("LPT_LANG") {
+        policy.spoken = vec![lang];
+    }
+    if let Ok(target) = std::env::var("LPT_TARGET") {
+        policy.target = (target != "none" && !target.is_empty()).then_some(target);
+    }
+    policy
+}
+
 /// The worker's channel back to the frontend: events plus the shared
 /// status snapshot, updated together.
 pub struct Ui {
@@ -93,39 +149,22 @@ pub struct Ui {
 struct Engines {
     engine: lpt_whisper::WhisperEngine,
     vad: lpt_whisper::SileroVad,
+    /// What the engine was last told detection may choose between. The
+    /// engines outlive a session while the policy can change between (and
+    /// during) sessions, so the two have to be compared rather than assumed.
+    spoken: Vec<String>,
 }
 
-/// Languages the restricted auto-detection may choose between (Main/Sub pair).
-fn allowed_langs() -> Vec<String> {
-    std::env::var("LPT_LANGS")
-        .unwrap_or_else(|_| "ja,en".into())
-        .split(',')
-        .map(|l| l.trim().to_string())
-        .filter(|l| !l.is_empty())
-        .collect()
-}
-
-// TODO(bundling): CARGO_MANIFEST_DIR is baked in at build time and only
-// valid on the build machine. Resolve models via the app data dir (and the
-// Step 2 ModelManager) before distributing bundles.
-fn model_path() -> String {
-    std::env::var("LPT_WHISPER_MODEL").unwrap_or_else(|_| {
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../models/ggml-large-v3-turbo-q8_0.bin"
-        )
-        .to_string()
-    })
-}
-
-fn vad_model_path() -> String {
-    std::env::var("LPT_VAD_MODEL").unwrap_or_else(|_| {
-        concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../models/ggml-silero-v5.1.2.bin"
-        )
-        .to_string()
-    })
+/// Where models are looked for, in order: what a download put in the app's
+/// own directory first, then the checkout's `models/` so `cargo run` works
+/// without one. The latter is a build-machine path and only ever a fallback.
+fn models(app: &AppHandle) -> ModelManager {
+    let mut dirs = Vec::new();
+    if let Ok(dir) = app.path().app_data_dir() {
+        dirs.push(dir.join("models"));
+    }
+    dirs.push(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../models")));
+    ModelManager::new(dirs)
 }
 
 fn lane_name(lane: Lane) -> &'static str {
@@ -174,13 +213,39 @@ fn emit_step(
     );
 }
 
-pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui) {
+/// A translation, or — with `text: None` — the news that this utterance is
+/// not getting one after all.
+fn emit_translation(ui: &Ui, lane: Lane, id: u64, text: Option<String>, lang: Option<String>) {
+    let _ = ui.app.emit(
+        "translation",
+        TranslationPayload {
+            id,
+            lane: lane_name(lane),
+            text,
+            lang,
+        },
+    );
+}
+
+pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
     let mut engines: Option<Engines> = None;
+    // Spawned once for the app: the translation model is expensive to load
+    // and, like the ASR engines, is kept between sessions. Its own model path
+    // is resolved lazily inside the worker, so a missing translation model
+    // costs the translation lane and not the transcript.
+    let mut translations = Translations::new(
+        TranslateLane::spawn(
+            models(&ui.app)
+                .resolve(Model::Translator)
+                .unwrap_or_else(|_| PathBuf::from(Model::Translator.default_file())),
+        ),
+        policy,
+    );
     emit_status(&ui, "idle", None);
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
             Cmd::Stop => {} // Stop while idle
-            Cmd::Start => match run_session(&cmd_rx, &ui, &mut engines) {
+            Cmd::Start => match run_session(&cmd_rx, &ui, &mut engines, &mut translations) {
                 Ok(()) => emit_status(&ui, "idle", None),
                 Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
             },
@@ -188,12 +253,24 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui) {
     }
 }
 
-fn load_engines<'a>(ui: &Ui, engines: &'a mut Option<Engines>) -> anyhow::Result<&'a mut Engines> {
+fn load_engines<'a>(
+    ui: &Ui,
+    engines: &'a mut Option<Engines>,
+    spoken: &[String],
+) -> anyhow::Result<&'a mut Engines> {
     if engines.is_none() {
         emit_status(ui, "loading", None);
-        let engine = lpt_whisper::WhisperEngine::load(&model_path(), &allowed_langs())?;
-        let vad = lpt_whisper::SileroVad::load(&vad_model_path())?;
-        *engines = Some(Engines { engine, vad });
+        let models = models(&ui.app);
+        let engine = lpt_whisper::WhisperEngine::load(
+            &models.resolve(Model::Asr)?.to_string_lossy(),
+            spoken,
+        )?;
+        let vad = lpt_whisper::SileroVad::load(&models.resolve(Model::Vad)?.to_string_lossy())?;
+        *engines = Some(Engines {
+            engine,
+            vad,
+            spoken: spoken.to_vec(),
+        });
     }
     Ok(engines.as_mut().expect("engines just ensured"))
 }
@@ -202,8 +279,13 @@ fn run_session(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
     engines: &mut Option<Engines>,
+    translations: &mut Translations,
 ) -> anyhow::Result<()> {
-    let engines = load_engines(ui, engines)?;
+    let engines = load_engines(ui, engines, &translations.policy().spoken)?;
+    // Load the translation model now rather than on the first sentence: the
+    // load overlaps the start of the meeting instead of delaying the first
+    // translation by all of it.
+    translations.begin_session();
     let stop_capture = Arc::new(AtomicBool::new(false));
     let result = (|| {
         let mic = start_capture(capture::mic::spawn, &stop_capture)?;
@@ -243,7 +325,15 @@ fn run_session(
                 None
             }
         };
-        let ran = run_capture_loop(cmd_rx, ui, engines, &mut lanes, recorder.as_mut(), notices);
+        let ran = run_capture_loop(
+            cmd_rx,
+            ui,
+            engines,
+            &mut lanes,
+            recorder.as_mut(),
+            notices,
+            translations,
+        );
         // Close the files even when the session ended badly: a WAV whose
         // header never got its final size is unreadable.
         let closed = recorder.map_or(Ok(()), |rec| rec.finish());
@@ -337,6 +427,10 @@ enum NoticeKey {
     Overrun(Lane),
     /// A lane's latest decode failed.
     Decode(Lane),
+    /// The translation backend is not working; the transcript still is.
+    Translation,
+    /// The requested spoken languages were refused; the old set stays.
+    Language,
 }
 
 /// The notices a listening session currently carries, joined oldest-first
@@ -381,6 +475,86 @@ impl Notices {
     }
 }
 
+/// The translation lane as the session sees it: utterance ids, the language
+/// policy, and how many sentences are still out with the translator.
+///
+/// Lives for the app, not the session: the ids must stay unique across a
+/// stop/start, because the UI keeps the earlier session's lines on screen and
+/// a reused id would attach a translation to the wrong one.
+struct Translations {
+    lane: TranslateLane,
+    policy: PolicyStore,
+    next_id: u64,
+    /// The current session's first utterance id. A translation from an
+    /// earlier session can still arrive (its drain timed out) and belongs on
+    /// its line, but not in this session's transcript file.
+    first_id: u64,
+    /// Submitted and not yet accounted for. Drives the drain at Stop.
+    outstanding: usize,
+}
+
+/// What became of one utterance handed to [`Translations::submit`].
+struct Submitted {
+    id: u64,
+    /// A translation is on its way; the UI leaves room for it.
+    translating: bool,
+    /// The older sentence dropped to make room, whose line is still waiting
+    /// for a translation that will now never arrive.
+    evicted: Option<lpt_core::translate::Job>,
+}
+
+impl Translations {
+    fn new(lane: TranslateLane, policy: PolicyStore) -> Self {
+        Self {
+            lane,
+            policy,
+            next_id: 1,
+            first_id: 1,
+            outstanding: 0,
+        }
+    }
+
+    fn policy(&self) -> LanguagePolicy {
+        self.policy.lock().unwrap().clone()
+    }
+
+    /// A session is starting: nothing from the last one is still owed, and
+    /// the model may as well start loading now.
+    fn begin_session(&mut self) {
+        self.outstanding = 0;
+        self.first_id = self.next_id;
+        self.lane.warm_up();
+    }
+
+    /// Number an utterance and queue it if the policy says it needs
+    /// translating.
+    fn submit(&mut self, lane: Lane, text: &str, source: Option<&str>) -> Submitted {
+        let id = self.next_id;
+        self.next_id += 1;
+        let Some(target) = self.policy().target_for(source).map(str::to_string) else {
+            return Submitted {
+                id,
+                translating: false,
+                evicted: None,
+            };
+        };
+        let evicted = self.lane.submit(lpt_core::translate::Job {
+            id,
+            lane,
+            text: text.to_string(),
+            source: source.map(str::to_string),
+            target,
+        });
+        // An eviction is one fewer result to wait for, not one more.
+        self.outstanding += usize::from(evicted.is_none());
+        Submitted {
+            id,
+            translating: true,
+            evicted,
+        }
+    }
+}
+
 /// What a lane needs from the session for one poll, beyond its own state.
 struct Poll<'a> {
     ui: &'a Ui,
@@ -389,6 +563,7 @@ struct Poll<'a> {
     notices: &'a mut Notices,
     /// This lane's index, in the order the recorder knows the lanes.
     index: usize,
+    tr: &'a mut Translations,
 }
 
 impl Poll<'_> {
@@ -497,20 +672,40 @@ impl LaneRuntime {
         Ok(())
     }
 
-    /// Send a step's outcome to the UI, and a finished utterance to the
-    /// session's transcript, both timed against the recording.
+    /// Send a step's outcome to the UI, a finished utterance to the session's
+    /// transcript (both timed against the recording), and the same utterance
+    /// to the translation lane.
     fn deliver(&mut self, poll: &mut Poll<'_>, out: lpt_core::scheduler::StepOutput) {
         if !self.gate.should_emit(&out) {
             return;
         }
         let mut out = out;
-        let utterance = out.utterance_final.take().map(|u| UtterancePayload {
-            start_ms: self.timeline.recording_ms(u.start_ms),
-            end_ms: self.timeline.recording_ms(u.end_ms),
-            text: u.text,
+        let finished = out.utterance_final.take();
+        let utterance = finished.map(|u| {
+            let submitted = poll.tr.submit(self.lane, &u.text, u.lang.as_deref());
+            if let Some(job) = submitted.evicted {
+                // Its line has been waiting for a translation since before
+                // this one; nothing is coming, so take the wait down.
+                emit_translation(poll.ui, job.lane, job.id, None, None);
+            }
+            UtterancePayload {
+                id: submitted.id,
+                start_ms: self.timeline.recording_ms(u.start_ms),
+                end_ms: self.timeline.recording_ms(u.end_ms),
+                text: u.text,
+                lang: u.lang,
+                translating: submitted.translating,
+            }
         });
         if let (Some(rec), Some(u)) = (poll.rec.as_deref_mut(), utterance.as_ref()) {
-            rec.write_transcript(lane_name(self.lane), u.start_ms, u.end_ms, &u.text);
+            rec.write_utterance(&record::Utterance {
+                id: u.id,
+                lane: lane_name(self.lane),
+                start_ms: u.start_ms,
+                end_ms: u.end_ms,
+                lang: u.lang.as_deref(),
+                text: &u.text,
+            });
         }
         emit_step(poll.ui, self.lane, out, utterance);
     }
@@ -860,11 +1055,12 @@ fn run_capture_loop(
     lanes: &mut [LaneRuntime],
     mut recorder: Option<&mut record::SessionRecorder>,
     mut notices: Notices,
+    translations: &mut Translations,
 ) -> anyhow::Result<()> {
-    // Unset = auto-detect per utterance window (mixed ja/en meetings);
-    // set LPT_LANG to pin a single language.
-    let lang = std::env::var("LPT_LANG").ok();
     let mut clock = SessionClock::default();
+    // The setting may have been changed while idle, after the engines were
+    // loaded — sync before the first decode, not just on later changes.
+    sync_langs(ui, engines, &translations.policy(), &mut notices);
     emit_status(ui, "listening", notices.message());
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -873,6 +1069,11 @@ fn run_capture_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
         }
+        let policy = translations.policy();
+        sync_langs(ui, engines, &policy, &mut notices);
+        // A single spoken language is pinned, which skips detection outright;
+        // two leave the choice to the engine, restricted to those two.
+        let lang = policy.pinned_lang().map(str::to_string);
         for (index, lane) in lanes.iter_mut().enumerate() {
             let mut poll = Poll {
                 ui,
@@ -880,9 +1081,17 @@ fn run_capture_loop(
                 rec: recorder.as_deref_mut(),
                 notices: &mut notices,
                 index,
+                tr: translations,
             };
             lane.tick(&mut poll, engines, lang.as_deref())?;
         }
+        collect_translations(
+            ui,
+            &mut notices,
+            recorder.as_deref_mut(),
+            translations,
+            "listening",
+        );
         // After every lane has had its say about this moment.
         if let Some(rec) = recorder.as_deref_mut() {
             rec.pump_mix();
@@ -891,6 +1100,7 @@ fn run_capture_loop(
     }
     // Every lane gets to flush its tail even when another failed: the
     // speaker's last utterance must not vanish because the mic died at Stop.
+    let lang = translations.policy().pinned_lang().map(str::to_string);
     let mut result = Ok(());
     for (index, lane) in lanes.iter_mut().enumerate() {
         let mut poll = Poll {
@@ -899,16 +1109,148 @@ fn run_capture_loop(
             rec: recorder.as_deref_mut(),
             notices: &mut notices,
             index,
+            tr: translations,
         };
         let finished = lane.finish(&mut poll, engines, lang.as_deref());
         result = result.and(finished);
     }
+    drain_translations(ui, &mut notices, recorder.as_deref_mut(), translations);
     // The finish writes above can be the ones that fail; a failure here has
     // no later poll to report it.
     if let Some(rec) = recorder {
         report_recording_failure(ui, &mut notices, rec);
     }
     result
+}
+
+/// Point the recogniser's restricted detection at the languages the policy
+/// now names. No model reload is involved — `transcribe` reads the set per
+/// decode — which is what lets this happen mid-recording.
+fn sync_langs(ui: &Ui, engines: &mut Engines, policy: &LanguagePolicy, notices: &mut Notices) {
+    if policy.spoken == engines.spoken {
+        return;
+    }
+    let notice = match engines.engine.set_allowed_langs(&policy.spoken) {
+        Ok(()) => {
+            engines.spoken = policy.spoken.clone();
+            None
+        }
+        // The old set stays in force; the session keeps running in it rather
+        // than falling back to whisper's unrestricted detection.
+        Err(e) => Some(format!("language setting ignored: {e:#}")),
+    };
+    if notices.set(NoticeKey::Language, notice) {
+        emit_status(ui, "listening", notices.message());
+    }
+}
+
+/// Hand every finished translation to the UI and the transcript.
+fn collect_translations(
+    ui: &Ui,
+    notices: &mut Notices,
+    mut recorder: Option<&mut record::SessionRecorder>,
+    translations: &mut Translations,
+    state: &'static str,
+) {
+    let first_id = translations.first_id;
+    for outcome in translations.lane.collect() {
+        translations.outstanding = translations.outstanding.saturating_sub(1);
+        apply_translation(
+            ui,
+            notices,
+            recorder.as_deref_mut(),
+            outcome,
+            state,
+            first_id,
+        );
+    }
+}
+
+/// `state` is the status the session is in while this runs — a notice raised
+/// during the Stop drain must not put "listening" back on screen.
+///
+/// `first_id` is the session's first utterance: a translation from a session
+/// that ended before its backlog cleared still belongs on its line (the UI
+/// keeps it), but not in *this* session's transcript file, which has no such
+/// utterance in it.
+fn apply_translation(
+    ui: &Ui,
+    notices: &mut Notices,
+    recorder: Option<&mut record::SessionRecorder>,
+    outcome: Outcome,
+    state: &'static str,
+    first_id: u64,
+) {
+    let (text, notice) = match outcome.status {
+        Status::Done(text) => (Some(text), None),
+        // The line simply stops waiting; the sentence is still transcribed.
+        Status::Failed(msg) => (None, Some(msg)),
+    };
+    if let (Some(rec), Some(text)) = (recorder, text.as_deref()) {
+        if outcome.id >= first_id {
+            rec.write_translation(outcome.id, &outcome.target, text);
+        }
+    }
+    emit_translation(ui, outcome.lane, outcome.id, text, Some(outcome.target));
+    // A success takes the previous failure's notice down, so a transient
+    // error does not sit on the status line for the rest of the meeting.
+    if notices.set(NoticeKey::Translation, notice) {
+        emit_status(ui, state, notices.message());
+    }
+}
+
+/// How long Stop waits for the sentences still with the translator. Long
+/// enough for a queue's worth at the measured ~1s a sentence, short enough
+/// that a wedged backend cannot hold the session open.
+const TRANSLATE_DRAIN: Duration = Duration::from_secs(10);
+
+/// Collect what the translator still owes before the session closes: the last
+/// sentences of a meeting are the ones most likely to matter, and the
+/// transcript file is about to be closed.
+fn drain_translations(
+    ui: &Ui,
+    notices: &mut Notices,
+    mut recorder: Option<&mut record::SessionRecorder>,
+    translations: &mut Translations,
+) {
+    collect_translations(ui, notices, recorder.as_deref_mut(), translations, "stopping");
+    if translations.outstanding == 0 {
+        return;
+    }
+    // Not "listening" any more, but not done either — the UI's Record button
+    // must already read as stopped while this finishes.
+    emit_status(
+        ui,
+        "stopping",
+        Some(format!(
+            "{} sentence(s) still being translated",
+            translations.outstanding
+        )),
+    );
+    let deadline = Instant::now() + TRANSLATE_DRAIN;
+    while translations.outstanding > 0 {
+        let Some(remaining) = deadline.checked_duration_since(Instant::now()) else {
+            break;
+        };
+        let Some(outcome) = translations.lane.wait(remaining) else {
+            break;
+        };
+        translations.outstanding -= 1;
+        apply_translation(
+            ui,
+            notices,
+            recorder.as_deref_mut(),
+            outcome,
+            "stopping",
+            translations.first_id,
+        );
+    }
+    // Whatever is left is not coming: clear the queue and let those lines
+    // stop waiting rather than leaving them mid-translation forever.
+    for job in translations.lane.abandon() {
+        emit_translation(ui, job.lane, job.id, None, None);
+    }
+    translations.outstanding = 0;
 }
 
 /// A write failure stops the recording but not the session, so the UI has to
@@ -1048,6 +1390,7 @@ mod tests {
                 text: "こんにちは".into(),
                 start_ms: 0,
                 end_ms: 1_000,
+                lang: Some("ja".into()),
             }),
         };
         assert!(gate.should_emit(&fin));

@@ -22,6 +22,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 | UIシェル | Tauri 2＋Svelte 5 | 153802 |
 | 音声取得 | マイク=cpal / スピーカー=CoreAudio Process Tap（mac, 14.2+）・WASAPIループバック（Win） | 153803 |
 | 翻訳 | 組み込みローカルLLM（llama.cpp系GGUF）＋アプリ内モデル選択・ダウンロード。Ollama / Codex / Claude Code / DeepLはtraitで将来追加 | 153804 |
+| ggml分離 | llama.cpp側をcdylibに隔離しdlopen（whisperのggmlとシンボル衝突するため）。プロセスは単一のまま | 153805 |
 
 ## ビルド順（small-first）
 
@@ -34,7 +35,7 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] RustからCoreAudio Process Tapでシステム音声PCMを取得できることを確認 — **成功**（objc2-core-audioで48kHz/2ch/f32を取得、Swiftヘルパー不要）。再現: `scripts/tap-check.sh`。ただし署名済み.appを`open`で起動しないとTCCが無音を返す（[docs/step0-tap-results.md](docs/step0-tap-results.md)）
 - [x] whisper-rs＋Metalでlarge-v3-turbo量子化モデルの動作・メモリ実測 — 全予算クリア（最初の部分結果≈1.7s、RSS 1.1GB）。q5_0はq8_0より遅いためq8_0を既定候補に
 - [x] llama.cpp系バインディング（llama-cpp-2等）で翻訳用小型GGUFモデルの動作・メモリ実測（whisperとの同時稼働込み）— 文あたり0.3〜0.9s、同時稼働時でも最悪4s/文で要件内
-- [x] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証 — **失敗を確認**: ggmlシンボル衝突により実行時SIGABRT。cdylib分離（推奨）/テキストサイドカー/バージョンピン留めの選択肢をStep 2で決定しADR化する
+- [x] whisper-rsとllama-cpp-2の同一バイナリへの同時リンク検証 — **失敗を確認**: ggmlシンボル衝突により実行時SIGABRT。→ Step 2でcdylib分離を採用しADR化（[ADR-153805](docs/ADR/20260819-143000-isolate-llama-cpp-in-a-cdylib.md)）
 - [x] **MLX比較ハーネス**: 同一音声・同一文でggmlとMLXをA/B比較できるようにする — 結果: ほぼ互角（ASRでMLXが1割強速い程度）。ggml路線を維持し、MLXバックエンドは追加しない
   - 擬似ストリーミングのスケジューラ（LocalAgreement）は共通実装にし、推論呼び出し（`transcribe(window)` / `translate(sentence)`）だけをバックエンド差し替えにする（エンジン差と確定ロジック差を混ぜない）
   - ggml側: whisper-rs / llama-cpp-2（インプロセス）
@@ -57,10 +58,11 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 2: 確定文の翻訳レーン
 
-- [ ] `Translator` trait＋組み込みllama.cpp実装（キュー＋逐次処理、バックプレッシャーあり）
-- [ ] モデル管理（ModelManager）: ASRのWhisperモデルと翻訳LLMを共通の仕組みで選択・ダウンロード・切り替え（PoC段階はローカルパス指定でも可）
-- [ ] finalイベント→翻訳→UIの確定文に訳文を後付け表示
-- [ ] 言語設定: Main（利用者言語）/ Sub の2言語ペア
+- [x] `Translator` trait＋組み込みllama.cpp実装 — cdylib（`lpt-translate-ggml`）をdlopenする`lpt-translate`＋専用スレッド。キュー上限8文、溢れたら**最古を捨てる**（会議で価値があるのは画面に出ている最新の文）
+- [x] モデル管理（`lpt-core::models`）: ASR・VAD・翻訳LLMを共通の探索順（env override → アプリデータ → チェックアウトの`models/`）で解決。ダウンロードUIは後続
+- [x] finalイベント→翻訳→UIの確定文に訳文を後付け表示 — 発話にID採番、`translation`イベントでID照合。`transcript.jsonl`は`{"type":"utterance"|"translation"}`の2種
+- [x] 言語設定: **Main/Sub廃止**。「話される言語（最大2）」と「翻訳先（なし可）」を分離し、相互翻訳フラグを追加（`mockups/feature-language-picker.html`案A、設計は`plans/step2-translation.md`）。録音中の変更はモデル再ロードなしで次の発話から反映
+- [ ] 実発話での確認（`./scripts/build-app.sh --open`）
 - 将来: Ollama（HTTP）/ Codex・Claude Code（CLIサブプロセス）/ DeepL（HTTP）を`Translator`実装として追加
 
 ### Step 3: スピーカーレーン

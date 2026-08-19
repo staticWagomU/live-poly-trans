@@ -105,18 +105,29 @@ impl WhisperEngine {
         let ctx = whisper_rs::WhisperContext::new_with_params(model_path, params)
             .with_context(|| format!("load whisper model {model_path}"))?;
         let state = ctx.create_state().context("create whisper state")?;
-        let allowed_lang_ids = allowed_langs
-            .iter()
-            .map(|l| {
-                whisper_rs::get_lang_id(l).with_context(|| format!("unknown language: {l}"))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let allowed_lang_ids = to_lang_ids(allowed_langs)?;
         Ok(Self {
             state,
             allowed_lang_ids,
             lang_pin_threshold: env_parse("LPT_LANG_PIN_THRESHOLD").unwrap_or(LANG_PIN_THRESHOLD),
         })
     }
+
+    /// Change which languages detection may choose between, mid-session.
+    /// `transcribe` reads this per decode, so no model reload is involved —
+    /// which is what lets the language picker work while recording.
+    /// An unknown code leaves the set untouched rather than emptying it.
+    pub fn set_allowed_langs(&mut self, langs: &[String]) -> Result<()> {
+        self.allowed_lang_ids = to_lang_ids(langs)?;
+        Ok(())
+    }
+}
+
+fn to_lang_ids(langs: &[String]) -> Result<Vec<i32>> {
+    langs
+        .iter()
+        .map(|l| whisper_rs::get_lang_id(l).with_context(|| format!("unknown language: {l}")))
+        .collect()
 }
 
 impl AsrEngine for WhisperEngine {

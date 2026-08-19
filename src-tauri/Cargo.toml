@@ -18,6 +18,9 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 cpal = "0.18.1"
 hound = "3.5"
 lpt-core = { path = "../crates/lpt-core" }
+# The dlopen host side only. lpt-translate-ggml is NOT a dependency: linking
+# it would put llama's ggml next to whisper's (docs/step0-results.md).
+lpt-translate = { path = "../crates/lpt-translate" }
 lpt-whisper = { path = "../crates/lpt-whisper" }
 rtrb = "0.4.0"
 serde = { version = "1", features = ["derive"] }

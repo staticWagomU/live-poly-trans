@@ -29,7 +29,8 @@
     "targets": ["app"],
     "icon": ["icons/icon.png"],
     "macOS": {
-      "minimumSystemVersion": "14.2"
+      "minimumSystemVersion": "14.2",
+      "frameworks": ["../target/release/liblpt_translate_ggml.dylib"]
     }
   }
 }

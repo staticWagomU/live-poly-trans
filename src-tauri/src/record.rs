@@ -41,6 +41,18 @@ const MIX_LAG_SAMPLES: usize = 2 * RECORD_RATE as usize;
 /// timestamp regardless.
 const SNAP_SAMPLES: usize = 3 * RECORD_RATE as usize / 100;
 
+/// One finished utterance as the transcript records it. `id` is what a
+/// translation arriving later names to find its way back to this line.
+pub struct Utterance<'a> {
+    pub id: u64,
+    pub lane: &'a str,
+    pub start_ms: u64,
+    pub end_ms: u64,
+    /// What it was recognised as; absent when detection was unconfident.
+    pub lang: Option<&'a str>,
+    pub text: &'a str,
+}
+
 /// What the recorder needs to know about one capture lane.
 pub struct LaneSpec {
     /// File stem: `mic` → `mic.wav`.
@@ -194,16 +206,34 @@ impl SessionRecorder {
     /// Append one finished utterance to `transcript.jsonl`, timed against the
     /// recording. Flushed per line: a crash should cost the last utterance,
     /// not the session's transcript.
-    pub fn write_transcript(&mut self, lane: &str, start_ms: u64, end_ms: u64, text: &str) {
+    pub fn write_utterance(&mut self, utterance: &Utterance<'_>) {
+        self.write_line(serde_json::json!({
+            "type": "utterance",
+            "id": utterance.id,
+            "lane": utterance.lane,
+            "startMs": utterance.start_ms,
+            "endMs": utterance.end_ms,
+            "lang": utterance.lang,
+            "text": utterance.text,
+        }));
+    }
+
+    /// Append a translation, naming the utterance it belongs to. It arrives
+    /// seconds later than the sentence and out of order between lanes, so the
+    /// file records the link rather than the position.
+    pub fn write_translation(&mut self, id: u64, lang: &str, text: &str) {
+        self.write_line(serde_json::json!({
+            "type": "translation",
+            "id": id,
+            "lang": lang,
+            "text": text,
+        }));
+    }
+
+    fn write_line(&mut self, line: serde_json::Value) {
         if self.failure.is_some() {
             return;
         }
-        let line = serde_json::json!({
-            "lane": lane,
-            "startMs": start_ms,
-            "endMs": end_ms,
-            "text": text,
-        });
         if let Err(e) = writeln!(self.transcript, "{line}").and_then(|()| self.transcript.flush()) {
             self.fail(anyhow::Error::new(e).context("write transcript"));
         }
@@ -441,26 +471,72 @@ mod tests {
         std::fs::remove_dir_all(&base).unwrap();
     }
 
+    fn utterance(
+        id: u64,
+        lane: &'static str,
+        start_ms: u64,
+        text: &'static str,
+    ) -> Utterance<'static> {
+        Utterance {
+            id,
+            lane,
+            start_ms,
+            end_ms: start_ms + 1_000,
+            lang: Some("ja"),
+            text,
+        }
+    }
+
+    fn read_jsonl(dir: &Path) -> Vec<serde_json::Value> {
+        std::fs::read_to_string(dir.join("transcript.jsonl"))
+            .unwrap()
+            .lines()
+            .map(|l| serde_json::from_str(l).expect("one JSON object per line"))
+            .collect()
+    }
+
     #[test]
     fn the_transcript_lands_next_to_the_audio() {
         let base = scratch("transcript");
         let mut rec = SessionRecorder::open(&base, "s", &[spec("mic", RECORD_RATE)]).unwrap();
-        rec.write_transcript("mic", 1_200, 3_400, "こんにちは");
-        rec.write_transcript("speaker", 4_000, 5_000, "hello");
+        rec.write_utterance(&utterance(1, "mic", 1_200, "こんにちは"));
+        rec.write_utterance(&utterance(2, "speaker", 4_000, "hello"));
         let dir = rec.dir().to_path_buf();
         rec.finish().unwrap();
 
-        let text = std::fs::read_to_string(dir.join("transcript.jsonl")).unwrap();
-        let lines: Vec<serde_json::Value> = text
-            .lines()
-            .map(|l| serde_json::from_str(l).expect("one JSON object per line"))
-            .collect();
+        let lines = read_jsonl(&dir);
         assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0]["type"], "utterance");
+        assert_eq!(lines[0]["id"], 1);
         assert_eq!(lines[0]["lane"], "mic");
         assert_eq!(lines[0]["startMs"], 1_200);
-        assert_eq!(lines[0]["endMs"], 3_400);
+        assert_eq!(lines[0]["endMs"], 2_200);
+        assert_eq!(lines[0]["lang"], "ja");
         assert_eq!(lines[0]["text"], "こんにちは");
         assert_eq!(lines[1]["lane"], "speaker");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_translation_is_appended_when_it_arrives_and_names_its_utterance() {
+        // Translations land seconds after the sentence they belong to, and
+        // out of order between lanes. The id is what puts them back together.
+        let base = scratch("translation");
+        let mut rec = SessionRecorder::open(&base, "s", &[spec("mic", RECORD_RATE)]).unwrap();
+        rec.write_utterance(&utterance(1, "mic", 0, "おはようございます"));
+        rec.write_utterance(&utterance(2, "speaker", 3_000, "good morning"));
+        rec.write_translation(2, "ja", "おはようございます");
+        rec.write_translation(1, "en", "Good morning.");
+        let dir = rec.dir().to_path_buf();
+        rec.finish().unwrap();
+
+        let lines = read_jsonl(&dir);
+        assert_eq!(lines.len(), 4);
+        assert_eq!(lines[2]["type"], "translation");
+        assert_eq!(lines[2]["id"], 2);
+        assert_eq!(lines[2]["lang"], "ja");
+        assert_eq!(lines[2]["text"], "おはようございます");
+        assert_eq!(lines[3]["id"], 1);
         std::fs::remove_dir_all(&base).unwrap();
     }
 

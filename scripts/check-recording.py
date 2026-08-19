@@ -137,7 +137,10 @@ def main():
     if not log.exists():
         print(f"\nno transcript.jsonl (older build?)")
         return
-    utterances = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+    entries = [json.loads(line) for line in log.read_text().splitlines() if line.strip()]
+    # Translations share the file but have no place in the audio; older
+    # recordings predate the "type" field and are all utterances.
+    utterances = [e for e in entries if e.get("type", "utterance") == "utterance"]
     if not utterances:
         print("\ntranscript.jsonl is empty — nothing was said, or nothing was heard")
         return
