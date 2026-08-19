@@ -211,7 +211,7 @@ fn run_session(
         // The speaker lane is best-effort: it needs macOS 14.2+ and the
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
-        let mut notices = Vec::new();
+        let mut notices = Notices::default();
         let speaker = start_speaker(&stop_capture).and_then(|session| {
             session
                 .map(|s| LaneRuntime::new(Lane::Speaker, s))
@@ -220,7 +220,12 @@ fn run_session(
         match speaker {
             Ok(Some(lane)) => lanes.push(lane),
             Ok(None) => {}
-            Err(e) => notices.push(format!("speaker lane unavailable: {e:#}")),
+            Err(e) => {
+                notices.set(
+                    NoticeKey::Speaker,
+                    Some(format!("speaker lane unavailable: {e:#}")),
+                );
+            }
         }
         // Recording is best-effort too: a full disk should cost the recording,
         // not the transcript.
@@ -231,7 +236,10 @@ fn run_session(
             }
             Err(e) => {
                 emit_recording_dir(ui, None);
-                notices.push(format!("recording unavailable: {e:#}"));
+                notices.set(
+                    NoticeKey::Recording,
+                    Some(format!("recording unavailable: {e:#}")),
+                );
                 None
             }
         };
@@ -316,13 +324,81 @@ impl SessionClock {
     }
 }
 
+/// One source of status-line text. Each source owns one slot in [`Notices`],
+/// so posting or expiring one notice never erases another's.
+#[derive(Clone, Copy, PartialEq)]
+enum NoticeKey {
+    /// The speaker lane is delivering nothing usable: it failed to start,
+    /// or macOS is withholding the system-audio permission.
+    Speaker,
+    /// Recording is off: the files failed to open, or a write failed.
+    Recording,
+    /// A lane's ring overflowed recently.
+    Overrun(Lane),
+    /// A lane's latest decode failed.
+    Decode(Lane),
+}
+
+/// The notices a listening session currently carries, joined oldest-first
+/// into the single status message the UI shows.
+#[derive(Default)]
+struct Notices {
+    entries: Vec<(NoticeKey, String)>,
+}
+
+impl Notices {
+    /// Post (`Some`) or take down (`None`) one source's notice. Returns
+    /// whether the joined message changed — the caller's cue to re-emit.
+    fn set(&mut self, key: NoticeKey, msg: Option<String>) -> bool {
+        let at = self.entries.iter().position(|(k, _)| *k == key);
+        match (at, msg) {
+            (Some(i), None) => {
+                self.entries.remove(i);
+                true
+            }
+            (Some(i), Some(msg)) => {
+                let changed = self.entries[i].1 != msg;
+                self.entries[i].1 = msg;
+                changed
+            }
+            (None, Some(msg)) => {
+                self.entries.push((key, msg));
+                true
+            }
+            (None, None) => false,
+        }
+    }
+
+    /// The joined status message; `None` when nothing is wrong.
+    fn message(&self) -> Option<String> {
+        (!self.entries.is_empty()).then(|| {
+            self.entries
+                .iter()
+                .map(|(_, msg)| msg.as_str())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        })
+    }
+}
+
 /// What a lane needs from the session for one poll, beyond its own state.
 struct Poll<'a> {
     ui: &'a Ui,
     clock: &'a mut SessionClock,
     rec: Option<&'a mut record::SessionRecorder>,
+    notices: &'a mut Notices,
     /// This lane's index, in the order the recorder knows the lanes.
     index: usize,
+}
+
+impl Poll<'_> {
+    /// Post or take down one source's notice, re-emitting the status line
+    /// only when the joined message actually changed.
+    fn notice(&mut self, key: NoticeKey, msg: Option<String>) {
+        if self.notices.set(key, msg) {
+            emit_status(self.ui, "listening", self.notices.message());
+        }
+    }
 }
 
 /// Per-lane capture-to-scheduler state: one runtime per lane, with the
@@ -405,10 +481,17 @@ impl LaneRuntime {
             .scheduler
             .step(&mut engines.engine, &mut engines.vad, lang)
         {
-            Ok(Some(out)) => self.deliver(poll, out),
-            Ok(None) => {}
-            // Non-fatal: keep listening, surface the message.
-            Err(e) => emit_status(poll.ui, "listening", Some(format!("decode error: {e:#}"))),
+            Ok(Some(out)) => {
+                poll.notice(NoticeKey::Decode(self.lane), None);
+                self.deliver(poll, out);
+            }
+            Ok(None) => poll.notice(NoticeKey::Decode(self.lane), None),
+            // Non-fatal: keep listening, surface the message until a
+            // decode succeeds again.
+            Err(e) => poll.notice(
+                NoticeKey::Decode(self.lane),
+                Some(format!("decode error: {e:#}")),
+            ),
         }
         self.next_step = started + STEP_INTERVAL;
         Ok(())
@@ -478,8 +561,12 @@ impl LaneRuntime {
                 break;
             }
             if let Some(watch) = self.silence.as_mut() {
-                if let Some(notice) = watch.observe(&self.mono, Instant::now()) {
-                    emit_status(poll.ui, "listening", Some(notice.to_string()));
+                match watch.observe(&self.mono, Instant::now()) {
+                    Some(SilenceEvent::Broken) => {
+                        poll.notice(NoticeKey::Speaker, Some(SILENT_LANE_NOTICE.to_string()));
+                    }
+                    Some(SilenceEvent::Recovered) => poll.notice(NoticeKey::Speaker, None),
+                    None => {}
                 }
             }
             // Where the OS says this audio was captured. Without an anchor
@@ -510,9 +597,8 @@ impl LaneRuntime {
             // interleaved sample count → wall-clock duration of lost audio
             let ms =
                 drops as u64 * 1000 / (self.session.channels as u64 * self.session.src_rate as u64);
-            emit_status(
-                poll.ui,
-                "listening",
+            poll.notice(
+                NoticeKey::Overrun(self.lane),
                 Some(format!("audio overrun: ~{ms}ms dropped so far")),
             );
             self.reported_drops = drops;
@@ -522,7 +608,7 @@ impl LaneRuntime {
             .is_some_and(|until| Instant::now() >= until)
         {
             // The overrun stopped a while ago; take the notice down.
-            emit_status(poll.ui, "listening", None);
+            poll.notice(NoticeKey::Overrun(self.lane), None);
             self.overrun_until = None;
         }
         Ok(())
@@ -654,6 +740,16 @@ const SILENCE_GRACE: Duration = Duration::from_secs(20);
 const SILENT_LANE_NOTICE: &str = "speaker lane is receiving only silence — grant \
     System Settings > Privacy & Security > Screen & System Audio Recording";
 
+/// What [`SilenceWatch`] concluded from one chunk of samples.
+#[derive(Debug, PartialEq)]
+enum SilenceEvent {
+    /// Digital silence lasted the grace period: the permission is withheld.
+    Broken,
+    /// Real audio arrived after a report: the lane works after all, and the
+    /// notice must not outlive the problem.
+    Recovered,
+}
+
 /// Watches a lane for the one failure this pipeline cannot see as an error:
 /// macOS withholds the system-audio permission by zero-filling the buffers
 /// (docs/step0-tap-results.md), so every call succeeds and the transcript
@@ -669,19 +765,18 @@ struct SilenceWatch {
 }
 
 impl SilenceWatch {
-    fn observe(&mut self, samples: &[f32], now: Instant) -> Option<&'static str> {
+    fn observe(&mut self, samples: &[f32], now: Instant) -> Option<SilenceEvent> {
         if samples.is_empty() {
             return None;
         }
         if samples.iter().any(|s| *s != 0.0) {
             self.silent_since = None;
-            self.reported = false;
-            return None;
+            return std::mem::take(&mut self.reported).then_some(SilenceEvent::Recovered);
         }
         let since = *self.silent_since.get_or_insert(now);
         if !self.reported && now.duration_since(since) >= SILENCE_GRACE {
             self.reported = true;
-            return Some(SILENT_LANE_NOTICE);
+            return Some(SilenceEvent::Broken);
         }
         None
     }
@@ -764,17 +859,13 @@ fn run_capture_loop(
     engines: &mut Engines,
     lanes: &mut [LaneRuntime],
     mut recorder: Option<&mut record::SessionRecorder>,
-    notices: Vec<String>,
+    mut notices: Notices,
 ) -> anyhow::Result<()> {
     // Unset = auto-detect per utterance window (mixed ja/en meetings);
     // set LPT_LANG to pin a single language.
     let lang = std::env::var("LPT_LANG").ok();
     let mut clock = SessionClock::default();
-    emit_status(
-        ui,
-        "listening",
-        (!notices.is_empty()).then(|| notices.join(" / ")),
-    );
+    emit_status(ui, "listening", notices.message());
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
@@ -787,6 +878,7 @@ fn run_capture_loop(
                 ui,
                 clock: &mut clock,
                 rec: recorder.as_deref_mut(),
+                notices: &mut notices,
                 index,
             };
             lane.tick(&mut poll, engines, lang.as_deref())?;
@@ -794,7 +886,7 @@ fn run_capture_loop(
         // After every lane has had its say about this moment.
         if let Some(rec) = recorder.as_deref_mut() {
             rec.pump_mix();
-            report_recording_failure(ui, rec);
+            report_recording_failure(ui, &mut notices, rec);
         }
     }
     // Every lane gets to flush its tail even when another failed: the
@@ -805,6 +897,7 @@ fn run_capture_loop(
             ui,
             clock: &mut clock,
             rec: recorder.as_deref_mut(),
+            notices: &mut notices,
             index,
         };
         let finished = lane.finish(&mut poll, engines, lang.as_deref());
@@ -813,17 +906,22 @@ fn run_capture_loop(
     // The finish writes above can be the ones that fail; a failure here has
     // no later poll to report it.
     if let Some(rec) = recorder {
-        report_recording_failure(ui, rec);
+        report_recording_failure(ui, &mut notices, rec);
     }
     result
 }
 
 /// A write failure stops the recording but not the session, so the UI has to
 /// be told — once — that the files it was pointed at are no longer growing.
-fn report_recording_failure(ui: &Ui, rec: &mut record::SessionRecorder) {
+fn report_recording_failure(ui: &Ui, notices: &mut Notices, rec: &mut record::SessionRecorder) {
     if let Some(msg) = rec.take_failure() {
         emit_recording_dir(ui, None);
-        emit_status(ui, "listening", Some(format!("recording stopped: {msg}")));
+        if notices.set(
+            NoticeKey::Recording,
+            Some(format!("recording stopped: {msg}")),
+        ) {
+            emit_status(ui, "listening", notices.message());
+        }
     }
 }
 
@@ -869,10 +967,55 @@ mod tests {
         assert_eq!(watch.observe(&[0.0; 16], t0), None);
         assert_eq!(
             watch.observe(&[0.0; 16], t0 + SILENCE_GRACE),
-            Some(SILENT_LANE_NOTICE)
+            Some(SilenceEvent::Broken)
         );
         // Said once: repeating it every poll would bury the real status.
         assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE * 2), None);
+    }
+
+    #[test]
+    fn audio_arriving_after_a_report_takes_the_notice_down() {
+        // Permission granted mid-session: the tap starts delivering real
+        // audio, and the warning must not outlive the problem.
+        let mut watch = SilenceWatch::default();
+        let t0 = Instant::now();
+        assert_eq!(watch.observe(&[0.0; 16], t0), None);
+        assert_eq!(
+            watch.observe(&[0.0; 16], t0 + SILENCE_GRACE),
+            Some(SilenceEvent::Broken)
+        );
+        assert_eq!(
+            watch.observe(&[0.1; 16], t0 + SILENCE_GRACE * 2),
+            Some(SilenceEvent::Recovered)
+        );
+        // and silence must again last the grace period before a new report
+        assert_eq!(watch.observe(&[0.0; 16], t0 + SILENCE_GRACE * 3), None);
+    }
+
+    #[test]
+    fn one_sources_notice_does_not_erase_anothers() {
+        let mut notices = Notices::default();
+        assert!(notices.set(NoticeKey::Speaker, Some("speaker gone".into())));
+        assert!(notices.set(NoticeKey::Overrun(Lane::Mic), Some("overrun".into())));
+        assert_eq!(notices.message().as_deref(), Some("speaker gone / overrun"));
+        // the overrun expiring takes down only its own line
+        assert!(notices.set(NoticeKey::Overrun(Lane::Mic), None));
+        assert_eq!(notices.message().as_deref(), Some("speaker gone"));
+    }
+
+    #[test]
+    fn an_unchanged_notice_is_not_worth_a_re_emit() {
+        let mut notices = Notices::default();
+        assert!(notices.set(NoticeKey::Recording, Some("stopped".into())));
+        assert!(!notices.set(NoticeKey::Recording, Some("stopped".into())));
+        // clearing a notice that was never up changes nothing either
+        assert!(!notices.set(NoticeKey::Decode(Lane::Mic), None));
+        assert_eq!(notices.message().as_deref(), Some("stopped"));
+    }
+
+    #[test]
+    fn no_notices_means_no_message() {
+        assert_eq!(Notices::default().message(), None);
     }
 
     #[test]
