@@ -200,7 +200,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
     );
     // A nil queue reportedly fails to register the block on macOS 26, so
     // always hand the HAL an explicit one.
-    let queue = dispatch2::DispatchQueue::new("dev.wagomu.kkm.speaker-io", None);
+    let queue = dispatch2::DispatchQueue::new("dev.wagomu.kikimimic.speaker-io", None);
     let mut proc_id: AudioDeviceIOProcID = None;
     check(
         unsafe {

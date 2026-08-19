@@ -184,7 +184,7 @@ fn run_with_tap(desc: &CATapDescription, tap_id: AudioObjectID, secs: u64) -> Re
         set(
             &agg_desc,
             kAudioAggregateDeviceUIDKey,
-            &NSString::from_str("dev.wagomu.kkm-tap-check"),
+            &NSString::from_str("dev.wagomu.kikimimic.tap-check"),
         );
         set(&agg_desc, kAudioAggregateDeviceIsPrivateKey, &NSNumber::new_bool(true));
         set(&agg_desc, kAudioAggregateDeviceTapAutoStartKey, &NSNumber::new_bool(true));
