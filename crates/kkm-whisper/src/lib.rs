@@ -189,6 +189,76 @@ impl AsrEngine for WhisperEngine {
     }
 }
 
+/// The loaded models, shared by every lane and outliving a session.
+///
+/// One copy: the model is most of a gigabyte, and a second lane wanting its
+/// own would double the app's memory to recognise the same languages. They
+/// are only ever used from the pipeline thread, one lane at a time.
+pub struct WhisperModels {
+    pub engine: WhisperEngine,
+    pub vad: SileroVad,
+    /// What the engine was last told detection may choose between. The
+    /// models outlive a session while the policy can change between (and
+    /// during) sessions, so the two have to be compared rather than assumed.
+    pub spoken: Vec<String>,
+}
+
+impl WhisperModels {
+    pub fn load(asr_model: &str, vad_model: &str, spoken: &[String]) -> Result<Self> {
+        Ok(Self {
+            engine: WhisperEngine::load(asr_model, spoken)?,
+            vad: SileroVad::load(vad_model)?,
+            spoken: spoken.to_vec(),
+        })
+    }
+}
+
+/// The Whisper strategy: a rolling window, re-decoded on a cadence, with
+/// LocalAgreement deciding what has settled ([`kkm_core::scheduler`]).
+///
+/// The window state is per lane; the models behind it are not. `Rc` rather
+/// than `Arc` because both live and die on the pipeline thread — the sharing
+/// here is between two lanes, never between two threads.
+pub struct WhisperRecognizer {
+    models: std::rc::Rc<std::cell::RefCell<WhisperModels>>,
+    scheduler: kkm_core::scheduler::StreamScheduler,
+}
+
+impl WhisperRecognizer {
+    pub fn new(models: std::rc::Rc<std::cell::RefCell<WhisperModels>>) -> Self {
+        Self {
+            models,
+            scheduler: kkm_core::scheduler::StreamScheduler::new(),
+        }
+    }
+}
+
+impl kkm_core::Recognizer for WhisperRecognizer {
+    fn push_audio(&mut self, samples: &[f32]) {
+        self.scheduler.push_audio(samples);
+    }
+
+    fn step(
+        &mut self,
+        lang: Option<&str>,
+    ) -> Result<Option<kkm_core::scheduler::StepOutput>> {
+        // Borrowed for the decode only. Nothing else on this thread runs
+        // during it, and nothing holds the models across calls.
+        let models = &mut *self.models.borrow_mut();
+        self.scheduler
+            .step(&mut models.engine, &mut models.vad, lang)
+    }
+
+    fn finish(
+        &mut self,
+        lang: Option<&str>,
+    ) -> Result<Option<kkm_core::scheduler::StepOutput>> {
+        let models = &mut *self.models.borrow_mut();
+        self.scheduler
+            .finish(&mut models.engine, &mut models.vad, lang)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

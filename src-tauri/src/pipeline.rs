@@ -1,11 +1,16 @@
-//! The pipeline worker: one long-lived thread that owns the ASR engines,
-//! the scheduler, and the capture-session lifecycle.
+//! The pipeline worker: one long-lived thread that owns the ASR models, the
+//! per-lane recognisers, and the capture-session lifecycle.
 //!
 //! Start/Stop arrive on a command channel and are handled strictly in
 //! order, so a stale session can never overlap a new one, and the models
 //! load exactly once for the app's lifetime instead of once per Record.
+//!
+//! How audio becomes text is not decided here: a lane holds a
+//! [`Recognizer`] and this file only feeds it and delivers what comes back.
 
+use std::cell::RefCell;
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
@@ -18,7 +23,7 @@ use crate::record;
 use crate::translate::{Outcome, Status, TranslateLane};
 use kkm_core::language::LanguagePolicy;
 use kkm_core::models::{Model, ModelManager};
-use kkm_core::Lane;
+use kkm_core::{Lane, Recognizer};
 
 /// Decode cadence, measured step-start to step-start: a slow decode eats
 /// into the following idle time instead of stacking on top of it.
@@ -146,13 +151,14 @@ pub struct Ui {
     pub status: StatusStore,
 }
 
-struct Engines {
-    engine: kkm_whisper::WhisperEngine,
-    vad: kkm_whisper::SileroVad,
-    /// What the engine was last told detection may choose between. The
-    /// engines outlive a session while the policy can change between (and
-    /// during) sessions, so the two have to be compared rather than assumed.
-    spoken: Vec<String>,
+/// The loaded ASR models, shared by the lanes of a session and kept between
+/// sessions. Each lane recognises through its own [`Recognizer`] over this.
+type Models = Rc<RefCell<kkm_whisper::WhisperModels>>;
+
+/// The recogniser a new lane gets. One place to change when there is more
+/// than one ASR to choose from (plan.md Step 6).
+fn recognizer(models: &Models) -> Box<dyn Recognizer> {
+    Box::new(kkm_whisper::WhisperRecognizer::new(Rc::clone(models)))
 }
 
 /// Where models are looked for, in order: what a download put in the app's
@@ -228,7 +234,7 @@ fn emit_translation(ui: &Ui, lane: Lane, id: u64, text: Option<String>, lang: Op
 }
 
 pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
-    let mut engines: Option<Engines> = None;
+    let mut engines: Option<Models> = None;
     // Spawned once for the app: the translation model is expensive to load
     // and, like the ASR engines, is kept between sessions. Its own model path
     // is resolved lazily inside the worker, so a missing translation model
@@ -253,35 +259,27 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
     }
 }
 
-fn load_engines<'a>(
-    ui: &Ui,
-    engines: &'a mut Option<Engines>,
-    spoken: &[String],
-) -> anyhow::Result<&'a mut Engines> {
+fn load_engines(ui: &Ui, engines: &mut Option<Models>, spoken: &[String]) -> anyhow::Result<Models> {
     if engines.is_none() {
         emit_status(ui, "loading", None);
-        let models = models(&ui.app);
-        let engine = kkm_whisper::WhisperEngine::load(
-            &models.resolve(Model::Asr)?.to_string_lossy(),
+        let paths = models(&ui.app);
+        let loaded = kkm_whisper::WhisperModels::load(
+            &paths.resolve(Model::Asr)?.to_string_lossy(),
+            &paths.resolve(Model::Vad)?.to_string_lossy(),
             spoken,
         )?;
-        let vad = kkm_whisper::SileroVad::load(&models.resolve(Model::Vad)?.to_string_lossy())?;
-        *engines = Some(Engines {
-            engine,
-            vad,
-            spoken: spoken.to_vec(),
-        });
+        *engines = Some(Rc::new(RefCell::new(loaded)));
     }
-    Ok(engines.as_mut().expect("engines just ensured"))
+    Ok(Rc::clone(engines.as_ref().expect("engines just ensured")))
 }
 
 fn run_session(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
-    engines: &mut Option<Engines>,
+    engines: &mut Option<Models>,
     translations: &mut Translations,
 ) -> anyhow::Result<()> {
-    let engines = load_engines(ui, engines, &translations.policy().spoken)?;
+    let models = load_engines(ui, engines, &translations.policy().spoken)?;
     // Load the translation model now rather than on the first sentence: the
     // load overlaps the start of the meeting instead of delaying the first
     // translation by all of it.
@@ -289,14 +287,14 @@ fn run_session(
     let stop_capture = Arc::new(AtomicBool::new(false));
     let result = (|| {
         let mic = start_capture(capture::mic::spawn, &stop_capture)?;
-        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic)?];
+        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic, recognizer(&models))?];
         // The speaker lane is best-effort: it needs macOS 14.2+ and the
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
         let mut notices = Notices::default();
         let speaker = start_speaker(&stop_capture).and_then(|session| {
             session
-                .map(|s| LaneRuntime::new(Lane::Speaker, s))
+                .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&models)))
                 .transpose()
         });
         match speaker {
@@ -328,7 +326,7 @@ fn run_session(
         let ran = run_capture_loop(
             cmd_rx,
             ui,
-            engines,
+            &models,
             &mut lanes,
             recorder.as_mut(),
             notices,
@@ -576,8 +574,8 @@ impl Poll<'_> {
     }
 }
 
-/// Per-lane capture-to-scheduler state: one runtime per lane, with the
-/// engines shared across them.
+/// Per-lane capture-to-text state: one runtime per lane, each with its own
+/// [`Recognizer`] over models the lanes share.
 struct LaneRuntime {
     lane: Lane,
     session: capture::CaptureSession,
@@ -589,7 +587,7 @@ struct LaneRuntime {
     /// with no anchor to go on.
     next_position: usize,
     resampler: kkm_core::resample::StreamResampler,
-    scheduler: kkm_core::scheduler::StreamScheduler,
+    recognizer: Box<dyn Recognizer>,
     /// Downmix scratch buffer, reused across polls.
     mono: Vec<f32>,
     reported_drops: usize,
@@ -597,8 +595,8 @@ struct LaneRuntime {
     overrun_until: Option<Instant>,
     /// Per-lane: what the UI last saw of *this* lane's volatile tail.
     gate: EmitGate,
-    /// Audio handed to the scheduler so far. The scheduler times utterances
-    /// against this; [`LaneTimeline`] turns that into recording time.
+    /// Audio handed to the recogniser so far. It times utterances against
+    /// this; [`LaneTimeline`] turns that into recording time.
     stream_samples: usize,
     timeline: LaneTimeline,
     /// When this lane is next due to decode. Per-lane so one lane's slow
@@ -610,7 +608,11 @@ struct LaneRuntime {
 }
 
 impl LaneRuntime {
-    fn new(lane: Lane, session: capture::CaptureSession) -> anyhow::Result<Self> {
+    fn new(
+        lane: Lane,
+        session: capture::CaptureSession,
+        recognizer: Box<dyn Recognizer>,
+    ) -> anyhow::Result<Self> {
         let resampler = kkm_core::resample::StreamResampler::new(session.src_rate)?;
         Ok(Self {
             lane,
@@ -619,7 +621,7 @@ impl LaneRuntime {
             trail: AnchorTrail::default(),
             next_position: 0,
             resampler,
-            scheduler: kkm_core::scheduler::StreamScheduler::new(),
+            recognizer,
             mono: Vec::new(),
             reported_drops: 0,
             overrun_until: None,
@@ -631,8 +633,8 @@ impl LaneRuntime {
         })
     }
 
-    /// Milliseconds of audio handed to the scheduler so far — the clock its
-    /// hypotheses are timed against.
+    /// Milliseconds of audio handed to the recogniser so far — the clock its
+    /// utterances are timed against.
     fn stream_ms(&self) -> u64 {
         self.stream_samples as u64 * 1000 / kkm_core::resample::TARGET_RATE as u64
     }
@@ -642,7 +644,6 @@ impl LaneRuntime {
     fn tick(
         &mut self,
         poll: &mut Poll<'_>,
-        engines: &mut Engines,
         lang: Option<&str>,
     ) -> anyhow::Result<()> {
         self.pump(poll)?;
@@ -652,10 +653,7 @@ impl LaneRuntime {
         // Measured step-start to step-start: a slow decode eats into the
         // following idle time instead of stacking on top of it.
         let started = Instant::now();
-        match self
-            .scheduler
-            .step(&mut engines.engine, &mut engines.vad, lang)
-        {
+        match self.recognizer.step(lang) {
             Ok(Some(out)) => {
                 poll.notice(NoticeKey::Decode(self.lane), None);
                 self.deliver(poll, out);
@@ -711,25 +709,21 @@ impl LaneRuntime {
     }
 
     /// Stop: recover the audio still in flight (ring buffer → resampler
-    /// tail → an undecoded scheduler remainder) before flushing the text.
+    /// tail → whatever the recogniser has not reached) before flushing the text.
     fn finish(
         &mut self,
         poll: &mut Poll<'_>,
-        engines: &mut Engines,
         lang: Option<&str>,
     ) -> anyhow::Result<()> {
         self.pump(poll)?;
         let tail = self.resampler.flush()?;
         self.stream_samples += tail.len();
-        self.scheduler.push_audio(&tail);
-        if let Some(fin) = self
-            .scheduler
-            .finish(&mut engines.engine, &mut engines.vad, lang)?
-        {
+        self.recognizer.push_audio(&tail);
+        if let Some(fin) = self.recognizer.finish(lang)? {
             self.deliver(poll, fin);
         }
-        // A tail can still be on screen when finish had nothing to flush (the
-        // scheduler discarded that hypothesis with a no-speech window drop).
+        // A tail can still be on screen when finish had nothing to flush: a
+        // recogniser may drop its pending text rather than commit it.
         if self.gate.volatile_on_screen {
             emit_step(
                 poll.ui,
@@ -741,7 +735,7 @@ impl LaneRuntime {
         Ok(())
     }
 
-    /// Move captured audio into the scheduler and report overruns. Fails
+    /// Move captured audio into the recogniser and report overruns. Fails
     /// when the stream itself failed (device unplugged): without that the
     /// session would keep "listening" to silence forever.
     fn pump(&mut self, poll: &mut Poll<'_>) -> anyhow::Result<()> {
@@ -784,7 +778,7 @@ impl LaneRuntime {
             self.timeline
                 .observe(self.stream_ms(), at_ms.saturating_sub(self.stream_ms()));
             self.stream_samples += resampled.len();
-            self.scheduler.push_audio(&resampled);
+            self.recognizer.push_audio(&resampled);
             self.mono.clear();
         }
         let drops = self.session.dropped.load(Ordering::Relaxed);
@@ -1051,7 +1045,7 @@ impl EmitGate {
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
-    engines: &mut Engines,
+    models: &Models,
     lanes: &mut [LaneRuntime],
     mut recorder: Option<&mut record::SessionRecorder>,
     mut notices: Notices,
@@ -1060,7 +1054,7 @@ fn run_capture_loop(
     let mut clock = SessionClock::default();
     // The setting may have been changed while idle, after the engines were
     // loaded — sync before the first decode, not just on later changes.
-    sync_langs(ui, engines, &translations.policy(), &mut notices);
+    sync_langs(ui, models, &translations.policy(), &mut notices);
     emit_status(ui, "listening", notices.message());
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -1070,7 +1064,7 @@ fn run_capture_loop(
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
         }
         let policy = translations.policy();
-        sync_langs(ui, engines, &policy, &mut notices);
+        sync_langs(ui, models, &policy, &mut notices);
         // A single spoken language is pinned, which skips detection outright;
         // two leave the choice to the engine, restricted to those two.
         let lang = policy.pinned_lang().map(str::to_string);
@@ -1083,7 +1077,7 @@ fn run_capture_loop(
                 index,
                 tr: translations,
             };
-            lane.tick(&mut poll, engines, lang.as_deref())?;
+            lane.tick(&mut poll, lang.as_deref())?;
         }
         collect_translations(
             ui,
@@ -1111,7 +1105,7 @@ fn run_capture_loop(
             index,
             tr: translations,
         };
-        let finished = lane.finish(&mut poll, engines, lang.as_deref());
+        let finished = lane.finish(&mut poll, lang.as_deref());
         result = result.and(finished);
     }
     drain_translations(ui, &mut notices, recorder.as_deref_mut(), translations);
@@ -1126,13 +1120,14 @@ fn run_capture_loop(
 /// Point the recogniser's restricted detection at the languages the policy
 /// now names. No model reload is involved — `transcribe` reads the set per
 /// decode — which is what lets this happen mid-recording.
-fn sync_langs(ui: &Ui, engines: &mut Engines, policy: &LanguagePolicy, notices: &mut Notices) {
-    if policy.spoken == engines.spoken {
+fn sync_langs(ui: &Ui, models: &Models, policy: &LanguagePolicy, notices: &mut Notices) {
+    let models = &mut *models.borrow_mut();
+    if policy.spoken == models.spoken {
         return;
     }
-    let notice = match engines.engine.set_allowed_langs(&policy.spoken) {
+    let notice = match models.engine.set_allowed_langs(&policy.spoken) {
         Ok(()) => {
-            engines.spoken = policy.spoken.clone();
+            models.spoken = policy.spoken.clone();
             None
         }
         // The old set stays in force; the session keeps running in it rather
@@ -1455,6 +1450,21 @@ mod tests {
         assert_eq!(trail.nanos_at(&mut times, 0, RATE), None);
     }
 
+    /// Recognises nothing. These tests drive `drain` and the timeline, which
+    /// happen before any decode — and a stub is only possible because the
+    /// lane holds a [`Recognizer`] rather than a loaded model.
+    struct NoRecognizer;
+
+    impl Recognizer for NoRecognizer {
+        fn push_audio(&mut self, _samples: &[f32]) {}
+        fn step(&mut self, _lang: Option<&str>) -> anyhow::Result<Option<StepOutput>> {
+            Ok(None)
+        }
+        fn finish(&mut self, _lang: Option<&str>) -> anyhow::Result<Option<StepOutput>> {
+            Ok(None)
+        }
+    }
+
     /// A LaneRuntime over hand-fed rings, for driving `drain` directly.
     fn test_lane() -> (
         rtrb::Producer<f32>,
@@ -1471,7 +1481,7 @@ mod tests {
             dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             error: Arc::new(Mutex::new(None)),
         };
-        let lane = LaneRuntime::new(Lane::Mic, session).expect("48 kHz lane");
+        let lane = LaneRuntime::new(Lane::Mic, session, Box::new(NoRecognizer)).expect("48 kHz lane");
         (audio_tx, anchor_tx, lane)
     }
 

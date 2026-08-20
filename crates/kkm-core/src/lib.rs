@@ -41,6 +41,33 @@ pub trait AsrEngine: Send {
     fn transcribe(&mut self, samples: &[f32], lang: Option<&str>) -> anyhow::Result<Hypothesis>;
 }
 
+/// One lane's recognition, end to end: audio in, committed and volatile text
+/// out. This is the seam the pipeline chooses an ASR at.
+///
+/// [`AsrEngine`] sits *below* this one. It is how an engine that can only
+/// transcribe a window at a time — Whisper — is driven, and the window, the
+/// slide and the agreement that turn that into a stream are the price of
+/// that limitation. An engine that streams natively pays none of it, so
+/// none of it appears here: an implementation may hold a window, or may
+/// simply forward audio to a model that keeps its own state.
+///
+/// Implementations are per lane, but the model behind them need not be:
+/// two lanes sharing one loaded Whisper is the difference between 1GB and
+/// two of them.
+pub trait Recognizer {
+    /// Captured audio in order, 16 kHz mono f32.
+    fn push_audio(&mut self, samples: &[f32]);
+
+    /// Advance as far as the audio pushed so far allows. `None` means there
+    /// was nothing to do yet. `lang` pins the spoken language for this step;
+    /// `None` leaves the choice to the implementation.
+    fn step(&mut self, lang: Option<&str>) -> anyhow::Result<Option<scheduler::StepOutput>>;
+
+    /// Capture stopped: commit whatever is still pending, and reset so the
+    /// same recogniser can serve the next session.
+    fn finish(&mut self, lang: Option<&str>) -> anyhow::Result<Option<scheduler::StepOutput>>;
+}
+
 /// Voice activity detection over one window of 16 kHz mono audio.
 ///
 /// Like [`AsrEngine`], implementations run on the decode thread.
