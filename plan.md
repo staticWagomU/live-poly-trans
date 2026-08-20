@@ -62,7 +62,8 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 - [x] モデル管理（`kkm-core::models`）: ASR・VAD・翻訳LLMを共通の探索順（env override → アプリデータ → チェックアウトの`models/`）で解決。ダウンロードUIは後続
 - [x] finalイベント→翻訳→UIの確定文に訳文を後付け表示 — 発話にID採番、`translation`イベントでID照合。`transcript.jsonl`は`{"type":"utterance"|"translation"}`の2種
 - [x] 言語設定: **Main/Sub廃止**。「話される言語（最大2）」と「翻訳先（なし可）」を分離し、相互翻訳フラグを追加（`mockups/feature-language-picker.html`案A、設計は`plans/step2-translation.md`）。録音中の変更はモデル再ロードなしで次の発話から反映
-- [ ] 実発話での確認（`./scripts/build-app.sh --open`）
+- [x] 実発話での確認（2026-08-20, `Kikimimic.app`）— 確定文の下に訳文が後付けで並ぶことを確認。
+      cdylibのC ABIを`kkm_translate_*`に改名した後の初回実行でもあり、dlopenが通ることも兼ねて確認した
 - 将来: Ollama（HTTP）/ Codex・Claude Code（CLIサブプロセス）/ DeepL（HTTP）を`Translator`実装として追加
 
 ### Step 3: スピーカーレーン
