@@ -12,6 +12,9 @@ license.workspace = true
 default = ["asr", "llm"]
 asr = ["dep:whisper-rs", "dep:kkm-whisper", "dep:cpal"]
 llm = ["dep:llama-cpp-2"]
+# transcribe.cpp vendors a third ggml, so it is exclusive with `asr` for the
+# same reason `asr` and `llm` are: one binary, one ggml.
+parakeet = ["dep:transcribe-cpp"]
 
 [dependencies]
 kkm-core = { path = "../kkm-core" }
@@ -19,6 +22,7 @@ kkm-whisper = { path = "../kkm-whisper", optional = true }
 anyhow = "1"
 whisper-rs = { version = "0.16.0", features = ["metal"], optional = true }
 llama-cpp-2 = { version = "0.1.154", features = ["metal"], optional = true }
+transcribe-cpp = { version = "0.2.1", optional = true }
 cpal = { version = "0.18.1", optional = true }
 hound = "3.5.1"
 libc = "0.2.189"
@@ -52,3 +56,10 @@ required-features = ["asr"]
 name = "cdylib-check"
 path = "src/bin/cdylib_check.rs"
 required-features = ["asr"]
+
+# Build with --no-default-features --features parakeet: transcribe.cpp's ggml
+# must not meet whisper-rs's or llama's in one binary (ADR-153805).
+[[bin]]
+name = "nemotron-check"
+path = "src/bin/nemotron_check.rs"
+required-features = ["parakeet"]

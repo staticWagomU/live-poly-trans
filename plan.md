@@ -99,6 +99,30 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 ### Step 5: 話者分離（SHOULD）
 
 - [ ] 録音ファイルへのポストプロセス話者分離（pyannote / WhisperX等を検証して選定）
+      ※ `~/.cache/huggingface/hub` に `pyannote/speaker-diarization-community-1` が既にある
+
+### Step 6: ASRエンジンの複線化（Nemotron Streaming）
+
+Whisper一本から、**複数のASRモデルを選べる**構成にする。最初の追加候補が
+NVIDIA Nemotron Streaming 3.5（`parakeet` RNN-T）で、ランタイムは
+[transcribe.cpp](https://github.com/handy-computer/transcribe.cpp)（`transcribe-cpp` 0.2.1）。
+
+実測は [docs/nemotron-spike-results.md](docs/nemotron-spike-results.md)（2026-08-20, M4 Pro）。
+
+- [x] スパイク: 実録音でレイテンシー・メモリ・精度を計測 — `crates/spike/src/bin/nemotron_check.rs`。
+      チャンク処理 平均8ms（リアルタイムの約36倍）、確定の遅れ 平均150ms（予算1500ms）、
+      RSS 980MB（Whisper 1.1GBより低い）。精度はVAD無しの不利な条件でもほぼ互角で、
+      **Whisperが無音区間(-55dBFS)で "Thank you." を幻覚していたことが判明**
+- [ ] 決める: 確定を誰が持つか（`CommitPolicy::Auto` のstable-prefix vs 自前のLocalAgreement）。
+      RNN-Tはネイティブにストリーミングするので、擬似ストリーミングの機構は要らない
+- [ ] 決める: whisper-rsと併存させるか、ASRごとtranscribe.cppに寄せるか。
+      transcribe.cppはWhisperも動かせるので、寄せればggmlは3つでなく2つに減る。
+      併存ならcdylib＋dlopenでの隔離が必須（ADR-153805と同じ理由）
+- [ ] 決める: VADの出所。現在のSilero VADはwhisper.cpp由来なので、whisper-rsを外すと消える
+- [ ] 発話境界の供給: `committed`は区切りの無い連結テキスト。`Utterance{text,start_ms,end_ms}`に落とす方法
+- [ ] 言語コードの写像: `LanguagePolicy`のISO 2文字 → モデルのロケール（`ja`は不可、`ja-JP`）
+- [ ] モデル探索順にHFキャッシュ（`~/.cache/huggingface/hub`）を追加 — Handyと共有できる
+- [ ] 上記が固まった時点でADR化
 
 ## v1から流用候補のファイル
 
