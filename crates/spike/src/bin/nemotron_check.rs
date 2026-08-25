@@ -59,11 +59,15 @@ fn main() -> Result<()> {
         .unwrap_or(120);
     pcm.truncate(max_secs * TARGET_RATE as usize);
     let audio_ms = pcm.len() as u64 * 1000 / TARGET_RATE as u64;
-    println!("       {:.1}s at {}Hz mono", audio_ms as f64 / 1000.0, TARGET_RATE);
+    println!(
+        "       {:.1}s at {}Hz mono",
+        audio_ms as f64 / 1000.0,
+        TARGET_RATE
+    );
 
     let t0 = Instant::now();
-    let model = Model::load(&model_path)
-        .with_context(|| format!("loading {}", model_path.display()))?;
+    let model =
+        Model::load(&model_path).with_context(|| format!("loading {}", model_path.display()))?;
     let mut session = model.session()?;
     println!(
         "load:  {:?}  arch={} variant={} backend={}",
@@ -84,10 +88,7 @@ fn main() -> Result<()> {
         commit_policy: CommitPolicy::Auto,
         ..StreamOptions::default()
     };
-    println!(
-        "lang:  {}",
-        lang.as_deref().unwrap_or("(detect)")
-    );
+    println!("lang:  {}", lang.as_deref().unwrap_or("(detect)"));
 
     let chunk = chunk_ms * TARGET_RATE as usize / 1000;
     let mut stream = session.stream(&run, &stream_opts)?;
@@ -160,11 +161,13 @@ fn main() -> Result<()> {
 /// The newest session's mic lane. Real captured speech beats a clean sample:
 /// the numbers only mean something on the audio the app actually gets.
 fn newest_mic_wav() -> Result<PathBuf> {
-    let base = std::env::var("KKM_RECORD_DIR").map(PathBuf::from).unwrap_or_else(|_| {
-        PathBuf::from(std::env::var("HOME").unwrap_or_default())
-            .join("Music")
-            .join("kikimimic")
-    });
+    let base = std::env::var("KKM_RECORD_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| {
+            PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                .join("Music")
+                .join("kikimimic")
+        });
     let mut sessions: Vec<PathBuf> = std::fs::read_dir(&base)
         .with_context(|| format!("no recordings under {}", base.display()))?
         .flatten()

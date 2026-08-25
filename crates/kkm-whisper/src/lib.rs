@@ -238,10 +238,7 @@ impl kkm_core::Recognizer for WhisperRecognizer {
         self.scheduler.push_audio(samples);
     }
 
-    fn step(
-        &mut self,
-        lang: Option<&str>,
-    ) -> Result<Option<kkm_core::scheduler::StepOutput>> {
+    fn step(&mut self, lang: Option<&str>) -> Result<Option<kkm_core::scheduler::StepOutput>> {
         // Borrowed for the decode only. Nothing else on this thread runs
         // during it, and nothing holds the models across calls.
         let models = &mut *self.models.borrow_mut();
@@ -249,10 +246,7 @@ impl kkm_core::Recognizer for WhisperRecognizer {
             .step(&mut models.engine, &mut models.vad, lang)
     }
 
-    fn finish(
-        &mut self,
-        lang: Option<&str>,
-    ) -> Result<Option<kkm_core::scheduler::StepOutput>> {
+    fn finish(&mut self, lang: Option<&str>) -> Result<Option<kkm_core::scheduler::StepOutput>> {
         let models = &mut *self.models.borrow_mut();
         self.scheduler
             .finish(&mut models.engine, &mut models.vad, lang)

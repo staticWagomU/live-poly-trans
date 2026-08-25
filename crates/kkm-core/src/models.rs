@@ -116,12 +116,17 @@ mod tests {
         let found = manager()
             .resolve_with(Model::Asr, no_env, |p| p.starts_with("/repo"))
             .unwrap();
-        assert_eq!(found, PathBuf::from("/repo/models/ggml-large-v3-turbo-q8_0.bin"));
+        assert_eq!(
+            found,
+            PathBuf::from("/repo/models/ggml-large-v3-turbo-q8_0.bin")
+        );
     }
 
     #[test]
     fn a_downloaded_model_shadows_the_checkouts_copy() {
-        let found = manager().resolve_with(Model::Vad, no_env, |_| true).unwrap();
+        let found = manager()
+            .resolve_with(Model::Vad, no_env, |_| true)
+            .unwrap();
         assert_eq!(found, PathBuf::from("/data/ggml-silero-v5.1.2.bin"));
     }
 

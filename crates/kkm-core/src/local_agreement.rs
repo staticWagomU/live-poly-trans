@@ -78,10 +78,7 @@ impl LocalAgreement {
 }
 
 fn common_prefix_chars(a: &str, b: &str) -> usize {
-    a.chars()
-        .zip(b.chars())
-        .take_while(|(x, y)| x == y)
-        .count()
+    a.chars().zip(b.chars()).take_while(|(x, y)| x == y).count()
 }
 
 #[cfg(test)]
@@ -132,8 +129,8 @@ mod tests {
         let mut la = LocalAgreement::new();
         la.feed("こんにちは、せ");
         la.feed("こんにちは、世界"); // committed: こんにちは、
-        // Longer hypothesis that contradicts the committed prefix: splicing
-        // its tail after the committed text would garble the display.
+                                     // Longer hypothesis that contradicts the committed prefix: splicing
+                                     // its tail after the committed text would garble the display.
         let out = la.feed("今日は天気が良いですね");
         assert_eq!(out.committed_delta, "");
         assert_eq!(out.volatile, "");

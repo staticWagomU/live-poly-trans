@@ -40,12 +40,11 @@ use objc2_core_audio::{
     kAudioAggregateDeviceUIDKey, kAudioDevicePropertyDeviceUID,
     kAudioHardwarePropertyDefaultOutputDevice, kAudioObjectPropertyElementMain,
     kAudioObjectPropertyScopeGlobal, kAudioObjectSystemObject, kAudioSubDeviceUIDKey,
-    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey,
-    kAudioTapPropertyFormat, AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID,
-    AudioDeviceStart, AudioDeviceStop, AudioHardwareCreateAggregateDevice,
-    AudioHardwareCreateProcessTap, AudioHardwareDestroyAggregateDevice,
-    AudioHardwareDestroyProcessTap, AudioObjectGetPropertyData, AudioObjectID,
-    AudioObjectPropertyAddress, CATapDescription,
+    kAudioSubTapDriftCompensationKey, kAudioSubTapUIDKey, kAudioTapPropertyFormat,
+    AudioDeviceCreateIOProcIDWithBlock, AudioDeviceDestroyIOProcID, AudioDeviceStart,
+    AudioDeviceStop, AudioHardwareCreateAggregateDevice, AudioHardwareCreateProcessTap,
+    AudioHardwareDestroyAggregateDevice, AudioHardwareDestroyProcessTap,
+    AudioObjectGetPropertyData, AudioObjectID, AudioObjectPropertyAddress, CATapDescription,
 };
 use objc2_core_audio_types::{AudioBufferList, AudioStreamBasicDescription, AudioTimeStamp};
 use objc2_core_foundation::CFDictionary;
@@ -127,7 +126,10 @@ fn main() -> Result<()> {
     // The TCC "System Audio Recording" prompt fires here on first run.
     let mut tap_id: AudioObjectID = 0;
     let status = unsafe { AudioHardwareCreateProcessTap(Some(&desc), &mut tap_id) };
-    check(status, "AudioHardwareCreateProcessTap (audio-capture permission?)")?;
+    check(
+        status,
+        "AudioHardwareCreateProcessTap (audio-capture permission?)",
+    )?;
     println!("tap created: AudioObjectID {tap_id}");
 
     let result = run_with_tap(&desc, tap_id, secs);
@@ -175,28 +177,42 @@ fn run_with_tap(desc: &CATapDescription, tap_id: AudioObjectID, secs: u64) -> Re
     let sub_tap = NSMutableDictionary::<NSString, AnyObject>::new();
     let taps = unsafe {
         set(&sub_tap, kAudioSubTapUIDKey, &tap_uid);
-        set(&sub_tap, kAudioSubTapDriftCompensationKey, &NSNumber::new_bool(true));
+        set(
+            &sub_tap,
+            kAudioSubTapDriftCompensationKey,
+            &NSNumber::new_bool(true),
+        );
         NSArray::from_retained_slice(&[sub_tap])
     };
     let agg_desc = NSMutableDictionary::<NSString, AnyObject>::new();
     unsafe {
-        set(&agg_desc, kAudioAggregateDeviceNameKey, &NSString::from_str("kkm-tap-check"));
+        set(
+            &agg_desc,
+            kAudioAggregateDeviceNameKey,
+            &NSString::from_str("kkm-tap-check"),
+        );
         set(
             &agg_desc,
             kAudioAggregateDeviceUIDKey,
             &NSString::from_str("dev.wagomu.kikimimic.tap-check"),
         );
-        set(&agg_desc, kAudioAggregateDeviceIsPrivateKey, &NSNumber::new_bool(true));
-        set(&agg_desc, kAudioAggregateDeviceTapAutoStartKey, &NSNumber::new_bool(true));
+        set(
+            &agg_desc,
+            kAudioAggregateDeviceIsPrivateKey,
+            &NSNumber::new_bool(true),
+        );
+        set(
+            &agg_desc,
+            kAudioAggregateDeviceTapAutoStartKey,
+            &NSNumber::new_bool(true),
+        );
         set(&agg_desc, kAudioAggregateDeviceMainSubDeviceKey, &out_uid);
         set(&agg_desc, kAudioAggregateDeviceSubDeviceListKey, &sub_devs);
         set(&agg_desc, kAudioAggregateDeviceTapListKey, &taps);
     }
-    let cf_desc: &CFDictionary =
-        unsafe { &*(Retained::as_ptr(&agg_desc) as *const CFDictionary) };
+    let cf_desc: &CFDictionary = unsafe { &*(Retained::as_ptr(&agg_desc) as *const CFDictionary) };
     let mut agg_id: AudioObjectID = 0;
-    let status =
-        unsafe { AudioHardwareCreateAggregateDevice(cf_desc, NonNull::from(&mut agg_id)) };
+    let status = unsafe { AudioHardwareCreateAggregateDevice(cf_desc, NonNull::from(&mut agg_id)) };
     check(status, "AudioHardwareCreateAggregateDevice")?;
     println!("aggregate device created: AudioObjectID {agg_id}");
     std::thread::sleep(Duration::from_millis(300)); // let composition settle
@@ -300,8 +316,11 @@ fn capture(agg_id: AudioObjectID, asbd: &AudioStreamBasicDescription, secs: u64)
     };
     println!("{verdict}");
     // `open`-launched runs have nowhere to print, so leave the verdict on disk.
-    std::fs::write(REPORT_PATH, format!("{stats}\nwrote {WAV_PATH}\n{verdict}\n"))
-        .context("write report")?;
+    std::fs::write(
+        REPORT_PATH,
+        format!("{stats}\nwrote {WAV_PATH}\n{verdict}\n"),
+    )
+    .context("write report")?;
     anyhow::ensure!(!verdict.starts_with("FAIL"), "{verdict}");
     Ok(())
 }

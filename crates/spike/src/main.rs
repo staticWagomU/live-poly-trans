@@ -122,7 +122,10 @@ fn run_asr() -> Result<()> {
 
         // Full-file decode: accuracy reference + RTF.
         let (text, wall) = whisper.decode(&audio, lang)?;
-        println!("full decode: {wall} ms (RTF {:.2})", wall as f64 / 1000.0 / dur_s);
+        println!(
+            "full decode: {wall} ms (RTF {:.2})",
+            wall as f64 / 1000.0 / dur_s
+        );
         println!("text: {text}");
 
         // Pseudo-streaming: every STEP_SECS, re-decode the last WINDOW_SECS.
@@ -139,7 +142,10 @@ fn run_asr() -> Result<()> {
             if first_text_at.is_none() && !text.is_empty() {
                 first_text_at = Some((end_s, wall));
             }
-            println!("  t={end_s:>2}s window={:>5.1}s decode={wall:>5} ms", (end - start) as f64 / SAMPLE_RATE as f64);
+            println!(
+                "  t={end_s:>2}s window={:>5.1}s decode={wall:>5} ms",
+                (end - start) as f64 / SAMPLE_RATE as f64
+            );
         }
         if let Some((t, wall)) = first_text_at {
             println!("first non-empty partial: audio_t={t}s + decode {wall} ms");
@@ -162,8 +168,8 @@ impl Llm {
     fn load() -> Result<Self> {
         let t = Instant::now();
         let backend = llama_cpp_2::llama_backend::LlamaBackend::init()?;
-        let params = llama_cpp_2::model::params::LlamaModelParams::default()
-            .with_n_gpu_layers(1_000_000);
+        let params =
+            llama_cpp_2::model::params::LlamaModelParams::default().with_n_gpu_layers(1_000_000);
         let model = llama_cpp_2::model::LlamaModel::load_from_file(&backend, LLM_MODEL, &params)
             .context("load llm model")?;
         println!("llm model loaded in {} ms", t.elapsed().as_millis());
@@ -234,11 +240,17 @@ fn run_translate() -> Result<()> {
     let llm = Llm::load()?;
     for s in EN_SENTENCES {
         let (out, wall, gen) = llm.translate(s, "English", "Japanese")?;
-        println!("en→ja {wall:>5} ms {gen:>3} tok ({:.1} tok/s): {out}", gen as f64 / (wall as f64 / 1000.0));
+        println!(
+            "en→ja {wall:>5} ms {gen:>3} tok ({:.1} tok/s): {out}",
+            gen as f64 / (wall as f64 / 1000.0)
+        );
     }
     for s in JA_SENTENCES {
         let (out, wall, gen) = llm.translate(s, "Japanese", "English")?;
-        println!("ja→en {wall:>5} ms {gen:>3} tok ({:.1} tok/s): {out}", gen as f64 / (wall as f64 / 1000.0));
+        println!(
+            "ja→en {wall:>5} ms {gen:>3} tok ({:.1} tok/s): {out}",
+            gen as f64 / (wall as f64 / 1000.0)
+        );
     }
     Ok(())
 }

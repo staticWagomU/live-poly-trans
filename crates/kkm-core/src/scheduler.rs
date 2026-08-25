@@ -115,13 +115,18 @@ impl StreamScheduler {
     /// The language to stamp on an utterance ending now: what the caller
     /// pinned, else what this window's detection settled on.
     fn utterance_lang(&self, lang: Option<&str>) -> Option<String> {
-        lang.map(str::to_string).or_else(|| self.window_lang.clone())
+        lang.map(str::to_string)
+            .or_else(|| self.window_lang.clone())
     }
 
     /// Commit the agreement's pending tail and take the finished utterance,
     /// which ended at `end_ms` (stream time). Returns (newly committed tail,
     /// whole utterance if any).
-    fn finalize_utterance(&mut self, end_ms: u64, lang: Option<&str>) -> (String, Option<Utterance>) {
+    fn finalize_utterance(
+        &mut self,
+        end_ms: u64,
+        lang: Option<&str>,
+    ) -> (String, Option<Utterance>) {
         let tail = self.agreement.flush();
         self.utterance_acc.push_str(&tail);
         let full = std::mem::take(&mut self.utterance_acc);
@@ -234,8 +239,10 @@ impl StreamScheduler {
             // The hypothesis is as stable as it will get: commit its tail
             // and hand the whole utterance downstream.
             let spoken_in = self.utterance_lang(lang);
-            let (tail, full) = self
-                .finalize_utterance(self.window_start_ms() + hypothesis.end_ms, spoken_in.as_deref());
+            let (tail, full) = self.finalize_utterance(
+                self.window_start_ms() + hypothesis.end_ms,
+                spoken_in.as_deref(),
+            );
             committed_delta.push_str(&tail);
             volatile.clear();
             utterance_final = full;
@@ -461,10 +468,8 @@ mod tests {
         // The translation lane decides direction from this: a sentence
         // already in the reader's language must not be translated back into
         // it (`language::LanguagePolicy::target_for`).
-        let mut engine = FakeEngine::scripted_with_langs(&[
-            ("Hello", Some("en")),
-            ("Hello world", Some("en")),
-        ]);
+        let mut engine =
+            FakeEngine::scripted_with_langs(&[("Hello", Some("en")), ("Hello world", Some("en"))]);
         let mut vad = AmplitudeVad;
         let mut sched = StreamScheduler::new();
         sched.push_audio(&seconds(2));

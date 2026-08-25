@@ -129,15 +129,15 @@ pub unsafe extern "C" fn kkm_translate(
     let sentence = CStr::from_ptr(sentence).to_string_lossy();
     let source = CStr::from_ptr(source_lang).to_string_lossy();
     let target = CStr::from_ptr(target_lang).to_string_lossy();
-    catch_unwind(AssertUnwindSafe(
-        || match translate(translator, &sentence, &source, &target) {
+    catch_unwind(AssertUnwindSafe(|| {
+        match translate(translator, &sentence, &source, &target) {
             Ok(out) => CString::new(out).map_or(std::ptr::null_mut(), CString::into_raw),
             Err(e) => {
                 eprintln!("kkm-translate: {e:#}");
                 std::ptr::null_mut()
             }
-        },
-    ))
+        }
+    }))
     .unwrap_or_else(|_| {
         eprintln!("kkm-translate: panicked");
         std::ptr::null_mut()

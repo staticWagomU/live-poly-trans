@@ -165,7 +165,12 @@ impl Drop for GgmlTranslator {
 }
 
 impl Translator for GgmlTranslator {
-    fn translate(&mut self, sentence: &str, source_lang: &str, target_lang: &str) -> Result<String> {
+    fn translate(
+        &mut self,
+        sentence: &str,
+        source_lang: &str,
+        target_lang: &str,
+    ) -> Result<String> {
         let sentence = CString::new(sentence).context("sentence contains a NUL byte")?;
         let source = CString::new(source_lang)?;
         let target = CString::new(target_lang)?;
@@ -216,7 +221,10 @@ mod tests {
         // release while `tauri dev` rebuilds the shell in debug.
         let candidates = dylib_candidates(Path::new("/repo/target/debug/kikimimic"));
         assert!(
-            candidates.contains(&PathBuf::from(format!("/repo/target/release/{}", dylib_name()))),
+            candidates.contains(&PathBuf::from(format!(
+                "/repo/target/release/{}",
+                dylib_name()
+            ))),
             "{candidates:?}"
         );
     }

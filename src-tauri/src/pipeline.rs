@@ -169,7 +169,10 @@ fn models(app: &AppHandle) -> ModelManager {
     if let Ok(dir) = app.path().app_data_dir() {
         dirs.push(dir.join("models"));
     }
-    dirs.push(PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/../models")));
+    dirs.push(PathBuf::from(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../models"
+    )));
     ModelManager::new(dirs)
 }
 
@@ -259,7 +262,11 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
     }
 }
 
-fn load_engines(ui: &Ui, engines: &mut Option<Models>, spoken: &[String]) -> anyhow::Result<Models> {
+fn load_engines(
+    ui: &Ui,
+    engines: &mut Option<Models>,
+    spoken: &[String],
+) -> anyhow::Result<Models> {
     if engines.is_none() {
         emit_status(ui, "loading", None);
         let paths = models(&ui.app);
@@ -641,11 +648,7 @@ impl LaneRuntime {
 
     /// One poll of this lane: drain captured audio, then decode if its
     /// cadence came due.
-    fn tick(
-        &mut self,
-        poll: &mut Poll<'_>,
-        lang: Option<&str>,
-    ) -> anyhow::Result<()> {
+    fn tick(&mut self, poll: &mut Poll<'_>, lang: Option<&str>) -> anyhow::Result<()> {
         self.pump(poll)?;
         if Instant::now() < self.next_step {
             return Ok(());
@@ -710,11 +713,7 @@ impl LaneRuntime {
 
     /// Stop: recover the audio still in flight (ring buffer → resampler
     /// tail → whatever the recogniser has not reached) before flushing the text.
-    fn finish(
-        &mut self,
-        poll: &mut Poll<'_>,
-        lang: Option<&str>,
-    ) -> anyhow::Result<()> {
+    fn finish(&mut self, poll: &mut Poll<'_>, lang: Option<&str>) -> anyhow::Result<()> {
         self.pump(poll)?;
         let tail = self.resampler.flush()?;
         self.stream_samples += tail.len();
@@ -1208,7 +1207,13 @@ fn drain_translations(
     mut recorder: Option<&mut record::SessionRecorder>,
     translations: &mut Translations,
 ) {
-    collect_translations(ui, notices, recorder.as_deref_mut(), translations, "stopping");
+    collect_translations(
+        ui,
+        notices,
+        recorder.as_deref_mut(),
+        translations,
+        "stopping",
+    );
     if translations.outstanding == 0 {
         return;
     }
@@ -1481,7 +1486,8 @@ mod tests {
             dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             error: Arc::new(Mutex::new(None)),
         };
-        let lane = LaneRuntime::new(Lane::Mic, session, Box::new(NoRecognizer)).expect("48 kHz lane");
+        let lane =
+            LaneRuntime::new(Lane::Mic, session, Box::new(NoRecognizer)).expect("48 kHz lane");
         (audio_tx, anchor_tx, lane)
     }
 

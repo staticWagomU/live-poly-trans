@@ -79,6 +79,10 @@ pub trait SpeechDetector: Send {
 
 /// Sentence-level translator (queued, sequential; never blocks recognition).
 pub trait Translator: Send {
-    fn translate(&mut self, sentence: &str, source_lang: &str, target_lang: &str)
-        -> anyhow::Result<String>;
+    fn translate(
+        &mut self,
+        sentence: &str,
+        source_lang: &str,
+        target_lang: &str,
+    ) -> anyhow::Result<String>;
 }

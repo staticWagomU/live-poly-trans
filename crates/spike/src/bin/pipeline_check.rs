@@ -28,8 +28,8 @@ fn main() -> anyhow::Result<()> {
         .collect();
     eprintln!("loading {model} … (langs {allowed:?})");
     let mut engine = kkm_whisper::WhisperEngine::load(&model, &allowed)?;
-    let vad_model = std::env::var("KKM_VAD_MODEL")
-        .unwrap_or_else(|_| "models/ggml-silero-v5.1.2.bin".into());
+    let vad_model =
+        std::env::var("KKM_VAD_MODEL").unwrap_or_else(|_| "models/ggml-silero-v5.1.2.bin".into());
     let mut vad = kkm_whisper::SileroVad::load(&vad_model)?;
     eprintln!("capturing {secs}s from default input (lang={lang:?})");
 
@@ -52,9 +52,8 @@ fn main() -> anyhow::Result<()> {
         std::thread::sleep(Duration::from_secs(1));
         {
             let mut queued = pending.lock().unwrap();
-            let rms = (queued.iter().map(|s| s * s).sum::<f32>()
-                / queued.len().max(1) as f32)
-                .sqrt();
+            let rms =
+                (queued.iter().map(|s| s * s).sum::<f32>() / queued.len().max(1) as f32).sqrt();
             eprintln!("queued {} samples, rms {rms:.5}", queued.len());
             scheduler.push_audio(&queued);
             queued.clear();

@@ -59,7 +59,10 @@ impl LanguagePolicy {
         if !self.mutual {
             return None;
         }
-        self.spoken.iter().map(String::as_str).find(|l| *l != target)
+        self.spoken
+            .iter()
+            .map(String::as_str)
+            .find(|l| *l != target)
     }
 }
 
