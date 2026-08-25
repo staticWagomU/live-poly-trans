@@ -114,15 +114,17 @@ def main():
     print(f"session: {session}\n")
 
     audio = {}
+    floors = {}
     for lane in LANES:
         path = session / f"{lane}.wav"
         if not path.exists():
             sys.exit(f"missing {path}")
         rate, samples = read_wav(path)
         audio[lane] = (rate, samples)
+        floors[lane] = noise_floor(samples, rate)
         print(f"{lane + '.wav':>12}  {len(samples)/rate:7.2f}s  "
               f"peak {max(abs(s) for s in samples)/32767:.3f}  "
-              f"rms {rms(samples):.4f}  floor {noise_floor(samples, rate):.4f}")
+              f"rms {rms(samples):.4f}  floor {floors[lane]:.4f}")
 
     lengths = {lane: len(audio[lane][1]) for lane in LANES}
     if len(set(lengths.values())) == 1:
@@ -150,7 +152,7 @@ def main():
     misaligned = 0
     for u in utterances:
         rate, samples = audio[u["lane"]]
-        floor = noise_floor(samples, rate)
+        floor = floors[u["lane"]]
         span = samples[int(u["startMs"] * rate / 1000):int(u["endMs"] * rate / 1000)]
         level = rms(span)
         ratio = level / floor if floor else float("inf")
