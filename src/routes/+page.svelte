@@ -39,6 +39,7 @@
   type Recording = {
     name: string;
     dir: string;
+    title: string | null;
     startedAtMs: number | null;
     durationMs: number;
     lanes: Lane[];
@@ -48,6 +49,8 @@
   /// A past session, read back from its transcript.
   type Session = {
     name: string;
+    dir: string;
+    title: string | null;
     startedAtMs: number | null;
     durationMs: number;
     lanes: Lane[];
@@ -97,6 +100,9 @@
   let search = $state('');
   let langOpen = $state(false);
   let actionsOpen = $state(false);
+  let editingTitle = $state(false);
+  let titleDraft = $state('');
+  let savingTitle = $state(false);
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -256,6 +262,7 @@
   // ── Session identity ─────────────────────────────────────────────────
   const sessionTitle = $derived.by(() => {
     if (!opened) return '新しい録音';
+    if (opened.title) return opened.title;
     if (opened.startedAtMs === null) return opened.name;
     const d = new Date(opened.startedAtMs);
     return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${timeOfDay(opened.startedAtMs)}`;
@@ -310,6 +317,7 @@
   async function openRecording(recording: Recording) {
     try {
       opened = await invoke<Session>('read_recording', { dir: recording.dir });
+      editingTitle = false;
       follow = false;
       view = 'session';
     } catch (error) {
@@ -319,9 +327,50 @@
 
   function goHome() {
     view = 'home';
+    editingTitle = false;
     langOpen = false;
     actionsOpen = false;
     void refresh();
+  }
+
+  function beginTitleEdit() {
+    if (!opened) return;
+    titleDraft = sessionTitle;
+    editingTitle = true;
+    actionsOpen = false;
+  }
+
+  function cancelTitleEdit() {
+    editingTitle = false;
+    titleDraft = '';
+  }
+
+  function focusTitleInput(input: HTMLInputElement) {
+    input.focus();
+    input.select();
+  }
+
+  async function saveTitle() {
+    if (!opened || savingTitle) return;
+    const title = titleDraft.trim();
+    if (!title) {
+      showToast('タイトルを入力してください');
+      return;
+    }
+
+    savingTitle = true;
+    try {
+      const saved = await invoke<string>('set_recording_title', { dir: opened.dir, title });
+      opened.title = saved;
+      const listed = recordings.find((recording) => recording.dir === opened?.dir);
+      if (listed) listed.title = saved;
+      cancelTitleEdit();
+      showToast('タイトルを変更しました');
+    } catch (error) {
+      showToast(`タイトルを変更できませんでした: ${error}`);
+    } finally {
+      savingTitle = false;
+    }
   }
 
   async function applyLanguages(next: Languages) {
@@ -369,7 +418,8 @@
     const term = search.trim().toLocaleLowerCase();
     const groups: { label: string; items: Recording[] }[] = [];
     for (const recording of recordings) {
-      const haystack = `${recording.snippet} ${recording.name}`.toLocaleLowerCase();
+      const haystack =
+        `${recording.title ?? ''} ${recording.snippet} ${recording.name}`.toLocaleLowerCase();
       if (term && !haystack.includes(term)) continue;
       const label = dayGroup(recording.startedAtMs);
       const last = groups.at(-1);
@@ -384,6 +434,7 @@
   /// A recording with nothing recognised still has to be tellable apart from
   /// the next one, so it falls back to when it was made.
   const rowTitle = (recording: Recording) =>
+    recording.title ||
     recording.snippet ||
     (recording.startedAtMs === null ? recording.name : `${timeOfDay(recording.startedAtMs)} の録音`);
 
@@ -521,7 +572,42 @@
     <section class="session-view" aria-label={sessionTitle}>
       <div class="session-head">
         <div class="session-identity">
-          <h1>{sessionTitle}</h1>
+          {#if opened && editingTitle}
+            <form
+              class="title-editor"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void saveTitle();
+              }}
+            >
+              <input
+                type="text"
+                bind:value={titleDraft}
+                maxlength="100"
+                aria-label="録音タイトル"
+                disabled={savingTitle}
+                onkeydown={(event) => {
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  cancelTitleEdit();
+                }}
+                {@attach focusTitleInput}
+              />
+              <button
+                class="title-editor-button"
+                type="button"
+                disabled={savingTitle}
+                onclick={cancelTitleEdit}>取消</button
+              >
+              <button
+                class="title-editor-button primary"
+                type="submit"
+                disabled={savingTitle || !titleDraft.trim()}>保存</button
+              >
+            </form>
+          {:else}
+            <h1>{sessionTitle}</h1>
+          {/if}
           <div class="session-meta">
             {#if opened}
               <span>{durationLabel(opened.durationMs)} · {laneSummary(opened.lanes)}</span>
@@ -581,19 +667,33 @@
             aria-label="この録音の操作"
             aria-haspopup="menu"
             aria-expanded={actionsOpen}
-            disabled={!hasTranscript}
+            disabled={!opened && !hasTranscript}
             onclick={() => (actionsOpen = !actionsOpen)}>•••</button
           >
           {#if actionsOpen}
             <div class="actions-menu" role="menu">
+              {#if opened}
+                <div class="menu-heading">録音</div>
+                <button class="menu-item" type="button" role="menuitem" onclick={beginTitleEdit}>
+                  タイトルを変更
+                </button>
+                <div class="menu-separator"></div>
+              {/if}
               <div class="menu-heading">クリップボード</div>
-              <button class="menu-item" type="button" role="menuitem" onclick={() => copy('full')}>
+              <button
+                class="menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!hasTranscript}
+                onclick={() => copy('full')}
+              >
                 全文をコピー
               </button>
               <button
                 class="menu-item"
                 type="button"
                 role="menuitem"
+                disabled={!hasTranscript}
                 onclick={() => copy('original')}
               >
                 原文のみをコピー
@@ -602,6 +702,7 @@
                 class="menu-item"
                 type="button"
                 role="menuitem"
+                disabled={!hasTranscript}
                 onclick={() => copy('translation')}
               >
                 翻訳のみをコピー
@@ -996,6 +1097,42 @@
     font-size: 20px;
     line-height: 1.25;
   }
+  .title-editor {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .title-editor input {
+    width: min(420px, 55vw);
+    height: 30px;
+    padding: 0 9px;
+    border: 1px solid rgba(0, 104, 216, 0.55);
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(0, 104, 216, 0.12);
+    font-size: 16px;
+    font-weight: 650;
+  }
+  .title-editor-button {
+    min-height: 28px;
+    padding: 0 8px;
+    border-radius: 6px;
+    color: var(--accent);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .title-editor-button:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+  .title-editor-button.primary {
+    color: #fff;
+    background: var(--accent);
+  }
+  .title-editor-button.primary:hover:not(:disabled) {
+    background: #005bbd;
+  }
   .session-meta {
     display: flex;
     align-items: center;
@@ -1158,6 +1295,15 @@
   .menu-item:hover {
     color: #fff;
     background: var(--accent);
+  }
+  .menu-item:disabled {
+    color: var(--muted);
+    background: transparent;
+  }
+  .menu-separator {
+    height: 1px;
+    margin: 5px 8px;
+    background: var(--separator);
   }
 
   /* ── Transcript ──────────────────────────────────────────────────── */
@@ -1346,6 +1492,12 @@
     }
     .session-head {
       padding: 18px 18px 12px;
+    }
+    .title-editor {
+      flex-wrap: wrap;
+    }
+    .title-editor input {
+      width: 100%;
     }
     .transcript {
       padding-inline: 18px;

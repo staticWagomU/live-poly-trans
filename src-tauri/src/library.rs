@@ -7,10 +7,18 @@
 
 use std::path::{Path, PathBuf};
 
+use anyhow::Context;
 use chrono::{NaiveDateTime, TimeZone};
 
 /// The lanes a session may have, in the order the list names them.
 const LANES: [&str; 2] = ["mic", "speaker"];
+const METADATA_FILE: &str = "metadata.json";
+const MAX_TITLE_CHARS: usize = 100;
+
+#[derive(serde::Deserialize, serde::Serialize)]
+struct Metadata {
+    title: String,
+}
 
 /// One recorded session, as the library list needs it.
 #[derive(Debug, PartialEq, serde::Serialize)]
@@ -20,6 +28,9 @@ pub struct Recording {
     /// same second.
     pub name: String,
     pub dir: String,
+    /// A user-supplied display name. The directory name remains the stable
+    /// recording identifier and still carries its start time.
+    pub title: Option<String>,
     /// When it started, from the name's wall clock read as local time.
     /// `None` for a directory that does not follow the naming, which is still
     /// listed — it just cannot be placed on the calendar.
@@ -81,12 +92,63 @@ fn read_session(dir: &Path) -> Option<Recording> {
     Some(Recording {
         started_at_ms: started_at_ms(&name),
         dir: dir.display().to_string(),
+        title: read_title(dir),
         name,
         duration_ms,
         lanes,
         snippet,
         utterances,
     })
+}
+
+fn read_title(dir: &Path) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(METADATA_FILE)).ok()?;
+    let metadata = serde_json::from_str::<Metadata>(&text).ok()?;
+    normalize_title(&metadata.title).ok()
+}
+
+fn normalize_title(raw: &str) -> anyhow::Result<String> {
+    let title = raw.trim();
+    if title.is_empty() {
+        anyhow::bail!("title must not be empty");
+    }
+    if title.chars().count() > MAX_TITLE_CHARS {
+        anyhow::bail!("title must be at most {MAX_TITLE_CHARS} characters");
+    }
+    if title.chars().any(char::is_control) {
+        anyhow::bail!("title must not contain control characters");
+    }
+    Ok(title.to_string())
+}
+
+/// Persist a display title without renaming the session directory. `dir` must
+/// be an immediate recording child of `base`; unlike reading, this mutates the
+/// filesystem and must not accept an arbitrary path from the webview.
+pub fn set_title(base: &Path, dir: &Path, raw_title: &str) -> anyhow::Result<String> {
+    let title = normalize_title(raw_title)?;
+    let base = base
+        .canonicalize()
+        .with_context(|| format!("resolve recording base {}", base.display()))?;
+    let dir = dir
+        .canonicalize()
+        .with_context(|| format!("resolve recording {}", dir.display()))?;
+    if dir.parent() != Some(base.as_path()) || read_session(&dir).is_none() {
+        anyhow::bail!("{} is not a recording in {}", dir.display(), base.display());
+    }
+
+    let mut payload = serde_json::to_vec_pretty(&Metadata {
+        title: title.clone(),
+    })?;
+    payload.push(b'\n');
+    let target = dir.join(METADATA_FILE);
+    let temporary = dir.join(format!(".{METADATA_FILE}.tmp"));
+    std::fs::write(&temporary, payload)
+        .with_context(|| format!("write recording title {}", temporary.display()))?;
+    if let Err(error) = std::fs::rename(&temporary, &target) {
+        let _ = std::fs::remove_file(&temporary);
+        return Err(error).with_context(|| format!("save recording title {}", target.display()));
+    }
+    Ok(title)
 }
 
 /// The wall clock in the directory name, as local time. The `-2` suffix a
@@ -154,6 +216,8 @@ pub struct Line {
 #[serde(rename_all = "camelCase")]
 pub struct Session {
     pub name: String,
+    pub dir: String,
+    pub title: Option<String>,
     pub started_at_ms: Option<i64>,
     pub duration_ms: u64,
     pub lanes: Vec<String>,
@@ -167,8 +231,8 @@ pub struct Session {
 /// utterance now, its translation seconds later, the other lane in between —
 /// so reading it means joining on the id, not trusting the order.
 pub fn read(dir: &Path) -> anyhow::Result<Session> {
-    let recording = read_session(dir)
-        .ok_or_else(|| anyhow::anyhow!("{} is not a recording", dir.display()))?;
+    let recording =
+        read_session(dir).ok_or_else(|| anyhow::anyhow!("{} is not a recording", dir.display()))?;
     let text = std::fs::read_to_string(dir.join("transcript.jsonl")).unwrap_or_default();
 
     let mut lines: Vec<Line> = Vec::new();
@@ -206,6 +270,8 @@ pub fn read(dir: &Path) -> anyhow::Result<Session> {
 
     Ok(Session {
         name: recording.name,
+        dir: recording.dir,
+        title: recording.title,
         started_at_ms: recording.started_at_ms,
         duration_ms: recording.duration_ms,
         lanes: recording.lanes,
@@ -353,6 +419,61 @@ mod tests {
     }
 
     #[test]
+    fn a_custom_title_is_trimmed_and_used_by_the_list_and_session() {
+        let base = scratch("title");
+        let dir = session(&base, "20260819090503", &["mic"], 1);
+
+        assert_eq!(
+            set_title(&base, &dir, "  週次ミーティング  ").unwrap(),
+            "週次ミーティング"
+        );
+        assert_eq!(list(&base)[0].title.as_deref(), Some("週次ミーティング"));
+        assert_eq!(
+            read(&dir).unwrap().title.as_deref(),
+            Some("週次ミーティング")
+        );
+        assert_eq!(dir.file_name().unwrap(), "20260819090503");
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn invalid_metadata_does_not_hide_a_recording() {
+        let base = scratch("bad-metadata");
+        let dir = session(&base, "20260819090503", &["mic"], 1);
+        std::fs::write(dir.join(METADATA_FILE), "not json").unwrap();
+
+        let listed = list(&base);
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].title, None);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn titles_are_validated_before_writing() {
+        let base = scratch("title-validation");
+        let dir = session(&base, "20260819090503", &["mic"], 1);
+
+        assert!(set_title(&base, &dir, "   ").is_err());
+        assert!(set_title(&base, &dir, "line\nbreak").is_err());
+        assert!(set_title(&base, &dir, &"長".repeat(MAX_TITLE_CHARS + 1)).is_err());
+        assert!(!dir.join(METADATA_FILE).exists());
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_title_cannot_be_written_outside_the_recording_base() {
+        let base = scratch("title-base");
+        let outside = scratch("title-outside");
+        let dir = session(&outside, "20260819090503", &["mic"], 1);
+        std::fs::create_dir_all(&base).unwrap();
+
+        assert!(set_title(&base, &dir, "別の録音").is_err());
+        assert!(!dir.join(METADATA_FILE).exists());
+        std::fs::remove_dir_all(&base).unwrap();
+        std::fs::remove_dir_all(&outside).unwrap();
+    }
+
+    #[test]
     fn a_transcript_cut_off_mid_line_still_lists_what_it_has() {
         // A crash leaves the last line half written. Losing the session from
         // the library over it would be the worse failure.
@@ -388,10 +509,7 @@ mod tests {
         .unwrap();
 
         let read = read(&dir).unwrap();
-        assert_eq!(
-            read.lines.iter().map(|l| l.id).collect::<Vec<_>>(),
-            [1, 2]
-        );
+        assert_eq!(read.lines.iter().map(|l| l.id).collect::<Vec<_>>(), [1, 2]);
         assert_eq!(read.lines[0].lane, "mic");
         assert_eq!(read.lines[0].lang.as_deref(), Some("ja"));
         assert_eq!(read.duration_ms, 1_000);

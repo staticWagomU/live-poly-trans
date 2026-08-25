@@ -66,6 +66,18 @@ fn read_recording(dir: String) -> Result<library::Session, String> {
     library::read(std::path::Path::new(&dir)).map_err(|e| format!("{e:#}"))
 }
 
+/// Change only the title users see. The timestamped directory remains the
+/// session's stable identity and keeps its calendar placement intact.
+#[tauri::command]
+fn set_recording_title(
+    app: tauri::AppHandle,
+    dir: String,
+    title: String,
+) -> Result<String, String> {
+    let base = library::base(&app).map_err(|e| format!("{e:#}"))?;
+    library::set_title(&base, std::path::Path::new(&dir), &title).map_err(|e| format!("{e:#}"))
+}
+
 /// The language settings as the UI exchanges them. Kept here rather than
 /// derived on [`LanguagePolicy`] so the core stays free of the shell's wire
 /// format (ADR-153800).
@@ -143,7 +155,8 @@ pub fn run() {
             get_languages,
             set_languages,
             list_recordings,
-            read_recording
+            read_recording,
+            set_recording_title
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
