@@ -12,7 +12,25 @@
 #     (docs/step0-tap-results.md). Hence `open` at the end, not the binary.
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+repo_dir="$(cd "$(dirname "$0")/.." && pwd)"
+script_path="$repo_dir/scripts/build-app.sh"
+cd "$repo_dir"
+
+# Keep the documented entry point usable from an ordinary shell. The flake
+# owns the Rust and Bun versions, so enter it here instead of requiring every
+# caller to remember `nix develop -c`.
+if ! command -v cargo >/dev/null 2>&1 || ! command -v bun >/dev/null 2>&1; then
+  if [[ "${KKM_BUILD_ENV_READY:-}" == "1" ]]; then
+    echo "error: cargo and bun are unavailable inside the Nix development environment" >&2
+    exit 127
+  fi
+  if ! command -v nix >/dev/null 2>&1; then
+    echo "error: cargo or bun is unavailable, and nix is not installed" >&2
+    exit 127
+  fi
+  echo "==> entering Nix development environment"
+  exec nix develop -c env KKM_BUILD_ENV_READY=1 "$script_path" "$@"
+fi
 
 echo "==> translation backend (cdylib)"
 cargo build --release -p kkm-translate-ggml
