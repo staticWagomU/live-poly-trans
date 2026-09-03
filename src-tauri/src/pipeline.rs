@@ -11,7 +11,7 @@
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{Receiver, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -44,6 +44,76 @@ const ANCHOR_JUMP_NANOS: u64 = 30_000_000;
 pub enum Cmd {
     Start,
     Stop,
+    RespondOutputDevice { prompt_id: u64, switch_device: bool },
+}
+
+const OUTPUT_DEVICE_WINDOW: &str = "output-device-change";
+const OUTPUT_DEVICE_EVENT: &str = "output-device-prompt";
+static NEXT_OUTPUT_DEVICE_PROMPT_ID: AtomicU64 = AtomicU64::new(1);
+
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OutputDevicePrompt {
+    id: u64,
+    previous_name: String,
+    detected_name: String,
+}
+
+pub type OutputDevicePromptStore = Arc<Mutex<Option<OutputDevicePrompt>>>;
+
+pub fn new_output_device_prompt_store() -> OutputDevicePromptStore {
+    Arc::new(Mutex::new(None))
+}
+
+#[derive(Default)]
+struct PendingOutputDevice {
+    prompt: Option<OutputDevicePrompt>,
+    expected_uid: Option<String>,
+}
+
+impl PendingOutputDevice {
+    fn observe(
+        &mut self,
+        capturing: &capture::OutputDevice,
+        detected: &capture::OutputDevice,
+    ) -> bool {
+        if capturing.uid == detected.uid {
+            return self.clear();
+        }
+        if self.expected_uid.as_deref() == Some(detected.uid.as_str()) {
+            return false;
+        }
+        self.expected_uid = Some(detected.uid.clone());
+        self.prompt = Some(OutputDevicePrompt {
+            id: NEXT_OUTPUT_DEVICE_PROMPT_ID.fetch_add(1, Ordering::Relaxed),
+            previous_name: capturing.name.clone(),
+            detected_name: detected.name.clone(),
+        });
+        true
+    }
+
+    fn decide(
+        &mut self,
+        prompt_id: u64,
+        switch_device: bool,
+    ) -> Option<capture::OutputDeviceSwitchDecision> {
+        if self.prompt.as_ref()?.id != prompt_id {
+            return None;
+        }
+        let expected_uid = self.expected_uid.take()?;
+        self.prompt = None;
+        Some(if switch_device {
+            capture::OutputDeviceSwitchDecision::Switch { expected_uid }
+        } else {
+            capture::OutputDeviceSwitchDecision::Cancel { expected_uid }
+        })
+    }
+
+    fn clear(&mut self) -> bool {
+        let changed = self.prompt.take().is_some();
+        self.expected_uid = None;
+        changed
+    }
 }
 
 #[derive(Clone, serde::Serialize)]
@@ -149,6 +219,7 @@ fn policy_from_env() -> LanguagePolicy {
 pub struct Ui {
     pub app: AppHandle,
     pub status: StatusStore,
+    pub output_device_prompt: OutputDevicePromptStore,
 }
 
 /// The loaded ASR models, shared by the lanes of a session and kept between
@@ -236,6 +307,104 @@ fn emit_translation(ui: &Ui, lane: Lane, id: u64, text: Option<String>, lang: Op
     );
 }
 
+fn present_output_device_prompt(ui: &Ui, prompt: Option<OutputDevicePrompt>) {
+    *ui.output_device_prompt.lock().unwrap() = prompt.clone();
+    let _ = ui
+        .app
+        .emit_to(OUTPUT_DEVICE_WINDOW, OUTPUT_DEVICE_EVENT, prompt.clone());
+    let Some(window) = ui.app.get_webview_window(OUTPUT_DEVICE_WINDOW) else {
+        return;
+    };
+    if prompt.is_some() {
+        let _ = window.show();
+        let _ = window.set_focus();
+    } else {
+        let _ = window.hide();
+    }
+}
+
+fn output_device_events(lanes: &[LaneRuntime]) -> Vec<capture::OutputDeviceSwitchEvent> {
+    let mut events = Vec::new();
+    for lane in lanes {
+        let Some(control) = lane.session.output_device_switch.as_ref() else {
+            continue;
+        };
+        let Ok(receiver) = control.event_receiver().lock() else {
+            continue;
+        };
+        events.extend(receiver.try_iter());
+    }
+    events
+}
+
+fn send_output_device_decision(
+    lanes: &[LaneRuntime],
+    decision: capture::OutputDeviceSwitchDecision,
+) -> Result<(), String> {
+    let control = lanes
+        .iter()
+        .find_map(|lane| lane.session.output_device_switch.as_ref())
+        .ok_or_else(|| "speaker capture is not available".to_string())?;
+    control
+        .decision_sender()
+        .send(decision)
+        .map_err(|_| "speaker capture is no longer running".to_string())
+}
+
+fn apply_output_device_event(
+    ui: &Ui,
+    pending: &mut PendingOutputDevice,
+    notices: &mut Notices,
+    event: capture::OutputDeviceSwitchEvent,
+) {
+    match event {
+        capture::OutputDeviceSwitchEvent::Detected {
+            capturing,
+            detected,
+        } => {
+            if pending.observe(&capturing, &detected) {
+                present_output_device_prompt(ui, pending.prompt.clone());
+            }
+        }
+        capture::OutputDeviceSwitchEvent::Switched { current, .. } => {
+            pending.clear();
+            present_output_device_prompt(ui, None);
+            if notices.set(NoticeKey::Speaker, None) {
+                emit_status(ui, "listening", notices.message());
+            }
+            let _ = ui
+                .app
+                .emit_to("main", "output-device-switched", current.name);
+        }
+        capture::OutputDeviceSwitchEvent::SwitchFailed {
+            capturing,
+            detected,
+            error,
+        } => {
+            eprintln!("output device switch failed: {error}");
+            pending.clear();
+            pending.observe(&capturing, &detected);
+            present_output_device_prompt(ui, pending.prompt.clone());
+            let _ = ui.app.emit_to(
+                OUTPUT_DEVICE_WINDOW,
+                "output-device-switch-error",
+                "出力先を切り替えられませんでした。接続を確認して、もう一度お試しください。",
+            );
+            if notices.set(
+                NoticeKey::Speaker,
+                Some("スピーカー録音の出力先を切り替えられませんでした".to_string()),
+            ) {
+                emit_status(ui, "listening", notices.message());
+            }
+        }
+        capture::OutputDeviceSwitchEvent::Cancelled { .. } => {
+            // The prompt was already cleared when its matching decision was
+            // accepted. A stale decision can arrive after a newer Detected
+            // event, and must not dismiss that newer prompt.
+        }
+    }
+}
+
 pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
     let mut engines: Option<Models> = None;
     // Spawned once for the app: the translation model is expensive to load
@@ -253,7 +422,8 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
     emit_status(&ui, "idle", None);
     while let Ok(cmd) = cmd_rx.recv() {
         match cmd {
-            Cmd::Stop => {} // Stop while idle
+            Cmd::Stop => {}                       // Stop while idle
+            Cmd::RespondOutputDevice { .. } => {} // no prompt while idle
             Cmd::Start => match run_session(&cmd_rx, &ui, &mut engines, &mut translations) {
                 Ok(()) => emit_status(&ui, "idle", None),
                 Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
@@ -345,6 +515,7 @@ fn run_session(
         ran.and(closed)
     })();
     stop_capture.store(true, Ordering::SeqCst);
+    present_output_device_prompt(ui, None);
     result
 }
 
@@ -1051,6 +1222,7 @@ fn run_capture_loop(
     translations: &mut Translations,
 ) -> anyhow::Result<()> {
     let mut clock = SessionClock::default();
+    let mut pending_output_device = PendingOutputDevice::default();
     // The setting may have been changed while idle, after the engines were
     // loaded — sync before the first decode, not just on later changes.
     sync_langs(ui, models, &translations.policy(), &mut notices);
@@ -1059,8 +1231,31 @@ fn run_capture_loop(
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
             Ok(Cmd::Start) => {} // already running
+            Ok(Cmd::RespondOutputDevice {
+                prompt_id,
+                switch_device,
+            }) => {
+                if let Some(decision) = pending_output_device.decide(prompt_id, switch_device) {
+                    present_output_device_prompt(ui, None);
+                    if let Err(error) = send_output_device_decision(lanes, decision) {
+                        notices.set(
+                            NoticeKey::Speaker,
+                            Some(format!("output device decision failed: {error}")),
+                        );
+                        emit_status(ui, "listening", notices.message());
+                    }
+                } else {
+                    // The prompt webview can receive an event before its
+                    // initial snapshot resolves. Re-emit the authoritative
+                    // prompt so a stale response cannot leave it disabled.
+                    present_output_device_prompt(ui, pending_output_device.prompt.clone());
+                }
+            }
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => break, // app shutdown
+        }
+        for event in output_device_events(lanes) {
+            apply_output_device_event(ui, &mut pending_output_device, &mut notices, event);
         }
         let policy = translations.policy();
         sync_langs(ui, models, &policy, &mut notices);
@@ -1280,6 +1475,54 @@ mod tests {
         }
     }
 
+    fn output_device(uid: &str, name: &str) -> capture::OutputDevice {
+        capture::OutputDevice {
+            uid: uid.into(),
+            name: name.into(),
+        }
+    }
+
+    #[test]
+    fn output_device_prompt_coalesces_duplicates_and_replaces_newer_devices() {
+        let built_in = output_device("built-in", "MacBookのスピーカー");
+        let headphones = output_device("headphones", "ヘッドフォン");
+        let display = output_device("display", "ディスプレイ");
+        let mut pending = PendingOutputDevice::default();
+
+        assert!(pending.observe(&built_in, &headphones));
+        let first_id = pending.prompt.as_ref().unwrap().id;
+        assert!(!pending.observe(&built_in, &headphones));
+        assert_eq!(pending.prompt.as_ref().unwrap().id, first_id);
+
+        assert!(pending.observe(&built_in, &display));
+        let latest_id = pending.prompt.as_ref().unwrap().id;
+        assert_ne!(latest_id, first_id);
+        assert_eq!(
+            pending.prompt.as_ref().unwrap().detected_name,
+            "ディスプレイ"
+        );
+
+        assert!(pending.decide(first_id, true).is_none());
+        assert!(matches!(
+            pending.decide(latest_id, false),
+            Some(capture::OutputDeviceSwitchDecision::Cancel { expected_uid })
+                if expected_uid == "display"
+        ));
+        assert!(pending.prompt.is_none());
+    }
+
+    #[test]
+    fn returning_to_the_captured_output_dismisses_the_prompt() {
+        let built_in = output_device("built-in", "MacBookのスピーカー");
+        let headphones = output_device("headphones", "ヘッドフォン");
+        let mut pending = PendingOutputDevice::default();
+
+        assert!(pending.observe(&built_in, &headphones));
+        assert!(pending.observe(&built_in, &built_in));
+        assert!(pending.prompt.is_none());
+        assert!(pending.expected_uid.is_none());
+    }
+
     #[test]
     fn gate_drops_idle_steps_but_passes_a_volatile_clear() {
         let mut gate = EmitGate::default();
@@ -1485,6 +1728,7 @@ mod tests {
             channels: 1,
             dropped: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             error: Arc::new(Mutex::new(None)),
+            output_device_switch: None,
         };
         let lane =
             LaneRuntime::new(Lane::Mic, session, Box::new(NoRecognizer)).expect("48 kHz lane");

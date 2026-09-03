@@ -62,6 +62,7 @@ fn run(stop: &AtomicBool, ready_tx: &Sender<Result<CaptureSession>>) -> Result<(
         channels,
         dropped,
         error,
+        output_device_switch: None,
     }));
     while !stop.load(Ordering::SeqCst) {
         std::thread::sleep(Duration::from_millis(100));
