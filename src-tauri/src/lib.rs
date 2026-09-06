@@ -19,6 +19,7 @@ struct PipelineHandle {
     cmd_tx: Mutex<Sender<pipeline::Cmd>>,
     status: pipeline::StatusStore,
     policy: pipeline::PolicyStore,
+    output_device_prompt: pipeline::OutputDevicePromptStore,
 }
 
 impl PipelineHandle {
@@ -46,6 +47,25 @@ fn stop_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
 #[tauri::command]
 fn get_status(state: State<'_, PipelineHandle>) -> pipeline::StatusPayload {
     state.status.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn get_output_device_prompt(
+    state: State<'_, PipelineHandle>,
+) -> Option<pipeline::OutputDevicePrompt> {
+    state.output_device_prompt.lock().unwrap().clone()
+}
+
+#[tauri::command]
+fn respond_output_device_change(
+    state: State<'_, PipelineHandle>,
+    prompt_id: u64,
+    switch_device: bool,
+) -> Result<(), String> {
+    state.send(pipeline::Cmd::RespondOutputDevice {
+        prompt_id,
+        switch_device,
+    })
 }
 
 /// The sessions already on disk, newest first. Read on every visit to the
@@ -135,9 +155,11 @@ pub fn run() {
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
             let status = pipeline::new_status_store();
             let policy = pipeline::new_policy_store();
+            let output_device_prompt = pipeline::new_output_device_prompt_store();
             let ui = pipeline::Ui {
                 app: app.handle().clone(),
                 status: status.clone(),
+                output_device_prompt: output_device_prompt.clone(),
             };
             let worker_policy = policy.clone();
             std::thread::spawn(move || pipeline::run(cmd_rx, ui, worker_policy));
@@ -145,6 +167,7 @@ pub fn run() {
                 cmd_tx: Mutex::new(cmd_tx),
                 status,
                 policy,
+                output_device_prompt,
             });
             Ok(())
         })
@@ -152,6 +175,8 @@ pub fn run() {
             start_capture,
             stop_capture,
             get_status,
+            get_output_device_prompt,
+            respond_output_device_change,
             get_languages,
             set_languages,
             list_recordings,
