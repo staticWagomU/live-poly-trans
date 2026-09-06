@@ -226,10 +226,20 @@ pub struct Ui {
 /// sessions. Each lane recognises through its own [`Recognizer`] over this.
 type Models = Rc<RefCell<kkm_whisper::WhisperModels>>;
 
-/// The recogniser a new lane gets. One place to change when there is more
-/// than one ASR to choose from (plan.md Step 6).
-fn recognizer(models: &Models) -> Box<dyn Recognizer> {
-    Box::new(kkm_whisper::WhisperRecognizer::new(Rc::clone(models)))
+enum AsrBackend {
+    Soniox { api_key: String },
+    Whisper(Models),
+}
+
+fn recognizer(backend: &AsrBackend) -> Box<dyn Recognizer> {
+    match backend {
+        AsrBackend::Soniox { api_key } => {
+            Box::new(crate::soniox::SonioxRecognizer::new(api_key.clone()))
+        }
+        AsrBackend::Whisper(models) => {
+            Box::new(kkm_whisper::WhisperRecognizer::new(Rc::clone(models)))
+        }
+    }
 }
 
 /// Where models are looked for, in order: what a download put in the app's
@@ -456,7 +466,10 @@ fn run_session(
     engines: &mut Option<Models>,
     translations: &mut Translations,
 ) -> anyhow::Result<()> {
-    let models = load_engines(ui, engines, &translations.policy().spoken)?;
+    let backend = match crate::soniox::api_key() {
+        Some(api_key) => AsrBackend::Soniox { api_key },
+        None => AsrBackend::Whisper(load_engines(ui, engines, &translations.policy().spoken)?),
+    };
     // Load the translation model now rather than on the first sentence: the
     // load overlaps the start of the meeting instead of delaying the first
     // translation by all of it.
@@ -464,14 +477,14 @@ fn run_session(
     let stop_capture = Arc::new(AtomicBool::new(false));
     let result = (|| {
         let mic = start_capture(capture::mic::spawn, &stop_capture)?;
-        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic, recognizer(&models))?];
+        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic, recognizer(&backend))?];
         // The speaker lane is best-effort: it needs macOS 14.2+ and the
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
         let mut notices = Notices::default();
         let speaker = start_speaker(&stop_capture).and_then(|session| {
             session
-                .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&models)))
+                .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&backend)))
                 .transpose()
         });
         match speaker {
@@ -503,7 +516,7 @@ fn run_session(
         let ran = run_capture_loop(
             cmd_rx,
             ui,
-            &models,
+            &backend,
             &mut lanes,
             recorder.as_mut(),
             notices,
@@ -1215,7 +1228,7 @@ impl EmitGate {
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
-    models: &Models,
+    backend: &AsrBackend,
     lanes: &mut [LaneRuntime],
     mut recorder: Option<&mut record::SessionRecorder>,
     mut notices: Notices,
@@ -1225,7 +1238,7 @@ fn run_capture_loop(
     let mut pending_output_device = PendingOutputDevice::default();
     // The setting may have been changed while idle, after the engines were
     // loaded — sync before the first decode, not just on later changes.
-    sync_langs(ui, models, &translations.policy(), &mut notices);
+    sync_langs(ui, backend, &translations.policy(), &mut notices);
     emit_status(ui, "listening", notices.message());
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
@@ -1258,7 +1271,7 @@ fn run_capture_loop(
             apply_output_device_event(ui, &mut pending_output_device, &mut notices, event);
         }
         let policy = translations.policy();
-        sync_langs(ui, models, &policy, &mut notices);
+        sync_langs(ui, backend, &policy, &mut notices);
         // A single spoken language is pinned, which skips detection outright;
         // two leave the choice to the engine, restricted to those two.
         let lang = policy.pinned_lang().map(str::to_string);
@@ -1314,7 +1327,10 @@ fn run_capture_loop(
 /// Point the recogniser's restricted detection at the languages the policy
 /// now names. No model reload is involved — `transcribe` reads the set per
 /// decode — which is what lets this happen mid-recording.
-fn sync_langs(ui: &Ui, models: &Models, policy: &LanguagePolicy, notices: &mut Notices) {
+fn sync_langs(ui: &Ui, backend: &AsrBackend, policy: &LanguagePolicy, notices: &mut Notices) {
+    let AsrBackend::Whisper(models) = backend else {
+        return;
+    };
     let models = &mut *models.borrow_mut();
     if policy.spoken == models.spoken {
         return;

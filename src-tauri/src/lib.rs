@@ -7,6 +7,7 @@ mod capture;
 mod library;
 mod pipeline;
 mod record;
+mod soniox;
 mod translate;
 
 use std::sync::mpsc::Sender;
@@ -150,6 +151,14 @@ fn set_languages(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // `open Kikimimic.app` does not preserve the checkout as its working
+    // directory. Keep the ordinary dotenv search, then try the build checkout
+    // so the locally built app can use the same untracked .env as `tauri dev`.
+    let _ = dotenvy::dotenv();
+    if std::env::var_os("SONIOX_API_KEY").is_none() && std::env::var_os("API_KEY").is_none() {
+        let checkout_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.env");
+        let _ = dotenvy::from_path(checkout_env);
+    }
     tauri::Builder::default()
         .setup(|app| {
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();
