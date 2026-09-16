@@ -4,6 +4,7 @@
 //! whether the audio came from a microphone or the system mix.
 
 use std::sync::atomic::AtomicUsize;
+use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 
 pub mod mic;
@@ -48,4 +49,80 @@ pub struct CaptureSession {
     /// keeps no audio flowing after one of these, so the pipeline must end
     /// the session instead of listening to silence forever.
     pub error: Arc<Mutex<Option<String>>>,
+    /// Speaker-only output-device switching. Microphone sessions use `None`.
+    pub output_device_switch: Option<OutputDeviceSwitch>,
+}
+
+/// A macOS output device as reported by Core Audio.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OutputDevice {
+    pub uid: String,
+    pub name: String,
+}
+
+/// Why a pending output-device switch was dismissed without rebuilding IO.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutputDeviceSwitchCancellation {
+    Rejected,
+    StaleDecision,
+    AlreadyCapturing,
+}
+
+/// Events produced by the speaker capture thread.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputDeviceSwitchEvent {
+    Detected {
+        capturing: OutputDevice,
+        detected: OutputDevice,
+    },
+    Switched {
+        previous: OutputDevice,
+        current: OutputDevice,
+    },
+    SwitchFailed {
+        capturing: OutputDevice,
+        detected: OutputDevice,
+        error: String,
+    },
+    Cancelled {
+        capturing: OutputDevice,
+        detected: OutputDevice,
+        reason: OutputDeviceSwitchCancellation,
+    },
+}
+
+/// A UI decision. `expected_uid` makes decisions safe against a newer device
+/// change arriving while a notification is visible.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum OutputDeviceSwitchDecision {
+    Switch { expected_uid: String },
+    Cancel { expected_uid: String },
+}
+
+/// The speaker capture control plane. It is owned by one pipeline lane;
+/// callers can clone only the decision sender when a longer-lived handle is
+/// needed, while the event receiver remains single-consumer by construction.
+pub struct OutputDeviceSwitch {
+    events: Mutex<Receiver<OutputDeviceSwitchEvent>>,
+    decisions: Sender<OutputDeviceSwitchDecision>,
+}
+
+impl OutputDeviceSwitch {
+    pub(super) fn new(
+        events: Receiver<OutputDeviceSwitchEvent>,
+        decisions: Sender<OutputDeviceSwitchDecision>,
+    ) -> Self {
+        Self {
+            events: Mutex::new(events),
+            decisions,
+        }
+    }
+
+    pub fn event_receiver(&self) -> &Mutex<Receiver<OutputDeviceSwitchEvent>> {
+        &self.events
+    }
+
+    pub fn decision_sender(&self) -> &Sender<OutputDeviceSwitchDecision> {
+        &self.decisions
+    }
 }

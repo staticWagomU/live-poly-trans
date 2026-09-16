@@ -18,6 +18,21 @@
         "height": 700,
         "minWidth": 640,
         "minHeight": 420
+      },
+      {
+        "title": "Kikimimic",
+        "label": "output-device-change",
+        "width": 430,
+        "height": 250,
+        "center": true,
+        "visible": false,
+        "focus": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
       }
     ],
     "security": {

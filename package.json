@@ -7,7 +7,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "check": "svelte-check --output human",
+    "check": "svelte-kit sync && svelte-check --output human",
+    "prepare": "svelte-kit sync",
     "tauri": "tauri"
   },
   "dependencies": {

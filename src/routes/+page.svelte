@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
   import { listen } from '@tauri-apps/api/event';
+  import { getCurrentWindow } from '@tauri-apps/api/window';
   import LanguagePopover from '$lib/LanguagePopover.svelte';
   import { pillText, type Languages } from '$lib/languages';
   import { clock, dayGroup, durationLabel, sessionStart, timeOfDay } from '$lib/format';
@@ -34,6 +35,11 @@
     /// Directory this session's WAV files are being written to; stays put
     /// after a stop so the files can still be found.
     recordingDir: string | null;
+  };
+  type OutputDevicePrompt = {
+    id: number;
+    previousName: string;
+    detectedName: string;
   };
   /// One session on disk, as the library lists it.
   type Recording = {
@@ -68,6 +74,7 @@
   // Cap the transcript so an hours-long session doesn't grow the DOM
   // without bound; the oldest lines scroll away first anyway.
   const MAX_LINES = 500;
+  const isOutputDevicePrompt = getCurrentWindow().label === 'output-device-change';
 
   const LANE_LABELS: Record<Lane, string> = { mic: 'マイク', speaker: 'スピーカー' };
   const LANES: Lane[] = ['mic', 'speaker'];
@@ -105,6 +112,10 @@
   let savingTitle = $state(false);
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  let outputDevicePrompt = $state<OutputDevicePrompt | null>(null);
+  let respondingToOutputDevice = $state(false);
+  let outputDevicePromptError = $state<string | null>(null);
+  let outputDeviceTitle = $state<HTMLHeadingElement>();
 
   // The backend is the source of truth for running: a capture error flips
   // it back to idle/error even though the Record invoke itself succeeded.
@@ -113,13 +124,38 @@
   // is a tooltip away.
   const recordingName = $derived(status.recordingDir?.split(/[\\/]/).pop() ?? null);
 
+  $effect(() => {
+    if (isOutputDevicePrompt && outputDevicePrompt && outputDeviceTitle) {
+      outputDeviceTitle.focus();
+    }
+  });
+
   function showToast(message: string) {
     toast = message;
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => (toast = null), 2400);
   }
 
-  onMount(() => {
+  function mountOutputDevicePrompt() {
+    const unlisten = listen<OutputDevicePrompt | null>('output-device-prompt', (event) => {
+      outputDevicePrompt = event.payload;
+      respondingToOutputDevice = false;
+      outputDevicePromptError = null;
+    });
+    const unlistenError = listen<string>('output-device-switch-error', (event) => {
+      respondingToOutputDevice = false;
+      outputDevicePromptError = event.payload;
+    });
+    invoke<OutputDevicePrompt | null>('get_output_device_prompt')
+      .then((pending) => (outputDevicePrompt = pending))
+      .catch((error: unknown) => (outputDevicePromptError = String(error)));
+    return () => {
+      unlisten.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }
+
+  function mountMainWindow() {
     const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
       const lane = lanes[event.payload.lane];
       lane.pending += event.payload.committedDelta;
@@ -153,6 +189,9 @@
       // A session that just ended is a new row in the library.
       if (wasRunning && !running) void refresh();
     });
+    const unlistenOutputDevice = listen<string>('output-device-switched', (event) => {
+      showToast(`スピーカー録音を「${event.payload}」へ切り替えました`);
+    });
     // Status events only fire on change; ask for the current snapshot so a
     // (re)loaded webview doesn't show "idle" while the backend is listening.
     invoke<StatusPayload>('get_status').then((s) => {
@@ -169,8 +208,26 @@
       unlistenTranscript.then((fn) => fn());
       unlistenTranslation.then((fn) => fn());
       unlistenStatus.then((fn) => fn());
+      unlistenOutputDevice.then((fn) => fn());
     };
-  });
+  }
+
+  onMount(() => (isOutputDevicePrompt ? mountOutputDevicePrompt() : mountMainWindow()));
+
+  async function respondToOutputDevice(switchDevice: boolean) {
+    if (!outputDevicePrompt || respondingToOutputDevice) return;
+    respondingToOutputDevice = true;
+    outputDevicePromptError = null;
+    try {
+      await invoke('respond_output_device_change', {
+        promptId: outputDevicePrompt.id,
+        switchDevice
+      });
+    } catch (error) {
+      respondingToOutputDevice = false;
+      outputDevicePromptError = String(error);
+    }
+  }
 
   async function refresh() {
     try {
@@ -441,6 +498,13 @@
   const laneSummary = (list: Lane[]) => list.map((lane) => LANE_LABELS[lane]).join(' + ');
 
   function onkeydown(event: KeyboardEvent) {
+    if (isOutputDevicePrompt) {
+      if (event.key === 'Escape' && outputDevicePrompt && !respondingToOutputDevice) {
+        event.preventDefault();
+        void respondToOutputDevice(false);
+      }
+      return;
+    }
     if (event.key === 'Escape') {
       actionsOpen = false;
       if (!langOpen) return;
@@ -460,7 +524,50 @@
 
 <svelte:window {onkeydown} {onpointerdown} />
 
-<main class="app-window">
+{#if isOutputDevicePrompt}
+  <div
+    class="output-device-prompt"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="output-device-title"
+    aria-describedby="output-device-description"
+  >
+    {#if outputDevicePrompt}
+      <div class="output-device-icon" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="output-device-copy">
+        <h1 id="output-device-title" tabindex="-1" bind:this={outputDeviceTitle}>
+          オーディオ出力が変わりました
+        </h1>
+        <p id="output-device-description">
+          「{outputDevicePrompt.detectedName}」が検出されました。スピーカー録音の出力先を
+          「{outputDevicePrompt.previousName}」から切り替えますか？
+        </p>
+        {#if outputDevicePromptError}
+          <p class="output-device-error" role="alert">{outputDevicePromptError}</p>
+        {/if}
+      </div>
+      <div class="output-device-actions">
+        <button
+          class="output-device-button"
+          type="button"
+          disabled={respondingToOutputDevice}
+          onclick={() => respondToOutputDevice(false)}>今のまま</button
+        >
+        <button
+          class="output-device-button primary"
+          type="button"
+          disabled={respondingToOutputDevice}
+          onclick={() => respondToOutputDevice(true)}
+        >
+          {respondingToOutputDevice ? '処理中…' : '切り替える'}
+        </button>
+      </div>
+    {/if}
+  </div>
+{:else}
+  <main class="app-window">
   <header class="window-toolbar">
     {#if view === 'session'}
       <button class="back-button" type="button" aria-label="録音一覧に戻る" onclick={goHome}>‹</button
@@ -775,7 +882,8 @@
   {#if toast}
     <div class="toast" role="status" aria-live="polite">{toast}</div>
   {/if}
-</main>
+  </main>
+{/if}
 
 <style>
   /* The window's palette, from mockups/desktop-prototype.html. Global so the
@@ -837,6 +945,93 @@
     overflow: hidden;
     display: grid;
     grid-template-rows: 54px minmax(0, 1fr);
+  }
+
+  /* ── Output device confirmation ───────────────────────────────────── */
+  .output-device-prompt {
+    width: 100vw;
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    column-gap: 16px;
+    padding: 25px 26px 22px;
+    overflow: hidden;
+    background: var(--surface);
+  }
+  .output-device-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border-radius: 8px;
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .output-device-icon span {
+    width: 4px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+  .output-device-icon span:nth-child(1) {
+    height: 16px;
+  }
+  .output-device-icon span:nth-child(2) {
+    height: 28px;
+  }
+  .output-device-icon span:nth-child(3) {
+    height: 21px;
+  }
+  .output-device-copy {
+    min-width: 0;
+  }
+  .output-device-copy h1 {
+    margin: 1px 0 8px;
+    font-size: 17px;
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+  .output-device-copy p {
+    margin: 0;
+    color: var(--secondary);
+    font-size: 13.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .output-device-copy .output-device-error {
+    margin-top: 7px;
+    color: var(--record);
+    font-size: 12px;
+  }
+  .output-device-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 18px;
+  }
+  .output-device-button {
+    min-width: 96px;
+    height: 34px;
+    padding: 0 16px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .output-device-button:hover:not(:disabled) {
+    background: rgba(120, 120, 128, 0.1);
+  }
+  .output-device-button.primary {
+    color: #fff;
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .output-device-button.primary:hover:not(:disabled) {
+    background: #005bbd;
   }
 
   /* ── Toolbar ─────────────────────────────────────────────────────── */
