@@ -8,9 +8,9 @@
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
     "preview": "vite preview",
-    "typecheck": "tsc --noEmit",
-    "check": "svelte-check --output human",
-    "test": "svelte-check --output human && vitest run && scripts/test-swift-helper.sh",
+    "typecheck": "svelte-kit sync && tsc --noEmit",
+    "check": "svelte-kit sync && svelte-check --output human",
+    "test": "svelte-kit sync && svelte-check --output human && vitest run && scripts/test-swift-helper.sh",
     "test:ui": "vitest run",
     "test:swift": "scripts/test-swift-helper.sh",
     "profile:speaker": "scripts/profile-speaker-helper.sh",
@@ -20,7 +20,8 @@
     "build:whisper-engine": "bun scripts/build-whisper-engine.mjs",
     "measure:whisper-engine": "bun scripts/measure-whisper-engine.mjs",
     "build:dist": "scripts/build-distribution.sh",
-    "verify:macos-runtime": "bun scripts/verify-macos-runtime.mjs"
+    "verify:macos-runtime": "bun scripts/verify-macos-runtime.mjs",
+    "prepare": "svelte-kit sync"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.6.0",
