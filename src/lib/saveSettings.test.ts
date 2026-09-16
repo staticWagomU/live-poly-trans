@@ -5,7 +5,7 @@ describe('renderFileName', () => {
   it('replaces date time title and language placeholders', () => {
     expect(
       renderFileName('{date} {time} {title} {lang}', {
-        date: new Date('2026-08-05T05:00:00.000Z'),
+        date: new Date(2026, 7, 5, 14, 0),
         title: '定例ミーティング',
         lang: 'ja-en'
       })
@@ -15,7 +15,7 @@ describe('renderFileName', () => {
   it('sanitizes values that are unsafe in file names', () => {
     expect(
       renderFileName('{date}/{time}:{title}', {
-        date: new Date('2026-08-05T05:00:00.000Z'),
+        date: new Date(2026, 7, 5, 14, 0),
         title: 'A/B:検討',
         lang: 'ja'
       })
@@ -25,7 +25,7 @@ describe('renderFileName', () => {
   it('falls back to transcript when the rendered result is blank', () => {
     expect(
       renderFileName('   ', {
-        date: new Date('2026-08-05T05:00:00.000Z'),
+        date: new Date(2026, 7, 5, 14, 0),
         title: '定例',
         lang: 'ja'
       })
@@ -37,7 +37,7 @@ describe('markdownExportPath', () => {
   it('joins the export directory and rendered markdown file name', () => {
     expect(
       markdownExportPath('/Users/me/Meetings', '{date} {time} {title}', {
-        date: new Date('2026-08-05T05:00:00.000Z'),
+        date: new Date(2026, 7, 5, 14, 0),
         title: '定例',
         lang: 'ja-en'
       })
@@ -47,7 +47,7 @@ describe('markdownExportPath', () => {
   it('does not duplicate the slash when the directory already ends with one', () => {
     expect(
       markdownExportPath('/Users/me/Meetings/', '{title}', {
-        date: new Date('2026-08-05T05:00:00.000Z'),
+        date: new Date(2026, 7, 5, 14, 0),
         title: '定例',
         lang: 'ja-en'
       })
