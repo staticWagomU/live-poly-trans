@@ -34,7 +34,12 @@ impl PipelineHandle {
 
 #[tauri::command]
 fn start_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
-    state.send(pipeline::Cmd::Start)
+    state.send(pipeline::Cmd::Start { mimi: false })
+}
+
+#[tauri::command]
+fn start_mimi_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
+    state.send(pipeline::Cmd::Start { mimi: true })
 }
 
 #[tauri::command]
@@ -173,6 +178,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             start_capture,
+            start_mimi_capture,
             stop_capture,
             get_status,
             get_output_device_prompt,

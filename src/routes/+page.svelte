@@ -4,6 +4,7 @@
   import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import LanguagePopover from '$lib/LanguagePopover.svelte';
+  import MimiView from '$lib/MimiView.svelte';
   import { pillText, type Languages } from '$lib/languages';
   import { clock, dayGroup, durationLabel, sessionStart, timeOfDay } from '$lib/format';
 
@@ -98,6 +99,16 @@
   let status = $state<StatusPayload>({ state: 'idle', message: null, recordingDir: null });
   let languages = $state<Languages>({ spoken: ['ja', 'en'], target: 'ja', mutual: false });
   let busy = $state(false);
+  let mimiActive = $state(false);
+  let mimiExiting = $state(false);
+  let mimiPendingStarts = 0;
+  let mimiSessionLive = false;
+  let mimiHeld = $state(false);
+  let mimiLines = $state<{ id: number; text: string; translation: string | null; translating: boolean }[]>([]);
+  let mimiPending = $state('');
+  let mimiVolatile = $state('');
+  let mimiError = $state<string | null>(null);
+  let mimiQueue: Promise<void> = Promise.resolve();
 
   /// `home` is the library; `session` is one recording — the live one when
   /// `opened` is null, otherwise the one read back off disk.
@@ -157,6 +168,21 @@
 
   function mountMainWindow() {
     const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
+      if (mimiActive) {
+        mimiPending += event.payload.committedDelta;
+        if (event.payload.utteranceFinal) {
+          const line = event.payload.utteranceFinal;
+          mimiLines.push({
+            id: line.id,
+            text: line.text,
+            translation: null,
+            translating: line.translating
+          });
+          mimiPending = '';
+        }
+        mimiVolatile = event.payload.volatile;
+        return;
+      }
       const lane = lanes[event.payload.lane];
       lane.pending += event.payload.committedDelta;
       const finished = event.payload.utteranceFinal;
@@ -178,6 +204,14 @@
     // Translations arrive seconds after their sentence and out of order
     // between lanes, so they are matched by id rather than by position.
     const unlistenTranslation = listen<TranslationPayload>('translation', (event) => {
+      if (mimiActive) {
+        const line = mimiLines.find((line) => line.id === event.payload.id);
+        if (line) {
+          line.translation = event.payload.text;
+          line.translating = false;
+        }
+        return;
+      }
       const line = lanes[event.payload.lane].lines.find((l) => l.id === event.payload.id);
       if (!line) return; // scrolled off the top, or from a cleared session
       line.translation = event.payload.text;
@@ -186,8 +220,25 @@
     const unlistenStatus = listen<StatusPayload>('status', (event) => {
       const wasRunning = running;
       status = event.payload;
+      if (mimiActive) {
+        if (status.state === 'loading' || status.state === 'listening') {
+          if (!mimiSessionLive) {
+            mimiSessionLive = true;
+            if (mimiPendingStarts) mimiPendingStarts--;
+          }
+        } else if (status.state === 'idle' || status.state === 'error') {
+          if (!mimiSessionLive && mimiPendingStarts && status.state === 'error') {
+            mimiPendingStarts--;
+          }
+          mimiSessionLive = false;
+          if (mimiExiting && !mimiPendingStarts) {
+            mimiActive = false;
+            mimiExiting = false;
+          }
+        }
+      }
       // A session that just ended is a new row in the library.
-      if (wasRunning && !running) void refresh();
+      if (wasRunning && !running && !mimiActive) void refresh();
     });
     const unlistenOutputDevice = listen<string>('output-device-switched', (event) => {
       showToast(`スピーカー録音を「${event.payload}」へ切り替えました`);
@@ -360,6 +411,53 @@
     } finally {
       busy = false;
     }
+  }
+
+  function enterMimi() {
+    if (running || busy || mimiActive) return;
+    mimiLines = [];
+    mimiPending = '';
+    mimiVolatile = '';
+    mimiError = null;
+    mimiPendingStarts = 0;
+    mimiSessionLive = false;
+    mimiExiting = false;
+    mimiActive = true;
+  }
+
+  function setMimiHeld(held: boolean) {
+    if (!mimiActive || (mimiExiting && held) || mimiHeld === held) return;
+    mimiHeld = held;
+    if (held) mimiPendingStarts++;
+    mimiQueue = mimiQueue.then(async () => {
+      if (held && !mimiActive) return;
+      await invoke(held ? 'start_mimi_capture' : 'stop_capture');
+    }).catch((error: unknown) => {
+      mimiHeld = false;
+      mimiError = String(error);
+      if (held) mimiPendingStarts--;
+      if (mimiExiting && !mimiPendingStarts && !mimiSessionLive) {
+        mimiActive = false;
+        mimiExiting = false;
+      }
+    });
+  }
+
+  function exitMimi() {
+    if (!mimiActive || mimiExiting) return;
+    setMimiHeld(false);
+    if (!mimiPendingStarts && !mimiSessionLive) {
+      mimiActive = false;
+      return;
+    }
+    mimiExiting = true;
+    mimiQueue = mimiQueue.then(async () => {
+      await invoke('stop_capture');
+    }).catch((error: unknown) => {
+      showToast(`対面モードを停止できませんでした: ${error}`);
+      mimiActive = false;
+      mimiExiting = false;
+    });
   }
 
   /// Recording always starts from a clean transcript: the previous session's
@@ -575,6 +673,14 @@
     {/if}
     <span class="window-title">{view === 'home' ? '録音' : sessionTitle}</span>
     <span class="toolbar-spacer"></span>
+
+    <button
+      class="toolbar-button"
+      type="button"
+      disabled={running || busy}
+      title={running ? '録音を停止してから対面モードを開く' : '対面モードを開く'}
+      onclick={enterMimi}
+    >対面モード</button>
 
     {#if running}
       <div class="toolbar-group">
@@ -881,6 +987,19 @@
 
   {#if toast}
     <div class="toast" role="status" aria-live="polite">{toast}</div>
+  {/if}
+  {#if mimiActive}
+    <MimiView
+      lines={mimiLines}
+      {languages}
+      pending={`${mimiPending}${mimiVolatile}`}
+      held={mimiHeld}
+      loading={status.state === 'loading'}
+      error={mimiError ?? (status.state === 'error' ? status.message : null)}
+      onHeldChange={setMimiHeld}
+      onLanguagesChange={applyLanguages}
+      onExit={exitMimi}
+    />
   {/if}
   </main>
 {/if}

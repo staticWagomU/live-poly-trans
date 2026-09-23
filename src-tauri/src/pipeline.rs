@@ -42,7 +42,7 @@ const OVERRUN_NOTICE: Duration = Duration::from_secs(5);
 const ANCHOR_JUMP_NANOS: u64 = 30_000_000;
 
 pub enum Cmd {
-    Start,
+    Start { mimi: bool },
     Stop,
     RespondOutputDevice { prompt_id: u64, switch_device: bool },
 }
@@ -424,10 +424,12 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
         match cmd {
             Cmd::Stop => {}                       // Stop while idle
             Cmd::RespondOutputDevice { .. } => {} // no prompt while idle
-            Cmd::Start => match run_session(&cmd_rx, &ui, &mut engines, &mut translations) {
-                Ok(()) => emit_status(&ui, "idle", None),
-                Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
-            },
+            Cmd::Start { mimi } => {
+                match run_session(&cmd_rx, &ui, &mut engines, &mut translations, mimi) {
+                    Ok(()) => emit_status(&ui, "idle", None),
+                    Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
+                }
+            }
         }
     }
 }
@@ -455,6 +457,7 @@ fn run_session(
     ui: &Ui,
     engines: &mut Option<Models>,
     translations: &mut Translations,
+    mimi: bool,
 ) -> anyhow::Result<()> {
     let models = load_engines(ui, engines, &translations.policy().spoken)?;
     // Load the translation model now rather than on the first sentence: the
@@ -469,11 +472,15 @@ fn run_session(
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
         let mut notices = Notices::default();
-        let speaker = start_speaker(&stop_capture).and_then(|session| {
-            session
-                .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&models)))
-                .transpose()
-        });
+        let speaker = if mimi {
+            Ok(None)
+        } else {
+            start_speaker(&stop_capture).and_then(|session| {
+                session
+                    .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&models)))
+                    .transpose()
+            })
+        };
         match speaker {
             Ok(Some(lane)) => lanes.push(lane),
             Ok(None) => {}
@@ -486,10 +493,14 @@ fn run_session(
         }
         // Recording is best-effort too: a full disk should cost the recording,
         // not the transcript.
-        let mut recorder = match open_recorder(ui, &lanes) {
+        let mut recorder = match if mimi {
+            Ok(None)
+        } else {
+            open_recorder(ui, &lanes).map(Some)
+        } {
             Ok(rec) => {
-                emit_recording_dir(ui, Some(rec.dir().display().to_string()));
-                Some(rec)
+                emit_recording_dir(ui, rec.as_ref().map(|rec| rec.dir().display().to_string()));
+                rec
             }
             Err(e) => {
                 emit_recording_dir(ui, None);
@@ -1230,7 +1241,7 @@ fn run_capture_loop(
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
-            Ok(Cmd::Start) => {} // already running
+            Ok(Cmd::Start { .. }) => {} // already running
             Ok(Cmd::RespondOutputDevice {
                 prompt_id,
                 switch_device,
