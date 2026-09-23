@@ -563,9 +563,27 @@ fn start_capture(
 ) -> anyhow::Result<capture::CaptureSession> {
     let (ready_tx, ready_rx) = std::sync::mpsc::channel();
     spawn(stop.clone(), ready_tx);
-    match ready_rx.recv() {
+    wait_capture_ready(ready_rx, stop, Duration::from_secs(10))
+}
+
+fn wait_capture_ready(
+    ready_rx: Receiver<anyhow::Result<capture::CaptureSession>>,
+    stop: &Arc<AtomicBool>,
+    timeout: Duration,
+) -> anyhow::Result<capture::CaptureSession> {
+    match ready_rx.recv_timeout(timeout) {
         Ok(session) => session,
-        Err(_) => anyhow::bail!("capture thread died before reporting"),
+        Err(RecvTimeoutError::Timeout) => {
+            // ponytail: CoreAudio can strand this thread; move capture to a process if repeated hangs matter.
+            stop.store(true, Ordering::SeqCst);
+            anyhow::bail!(
+                "capture device did not start within {} seconds",
+                timeout.as_secs()
+            )
+        }
+        Err(RecvTimeoutError::Disconnected) => {
+            anyhow::bail!("capture thread died before reporting")
+        }
     }
 }
 
@@ -1477,6 +1495,17 @@ fn report_recording_failure(ui: &Ui, notices: &mut Notices, rec: &mut record::Se
 mod tests {
     use super::*;
     use kkm_core::scheduler::StepOutput;
+
+    #[test]
+    fn capture_start_timeout_releases_the_pipeline() {
+        let (_ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let stop = Arc::new(AtomicBool::new(false));
+        let error = wait_capture_ready(ready_rx, &stop, Duration::from_millis(1))
+            .err()
+            .expect("capture should time out");
+        assert!(error.to_string().contains("did not start"));
+        assert!(stop.load(Ordering::SeqCst));
+    }
 
     fn out(committed: &str, volatile: &str) -> StepOutput {
         StepOutput {
