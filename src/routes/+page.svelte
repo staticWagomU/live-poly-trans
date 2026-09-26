@@ -5,6 +5,7 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import LanguagePopover from '$lib/LanguagePopover.svelte';
   import MimiView from '$lib/MimiView.svelte';
+  import { loadGlossary, saveGlossary, type GlossaryRule } from '$lib/glossary';
   import { pillText, type Languages } from '$lib/languages';
   import { clock, dayGroup, durationLabel, sessionStart, timeOfDay } from '$lib/format';
 
@@ -108,6 +109,7 @@
   let mimiPending = $state('');
   let mimiVolatile = $state('');
   let mimiError = $state<string | null>(null);
+  let mimiRules = $state<GlossaryRule[]>([]);
   let mimiQueue: Promise<void> = Promise.resolve();
 
   /// `home` is the library; `session` is one recording — the live one when
@@ -263,7 +265,19 @@
     };
   }
 
-  onMount(() => (isOutputDevicePrompt ? mountOutputDevicePrompt() : mountMainWindow()));
+  onMount(() => {
+    if (!isOutputDevicePrompt) mimiRules = loadGlossary();
+    return isOutputDevicePrompt ? mountOutputDevicePrompt() : mountMainWindow();
+  });
+
+  function updateMimiRules(rules: GlossaryRule[]) {
+    mimiRules = rules;
+    try {
+      saveGlossary(rules);
+    } catch (error) {
+      mimiError = `辞書を保存できませんでした: ${error}`;
+    }
+  }
 
   async function respondToOutputDevice(switchDevice: boolean) {
     if (!outputDevicePrompt || respondingToOutputDevice) return;
@@ -431,7 +445,7 @@
     if (held) mimiPendingStarts++;
     mimiQueue = mimiQueue.then(async () => {
       if (held && !mimiActive) return;
-      await invoke(held ? 'start_mimi_capture' : 'stop_capture');
+      await invoke(held ? 'start_mimi_capture' : 'stop_capture', held ? { rules: $state.snapshot(mimiRules) } : {});
     }).catch((error: unknown) => {
       mimiHeld = false;
       mimiError = String(error);
@@ -991,6 +1005,7 @@
   {#if mimiActive}
     <MimiView
       lines={mimiLines}
+      rules={mimiRules}
       {languages}
       pending={`${mimiPending}${mimiVolatile}`}
       held={mimiHeld}
@@ -998,6 +1013,7 @@
       error={mimiError ?? (status.state === 'error' ? status.message : null)}
       onHeldChange={setMimiHeld}
       onLanguagesChange={applyLanguages}
+      onRulesChange={updateMimiRules}
       onExit={exitMimi}
     />
   {/if}

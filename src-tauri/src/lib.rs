@@ -7,6 +7,7 @@ mod capture;
 mod library;
 mod pipeline;
 mod record;
+mod soniox;
 mod translate;
 
 use std::sync::mpsc::Sender;
@@ -34,12 +35,19 @@ impl PipelineHandle {
 
 #[tauri::command]
 fn start_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
-    state.send(pipeline::Cmd::Start { mimi: false })
+    state.send(pipeline::Cmd::Start {
+        mimi: false,
+        rules: Vec::new(),
+    })
 }
 
 #[tauri::command]
-fn start_mimi_capture(state: State<'_, PipelineHandle>) -> Result<(), String> {
-    state.send(pipeline::Cmd::Start { mimi: true })
+fn start_mimi_capture(
+    state: State<'_, PipelineHandle>,
+    rules: Vec<pipeline::GlossaryRule>,
+) -> Result<(), String> {
+    pipeline::validate_glossary(&rules)?;
+    state.send(pipeline::Cmd::Start { mimi: true, rules })
 }
 
 #[tauri::command]
@@ -155,6 +163,9 @@ fn set_languages(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let _ = dotenvy::dotenv();
+    let checkout_env = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../.env");
+    let _ = dotenvy::from_path(checkout_env);
     tauri::Builder::default()
         .setup(|app| {
             let (cmd_tx, cmd_rx) = std::sync::mpsc::channel();

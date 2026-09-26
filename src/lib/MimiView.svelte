@@ -1,11 +1,13 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import LanguagePopover from '$lib/LanguagePopover.svelte';
+  import type { GlossaryRule } from '$lib/glossary';
   import { pillText, type Languages } from '$lib/languages';
 
   type Line = { id: number; text: string; translation: string | null; translating: boolean };
   let {
     lines,
+    rules,
     languages,
     pending,
     held,
@@ -13,9 +15,11 @@
     error,
     onHeldChange,
     onLanguagesChange,
+    onRulesChange,
     onExit
   }: {
     lines: Line[];
+    rules: GlossaryRule[];
     languages: Languages;
     pending: string;
     held: boolean;
@@ -23,13 +27,34 @@
     error: string | null;
     onHeldChange: (held: boolean) => void;
     onLanguagesChange: (next: Languages) => void;
+    onRulesChange: (next: GlossaryRule[]) => void;
     onExit: () => void;
   } = $props();
 
   let scale = $state(1);
   let inverted = $state(false);
   let langOpen = $state(false);
+  let glossaryOpen = $state(false);
+  let from = $state('');
+  let to = $state('');
+  let glossaryError = $state<string | null>(null);
   const visible = $derived(lines.slice(-3));
+
+  function addRule() {
+    const rule = { from: from.trim(), to: to.trim() };
+    if (!rule.from || !rule.to || [...rule.from].length > 80 || [...rule.to].length > 80) {
+      glossaryError = 'どちらも1〜80文字で入力してください';
+      return;
+    }
+    if (rules.length >= 50 || rules.some((item) => item.from === rule.from)) {
+      glossaryError = '同じ誤認識表記は登録済みか、50件の上限に達しています';
+      return;
+    }
+    onRulesChange([...rules, rule]);
+    from = '';
+    to = '';
+    glossaryError = null;
+  }
 
   onMount(() => {
     const saved = Number(localStorage.getItem('lpt-mimi-scale'));
@@ -49,6 +74,13 @@
   }
 
   function keydown(event: KeyboardEvent) {
+    if (glossaryOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        glossaryOpen = false;
+      }
+      return;
+    }
     if (langOpen) return;
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -72,9 +104,9 @@
 <section class="mimi" class:inverted aria-label="対面モード" style={`--mimi-scale: ${scale}`}>
   <header>
     <strong>対面モード</strong>
-    <span>マイクのみ</span>
+    <span>マイクのみ · Soniox</span>
     <div class="language">
-      <button type="button" aria-haspopup="dialog" aria-expanded={langOpen} title="言語と翻訳" onclick={() => (langOpen = !langOpen)}>{pillText(languages)} ▾</button>
+      <button type="button" aria-haspopup="dialog" aria-expanded={langOpen} title="言語と翻訳" disabled={held} onclick={() => (langOpen = !langOpen)}>{pillText(languages)} ▾</button>
       {#if langOpen}
         <LanguagePopover
           {languages}
@@ -84,6 +116,24 @@
           }}
           onclose={() => (langOpen = false)}
         />
+      {/if}
+    </div>
+    <div class="glossary">
+      <button type="button" aria-haspopup="dialog" aria-expanded={glossaryOpen} disabled={held} onclick={() => { glossaryOpen = !glossaryOpen; langOpen = false; }}>辞書 ({rules.length})</button>
+      {#if glossaryOpen}
+        <div class="glossary-panel" role="dialog" aria-label="固有名詞の辞書">
+          <div class="glossary-title"><strong>固有名詞の修正</strong><button type="button" onclick={() => (glossaryOpen = false)}>閉じる</button></div>
+          <p>誤認識された表記を正しい名前に直します。次に話すときから有効です。</p>
+          <form onsubmit={(event) => { event.preventDefault(); addRule(); }}>
+            <label>誤認識表記<input bind:value={from} maxlength="80" placeholder="クロードコード" /></label>
+            <label>正しい表記<input bind:value={to} maxlength="80" placeholder="Claude Code" /></label>
+            <button type="submit">追加</button>
+          </form>
+          {#if glossaryError}<p class="glossary-error" role="alert">{glossaryError}</p>{/if}
+          {#each rules as rule, index (`${rule.from}-${index}`)}
+            <div class="glossary-rule"><span>{rule.from} → {rule.to}</span><button type="button" aria-label={`${rule.from} を削除`} onclick={() => onRulesChange(rules.filter((_, i) => i !== index))}>削除</button></div>
+          {/each}
+        </div>
       {/if}
     </div>
     <div class="spacer"></div>
@@ -119,6 +169,7 @@
       type="button"
       class="ptt"
       class:held
+      disabled={glossaryOpen}
       onpointerdown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -154,6 +205,18 @@
   .language { position: relative; min-width: 0; }
   .language > button { max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
   .language :global(.lang-pop) { color: #1d1d1f; }
+  .glossary { position: relative; }
+  .glossary-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 5; width: min(380px, 85vw); max-height: 60vh; overflow: auto; padding: 16px; border: 1px solid #aaa; border-radius: 9px; background: #fff; color: #1d1d1f; box-shadow: 0 10px 30px #0002; }
+  .glossary-panel strong { font-size: 15px; }
+  .glossary-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .glossary-panel p { margin: 8px 0; font-size: 13px; line-height: 1.4; }
+  .glossary-panel form { display: grid; gap: 8px; margin: 12px 0; }
+  .glossary-panel label { display: grid; gap: 4px; font-size: 13px; }
+  .glossary-panel input { min-height: 36px; padding: 6px 8px; border: 1px solid #aaa; border-radius: 6px; font: inherit; }
+  .glossary-panel form button { justify-self: start; }
+  .glossary-panel .glossary-error { color: #c31d2b; }
+  .glossary-rule { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid #ddd; font-size: 13px; overflow-wrap: anywhere; }
+  .glossary-rule span { white-space: normal; }
   .spacer { flex: 1; }
   header button { min-width: 42px; min-height: 36px; padding: 0 8px; border: 1px solid #aaa; border-radius: 7px; font-size: 13px; white-space: nowrap; }
   .inverted header button { border-color: #777; }

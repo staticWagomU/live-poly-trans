@@ -28,6 +28,7 @@ use kkm_core::{Lane, Recognizer};
 /// Decode cadence, measured step-start to step-start: a slow decode eats
 /// into the following idle time instead of stacking on top of it.
 const STEP_INTERVAL: Duration = Duration::from_millis(1000);
+const SONIOX_STEP_INTERVAL: Duration = Duration::from_millis(100);
 /// How often the worker drains the ring buffer and checks for commands;
 /// also the worst-case extra latency for Stop.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -42,9 +43,41 @@ const OVERRUN_NOTICE: Duration = Duration::from_secs(5);
 const ANCHOR_JUMP_NANOS: u64 = 30_000_000;
 
 pub enum Cmd {
-    Start { mimi: bool },
+    Start {
+        mimi: bool,
+        rules: Vec<GlossaryRule>,
+    },
     Stop,
-    RespondOutputDevice { prompt_id: u64, switch_device: bool },
+    RespondOutputDevice {
+        prompt_id: u64,
+        switch_device: bool,
+    },
+}
+
+#[derive(Clone, serde::Deserialize)]
+pub struct GlossaryRule {
+    from: String,
+    to: String,
+}
+
+pub fn validate_glossary(rules: &[GlossaryRule]) -> Result<(), String> {
+    if rules.len() > 50
+        || rules.iter().any(|r| {
+            r.from.trim().is_empty()
+                || r.to.trim().is_empty()
+                || r.from.chars().count() > 80
+                || r.to.chars().count() > 80
+        })
+    {
+        return Err("辞書は50件以内、各表記は1〜80文字で登録してください".into());
+    }
+    Ok(())
+}
+
+fn apply_glossary(text: &str, rules: &[GlossaryRule]) -> String {
+    rules.iter().fold(text.to_string(), |text, rule| {
+        text.replace(&rule.from, &rule.to)
+    })
 }
 
 const OUTPUT_DEVICE_WINDOW: &str = "output-device-change";
@@ -226,10 +259,32 @@ pub struct Ui {
 /// sessions. Each lane recognises through its own [`Recognizer`] over this.
 type Models = Rc<RefCell<kkm_whisper::WhisperModels>>;
 
+enum AsrBackend {
+    Whisper(Models),
+    Soniox {
+        api_key: String,
+        spoken: Vec<String>,
+        rules: Vec<GlossaryRule>,
+    },
+}
+
 /// The recogniser a new lane gets. One place to change when there is more
 /// than one ASR to choose from (plan.md Step 6).
-fn recognizer(models: &Models) -> Box<dyn Recognizer> {
-    Box::new(kkm_whisper::WhisperRecognizer::new(Rc::clone(models)))
+fn recognizer(backend: &AsrBackend) -> Box<dyn Recognizer> {
+    match backend {
+        AsrBackend::Whisper(models) => {
+            Box::new(kkm_whisper::WhisperRecognizer::new(Rc::clone(models)))
+        }
+        AsrBackend::Soniox {
+            api_key,
+            spoken,
+            rules,
+        } => Box::new(crate::soniox::SonioxRecognizer::new(
+            api_key.clone(),
+            spoken.clone(),
+            rules.iter().map(|rule| rule.to.clone()).collect(),
+        )),
+    }
 }
 
 /// Where models are looked for, in order: what a download put in the app's
@@ -424,8 +479,8 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
         match cmd {
             Cmd::Stop => {}                       // Stop while idle
             Cmd::RespondOutputDevice { .. } => {} // no prompt while idle
-            Cmd::Start { mimi } => {
-                match run_session(&cmd_rx, &ui, &mut engines, &mut translations, mimi) {
+            Cmd::Start { mimi, rules } => {
+                match run_session(&cmd_rx, &ui, &mut engines, &mut translations, mimi, &rules) {
                     Ok(()) => emit_status(&ui, "idle", None),
                     Err(e) => emit_status(&ui, "error", Some(format!("{e:#}"))),
                 }
@@ -458,8 +513,18 @@ fn run_session(
     engines: &mut Option<Models>,
     translations: &mut Translations,
     mimi: bool,
+    rules: &[GlossaryRule],
 ) -> anyhow::Result<()> {
-    let models = load_engines(ui, engines, &translations.policy().spoken)?;
+    let backend = if mimi {
+        AsrBackend::Soniox {
+            api_key: crate::soniox::api_key()
+                .ok_or_else(|| anyhow::anyhow!("対面モードには SONIOX_API_KEY が必要です"))?,
+            spoken: translations.policy().spoken,
+            rules: rules.to_vec(),
+        }
+    } else {
+        AsrBackend::Whisper(load_engines(ui, engines, &translations.policy().spoken)?)
+    };
     // Load the translation model now rather than on the first sentence: the
     // load overlaps the start of the meeting instead of delaying the first
     // translation by all of it.
@@ -467,7 +532,10 @@ fn run_session(
     let stop_capture = Arc::new(AtomicBool::new(false));
     let result = (|| {
         let mic = start_capture(capture::mic::spawn, &stop_capture)?;
-        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic, recognizer(&models))?];
+        let mut lanes = vec![LaneRuntime::new(Lane::Mic, mic, recognizer(&backend))?];
+        if mimi {
+            lanes[0].next_step = Instant::now();
+        }
         // The speaker lane is best-effort: it needs macOS 14.2+ and the
         // system-audio permission, and a meeting is still worth
         // transcribing from the mic alone when it is unavailable.
@@ -477,7 +545,7 @@ fn run_session(
         } else {
             start_speaker(&stop_capture).and_then(|session| {
                 session
-                    .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&models)))
+                    .map(|s| LaneRuntime::new(Lane::Speaker, s, recognizer(&backend)))
                     .transpose()
             })
         };
@@ -514,7 +582,7 @@ fn run_session(
         let ran = run_capture_loop(
             cmd_rx,
             ui,
-            &models,
+            &backend,
             &mut lanes,
             recorder.as_mut(),
             notices,
@@ -769,6 +837,7 @@ struct Poll<'a> {
     /// This lane's index, in the order the recorder knows the lanes.
     index: usize,
     tr: &'a mut Translations,
+    rules: &'a [GlossaryRule],
 }
 
 impl Poll<'_> {
@@ -848,7 +917,12 @@ impl LaneRuntime {
 
     /// One poll of this lane: drain captured audio, then decode if its
     /// cadence came due.
-    fn tick(&mut self, poll: &mut Poll<'_>, lang: Option<&str>) -> anyhow::Result<()> {
+    fn tick(
+        &mut self,
+        poll: &mut Poll<'_>,
+        lang: Option<&str>,
+        interval: Duration,
+    ) -> anyhow::Result<()> {
         self.pump(poll)?;
         if Instant::now() < self.next_step {
             return Ok(());
@@ -869,7 +943,7 @@ impl LaneRuntime {
                 Some(format!("decode error: {e:#}")),
             ),
         }
-        self.next_step = started + STEP_INTERVAL;
+        self.next_step = started + interval;
         Ok(())
     }
 
@@ -883,7 +957,8 @@ impl LaneRuntime {
         let mut out = out;
         let finished = out.utterance_final.take();
         let utterance = finished.map(|u| {
-            let submitted = poll.tr.submit(self.lane, &u.text, u.lang.as_deref());
+            let text = apply_glossary(&u.text, poll.rules);
+            let submitted = poll.tr.submit(self.lane, &text, u.lang.as_deref());
             if let Some(job) = submitted.evicted {
                 // Its line has been waiting for a translation since before
                 // this one; nothing is coming, so take the wait down.
@@ -893,7 +968,7 @@ impl LaneRuntime {
                 id: submitted.id,
                 start_ms: self.timeline.recording_ms(u.start_ms),
                 end_ms: self.timeline.recording_ms(u.end_ms),
-                text: u.text,
+                text,
                 lang: u.lang,
                 translating: submitted.translating,
             }
@@ -920,6 +995,9 @@ impl LaneRuntime {
         self.recognizer.push_audio(&tail);
         if let Some(fin) = self.recognizer.finish(lang)? {
             self.deliver(poll, fin);
+        }
+        while let Some(out) = self.recognizer.step(lang)? {
+            self.deliver(poll, out);
         }
         // A tail can still be on screen when finish had nothing to flush: a
         // recogniser may drop its pending text rather than commit it.
@@ -1244,18 +1322,29 @@ impl EmitGate {
 fn run_capture_loop(
     cmd_rx: &Receiver<Cmd>,
     ui: &Ui,
-    models: &Models,
+    backend: &AsrBackend,
     lanes: &mut [LaneRuntime],
     mut recorder: Option<&mut record::SessionRecorder>,
     mut notices: Notices,
     translations: &mut Translations,
 ) -> anyhow::Result<()> {
+    let rules: &[GlossaryRule] = match backend {
+        AsrBackend::Soniox { rules, .. } => rules,
+        AsrBackend::Whisper(_) => &[],
+    };
     let mut clock = SessionClock::default();
     let mut pending_output_device = PendingOutputDevice::default();
     // The setting may have been changed while idle, after the engines were
     // loaded — sync before the first decode, not just on later changes.
-    sync_langs(ui, models, &translations.policy(), &mut notices);
+    if let AsrBackend::Whisper(models) = backend {
+        sync_langs(ui, models, &translations.policy(), &mut notices);
+    }
     emit_status(ui, "listening", notices.message());
+    let interval = if matches!(backend, AsrBackend::Soniox { .. }) {
+        SONIOX_STEP_INTERVAL
+    } else {
+        STEP_INTERVAL
+    };
     loop {
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
@@ -1287,7 +1376,9 @@ fn run_capture_loop(
             apply_output_device_event(ui, &mut pending_output_device, &mut notices, event);
         }
         let policy = translations.policy();
-        sync_langs(ui, models, &policy, &mut notices);
+        if let AsrBackend::Whisper(models) = backend {
+            sync_langs(ui, models, &policy, &mut notices);
+        }
         // A single spoken language is pinned, which skips detection outright;
         // two leave the choice to the engine, restricted to those two.
         let lang = policy.pinned_lang().map(str::to_string);
@@ -1299,8 +1390,9 @@ fn run_capture_loop(
                 notices: &mut notices,
                 index,
                 tr: translations,
+                rules,
             };
-            lane.tick(&mut poll, lang.as_deref())?;
+            lane.tick(&mut poll, lang.as_deref(), interval)?;
         }
         collect_translations(
             ui,
@@ -1327,6 +1419,7 @@ fn run_capture_loop(
             notices: &mut notices,
             index,
             tr: translations,
+            rules,
         };
         let finished = lane.finish(&mut poll, lang.as_deref());
         result = result.and(finished);
@@ -1495,6 +1588,25 @@ fn report_recording_failure(ui: &Ui, notices: &mut Notices, rec: &mut record::Se
 mod tests {
     use super::*;
     use kkm_core::scheduler::StepOutput;
+
+    #[test]
+    fn glossary_corrects_final_text_before_translation() {
+        let rules = vec![GlossaryRule {
+            from: "クロードコード".into(),
+            to: "Claude Code".into(),
+        }];
+        assert!(validate_glossary(&rules).is_ok());
+        assert_eq!(
+            apply_glossary("クロードコードとクロードコード", &rules),
+            "Claude CodeとClaude Code"
+        );
+        assert_eq!(apply_glossary("別の名前", &rules), "別の名前");
+        assert!(validate_glossary(&[GlossaryRule {
+            from: String::new(),
+            to: "x".into()
+        }])
+        .is_err());
+    }
 
     #[test]
     fn capture_start_timeout_releases_the_pipeline() {

@@ -26,3 +26,6 @@ cclens.db
 /target
 /models
 /assets
+
+# Local secrets (SONIOX_API_KEY)
+.env
