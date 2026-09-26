@@ -1,70 +1,51 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "LivePolyTrans",
+  "productName": "Kikimimic",
   "version": "0.1.0",
-  "identifier": "com.staticwagomu.live-poly-trans",
+  "identifier": "com.staticwagomu.kikimimic",
   "build": {
-    "beforeDevCommand": "bun run build:helper && bun run build:whisper-engine && bun run dev",
-    "beforeBuildCommand": "bun scripts/prepare-dmg-background.mjs && bun run build:helper && bun run build:whisper-backend && bun run build:whisper-engine && bun run build",
+    "beforeDevCommand": "bun run dev",
+    "beforeBuildCommand": "bun run build",
     "devUrl": "http://127.0.0.1:1420",
     "frontendDist": "../build"
   },
   "app": {
-    "macOSPrivateApi": true,
     "windows": [
       {
-        "title": "LivePolyTrans",
+        "title": "Kikimimic",
         "label": "main",
-        "width": 1180,
-        "height": 800,
-        "minWidth": 720,
-        "minHeight": 520,
-        "decorations": true,
-        "transparent": false
+        "width": 980,
+        "height": 700,
+        "minWidth": 640,
+        "minHeight": 420
+      },
+      {
+        "title": "Kikimimic",
+        "label": "output-device-change",
+        "width": 430,
+        "height": 250,
+        "center": true,
+        "visible": false,
+        "focus": false,
+        "resizable": false,
+        "maximizable": false,
+        "minimizable": false,
+        "closable": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true
       }
     ],
     "security": {
-      "csp": null,
-      "assetProtocol": {
-        "enable": true,
-        "scope": [
-          "$APPDATA/recordings/**"
-        ]
-      }
+      "csp": null
     }
   },
   "bundle": {
     "active": true,
-    "targets": [
-      "dmg"
-    ],
-    "icon": [
-      "icons/icon.png"
-    ],
-    "externalBin": [
-      "binaries/helper",
-      "binaries/lpt-whisper-engine"
-    ],
-    "resources": [
-      "binaries/LivePolyTransHelper.app"
-    ],
+    "targets": ["app"],
+    "icon": ["icons/icon.png"],
     "macOS": {
-      "minimumSystemVersion": "26.0",
-      "dmg": {
-        "background": "icons/dmg-background.png",
-        "windowSize": {
-          "width": 760,
-          "height": 430
-        },
-        "appPosition": {
-          "x": 165,
-          "y": 220
-        },
-        "applicationFolderPosition": {
-          "x": 595,
-          "y": 220
-        }
-      }
+      "minimumSystemVersion": "14.2",
+      "frameworks": ["../target/release/libkkm_translate_ggml.dylib"]
     }
   }
 }

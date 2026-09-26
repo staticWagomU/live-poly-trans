@@ -1,0 +1,17 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/kkm-core",
+    "crates/kkm-translate",
+    "crates/kkm-translate-ggml",
+    "crates/kkm-whisper",
+    "crates/spike",
+    "src-tauri",
+]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+lto = "thin"

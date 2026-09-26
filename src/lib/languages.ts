@@ -1,70 +1,60 @@
-export type LanguageInfo = {
-  id: string;
-  label: string;
-};
+/// The language catalogue, labelled as each language labels itself — no
+/// flags: a language is not a country (English is not only the US, and
+/// representing Arabic with a Saudi flag is worse than lazy).
+///
+/// `jp` and `en` exist for the search box: a Japanese user types「スペイン」,
+/// an English one types "spanish", and both should find Español.
+export type Language = { code: string; name: string; jp: string; en: string };
 
-export type LanguagePair = {
-  source: string;
-  target: string;
-};
+export const LANGUAGES: Language[] = [
+  { code: 'ja', name: '日本語', jp: '日本語', en: 'Japanese' },
+  { code: 'en', name: 'English', jp: '英語', en: 'English' },
+  { code: 'zh', name: '中文', jp: '中国語', en: 'Chinese' },
+  { code: 'ko', name: '한국어', jp: '韓国語', en: 'Korean' },
+  { code: 'es', name: 'Español', jp: 'スペイン語', en: 'Spanish' },
+  { code: 'fr', name: 'Français', jp: 'フランス語', en: 'French' },
+  { code: 'de', name: 'Deutsch', jp: 'ドイツ語', en: 'German' },
+  { code: 'pt', name: 'Português', jp: 'ポルトガル語', en: 'Portuguese' },
+  { code: 'it', name: 'Italiano', jp: 'イタリア語', en: 'Italian' },
+  { code: 'ru', name: 'Русский', jp: 'ロシア語', en: 'Russian' },
+  { code: 'id', name: 'Bahasa Indonesia', jp: 'インドネシア語', en: 'Indonesian' },
+  { code: 'vi', name: 'Tiếng Việt', jp: 'ベトナム語', en: 'Vietnamese' },
+  { code: 'th', name: 'ไทย', jp: 'タイ語', en: 'Thai' },
+  { code: 'hi', name: 'हिन्दी', jp: 'ヒンディー語', en: 'Hindi' },
+  { code: 'ar', name: 'العربية', jp: 'アラビア語', en: 'Arabic' }
+];
 
-export function chooseDefaultLanguagePair(
-  languages: LanguageInfo[],
-  preferredLanguage?: string
-): LanguagePair {
-  const english = languages.find((language) => language.id.toLowerCase().startsWith('en'));
-  const japanese = languages.find((language) => language.id.toLowerCase().startsWith('ja'));
+export const labelOf = (code: string) => LANGUAGES.find((l) => l.code === code)?.name ?? code;
 
-  const preferredPrimary = (preferredLanguage ?? '').split('-')[0]?.toLowerCase() ?? '';
-  const preferred = preferredPrimary
-    ? languages.find((language) => language.id.toLowerCase().startsWith(preferredPrimary))
-    : undefined;
+/// How many languages may be spoken at once. Beyond two, detection on a
+/// one-second window is a guess rather than a decision (docs/step0-results.md),
+/// and the backend rejects it — so the control does not offer it.
+export const MAX_SPOKEN = 2;
 
-  if (preferred) {
-    const partner = [japanese, english, ...languages].find(
-      (language) =>
-        language && language.id.split('-')[0]?.toLowerCase() !== preferredPrimary
-    );
+export type Languages = { spoken: string[]; target: string | null; mutual: boolean };
 
-    if (partner) {
-      return { source: preferred.id, target: partner.id };
-    }
-  }
-
-  if (english && japanese) {
-    return { source: english.id, target: japanese.id };
-  }
-
-  return {
-    source: languages[0]?.id ?? 'en-US',
-    target: languages[1]?.id ?? languages[0]?.id ?? 'ja-JP'
-  };
+/// What the pill says. The symbol carries the mode so the languages
+/// themselves stay readable: none = one language, untranslated;
+/// → = one way; ⇄ = mutual; · = several languages, untranslated.
+export function pillText(languages: Languages): string {
+  const spoken = languages.spoken.map(labelOf);
+  if (!languages.target) return spoken.join(' · ');
+  const target = labelOf(languages.target);
+  const other = languages.spoken.find((code) => code !== languages.target);
+  if (languages.mutual && other) return `${target} ⇄ ${labelOf(other)}`;
+  return `${other ? labelOf(other) : spoken[0]} → ${target}`;
 }
 
-export function languageControlLabel(language: LanguageInfo): string {
-  const baseName = language.label.replace(/\s*\(.+\)\s*$/, '');
-  const region = language.id.split('-')[1];
+/// Mutual only means something with a second language to translate back into.
+export const canBeMutual = (languages: Languages) =>
+  languages.spoken.length === 2 &&
+  !!languages.target &&
+  languages.spoken.includes(languages.target);
 
-  return region ? `${baseName} ${region.toUpperCase()}` : baseName;
-}
-
-export function transcriptionCandidateLanguages(mainLanguage: string, subLanguage: string) {
-  return [mainLanguage, subLanguage].filter(
-    (language, index, languages) => language && languages.indexOf(language) === index
-  );
-}
-
-export function updateLanguagePair(
-  pair: LanguagePair,
-  side: keyof LanguagePair,
-  language: string
-): LanguagePair {
-  if (
-    (side === 'source' && language === pair.target) ||
-    (side === 'target' && language === pair.source)
-  ) {
-    return { source: pair.target, target: pair.source };
-  }
-
-  return { ...pair, [side]: language };
+export function matches(language: Language, term: string): boolean {
+  const needle = term.trim().toLocaleLowerCase();
+  if (!needle) return true;
+  return `${language.code} ${language.name} ${language.jp} ${language.en}`
+    .toLocaleLowerCase()
+    .includes(needle);
 }

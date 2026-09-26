@@ -1,368 +1,248 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import {
-    captionFontFamilyValue,
-    captionLineHeightValue,
-    type CaptionFontFamily,
-    type CaptionLineHeight
-  } from '$lib/captionAppearance';
-  import {
-    decreaseMimiScale,
-    DEFAULT_MIMI_SCALE,
-    increaseMimiScale,
-    MAX_MIMI_SCALE,
-    MIN_MIMI_SCALE
-  } from '$lib/mimiDisplay';
-  import { getMimiInvert, getMimiScale, setMimiInvert, setMimiScale } from '$lib/settingsStore';
+  import LanguagePopover from '$lib/LanguagePopover.svelte';
+  import type { GlossaryRule } from '$lib/glossary';
+  import { pillText, type Languages } from '$lib/languages';
 
-  /// Latest utterance texts, oldest first; the last one is the live line.
-  export let lines: string[];
-  export let pttHeld: boolean;
-  export let captionFontFamily: CaptionFontFamily;
-  export let captionLineHeight: CaptionLineHeight;
-  export let onPttChange: (held: boolean) => void;
-  export let onExit: () => void;
+  type Line = { id: number; text: string; translation: string | null; translating: boolean };
+  let {
+    lines,
+    rules,
+    languages,
+    pending,
+    held,
+    loading,
+    error,
+    onHeldChange,
+    onLanguagesChange,
+    onRulesChange,
+    onExit
+  }: {
+    lines: Line[];
+    rules: GlossaryRule[];
+    languages: Languages;
+    pending: string;
+    held: boolean;
+    loading: boolean;
+    error: string | null;
+    onHeldChange: (held: boolean) => void;
+    onLanguagesChange: (next: Languages) => void;
+    onRulesChange: (next: GlossaryRule[]) => void;
+    onExit: () => void;
+  } = $props();
 
-  let scale = DEFAULT_MIMI_SCALE;
-  let invert = false;
+  let scale = $state(1);
+  let inverted = $state(false);
+  let langOpen = $state(false);
+  let glossaryOpen = $state(false);
+  let from = $state('');
+  let to = $state('');
+  let glossaryError = $state<string | null>(null);
+  const visible = $derived(lines.slice(-3));
+
+  function addRule() {
+    const rule = { from: from.trim(), to: to.trim() };
+    if (!rule.from || !rule.to || [...rule.from].length > 80 || [...rule.to].length > 80) {
+      glossaryError = 'どちらも1〜80文字で入力してください';
+      return;
+    }
+    if (rules.length >= 50 || rules.some((item) => item.from === rule.from)) {
+      glossaryError = '同じ誤認識表記は登録済みか、50件の上限に達しています';
+      return;
+    }
+    onRulesChange([...rules, rule]);
+    from = '';
+    to = '';
+    glossaryError = null;
+  }
 
   onMount(() => {
-    scale = getMimiScale();
-    invert = getMimiInvert();
-
-    return () => {
-      onPttChange(false);
-    };
+    const saved = Number(localStorage.getItem('lpt-mimi-scale'));
+    if (Number.isFinite(saved) && saved >= 0.7 && saved <= 2.2) scale = saved;
+    inverted = localStorage.getItem('lpt-mimi-invert') === '1';
+    return () => onHeldChange(false);
   });
 
-  function setScale(next: number) {
-    scale = next;
-    setMimiScale(next);
+  function changeScale(step: number) {
+    scale = Math.min(2.2, Math.max(0.7, Math.round((scale + step) * 100) / 100));
+    localStorage.setItem('lpt-mimi-scale', String(scale));
   }
 
   function toggleInvert() {
-    invert = !invert;
-    setMimiInvert(invert);
+    inverted = !inverted;
+    localStorage.setItem('lpt-mimi-invert', inverted ? '1' : '0');
   }
 
-  // Space works like the on-screen button: recognition only while held.
-  // key repeat must not re-trigger, and releasing anywhere must stop.
-  function handleKeydown(event: KeyboardEvent) {
+  function keydown(event: KeyboardEvent) {
+    if (glossaryOpen) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        glossaryOpen = false;
+      }
+      return;
+    }
+    if (langOpen) return;
     if (event.key === 'Escape') {
       event.preventDefault();
       onExit();
-      return;
-    }
-
-    if (event.code === 'Space' && !event.repeat) {
+    } else if (event.code === 'Space') {
       event.preventDefault();
-      onPttChange(true);
+      if (!event.repeat) onHeldChange(true);
     }
   }
 
-  function handleKeyup(event: KeyboardEvent) {
+  function keyup(event: KeyboardEvent) {
     if (event.code === 'Space') {
       event.preventDefault();
-      onPttChange(false);
+      onHeldChange(false);
     }
   }
-
-  $: visibleLines = lines.slice(-3);
 </script>
 
-<svelte:window on:keydown={handleKeydown} on:keyup={handleKeyup} />
+<svelte:window onkeydown={keydown} onkeyup={keyup} onblur={() => onHeldChange(false)} />
 
-<section class="mimi" class:invert aria-label="対面モード">
-  <header class="mimi-top">
-    <span class="mimi-badge">👂 対面モード · マイクのみ</span>
+<section class="mimi" class:inverted aria-label="対面モード" style={`--mimi-scale: ${scale}`}>
+  <header>
+    <strong>対面モード</strong>
+    <span>マイクのみ · Soniox</span>
+    <div class="language">
+      <button type="button" aria-haspopup="dialog" aria-expanded={langOpen} title="言語と翻訳" disabled={held} onclick={() => (langOpen = !langOpen)}>{pillText(languages)} ▾</button>
+      {#if langOpen}
+        <LanguagePopover
+          {languages}
+          onapply={(next) => {
+            onLanguagesChange(next);
+            langOpen = false;
+          }}
+          onclose={() => (langOpen = false)}
+        />
+      {/if}
+    </div>
+    <div class="glossary">
+      <button type="button" aria-haspopup="dialog" aria-expanded={glossaryOpen} disabled={held} onclick={() => { glossaryOpen = !glossaryOpen; langOpen = false; }}>辞書 ({rules.length})</button>
+      {#if glossaryOpen}
+        <div class="glossary-panel" role="dialog" aria-label="固有名詞の辞書">
+          <div class="glossary-title"><strong>固有名詞の修正</strong><button type="button" onclick={() => (glossaryOpen = false)}>閉じる</button></div>
+          <p>誤認識された表記を正しい名前に直します。次に話すときから有効です。</p>
+          <form onsubmit={(event) => { event.preventDefault(); addRule(); }}>
+            <label>誤認識表記<input bind:value={from} maxlength="80" placeholder="クロードコード" /></label>
+            <label>正しい表記<input bind:value={to} maxlength="80" placeholder="Claude Code" /></label>
+            <button type="submit">追加</button>
+          </form>
+          {#if glossaryError}<p class="glossary-error" role="alert">{glossaryError}</p>{/if}
+          {#each rules as rule, index (`${rule.from}-${index}`)}
+            <div class="glossary-rule"><span>{rule.from} → {rule.to}</span><button type="button" aria-label={`${rule.from} を削除`} onclick={() => onRulesChange(rules.filter((_, i) => i !== index))}>削除</button></div>
+          {/each}
+        </div>
+      {/if}
+    </div>
     <div class="spacer"></div>
-    <button
-      type="button"
-      class="mimi-ctl"
-      title="文字を小さく"
-      disabled={scale <= MIN_MIMI_SCALE}
-      on:click={() => setScale(decreaseMimiScale(scale))}
-    >
-      A−
-    </button>
-    <button
-      type="button"
-      class="mimi-ctl"
-      title="文字を大きく"
-      disabled={scale >= MAX_MIMI_SCALE}
-      on:click={() => setScale(increaseMimiScale(scale))}
-    >
-      A＋
-    </button>
-    <button type="button" class="mimi-ctl" title="白黒反転" on:click={toggleInvert}>
-      ◐ 反転
-    </button>
-    <button type="button" class="mimi-ctl exit" on:click={onExit}>終了</button>
+    <button type="button" aria-label="文字を小さく" title="文字を小さく" disabled={scale <= 0.7} onclick={() => changeScale(-0.15)}>A−</button>
+    <button type="button" aria-label="文字を大きく" title="文字を大きく" disabled={scale >= 2.2} onclick={() => changeScale(0.15)}>A＋</button>
+    <button type="button" title="白黒反転" onclick={toggleInvert}>◐ 反転</button>
+    <button type="button" class="exit" onclick={onExit}>終了</button>
   </header>
 
-  <div
-    class="mimi-body"
-    style="--mfs: {scale}; --caption-font: {captionFontFamilyValue(
-      captionFontFamily
-    )}; --caption-line: {captionLineHeightValue(captionLineHeight)}"
-  >
-    {#if visibleLines.length === 0}
-      <p class="mimi-hint">下のボタンを押しながらマイクに向かって話すと、ここに大きな文字で表示されます</p>
-    {:else}
-      {#each visibleLines as line, index (index)}
-        <div class="mimi-line">
-          <p>{line}</p>
-        </div>
-      {/each}
+  <div class="lines" aria-live="polite" aria-atomic="false">
+    {#if error}
+      <p class="error" role="alert">{error}</p>
+    {:else if visible.length === 0 && !pending}
+      <p class="hint">ボタンを押しながら話してください</p>
+    {/if}
+    {#each visible as line (line.id)}
+      <div class="line">
+        <p>{line.text}</p>
+        {#if line.translation}
+          <p class="translation">{line.translation}</p>
+        {:else if line.translating}
+          <p class="translation waiting">訳しています…</p>
+        {/if}
+      </div>
+    {/each}
+    {#if pending}
+      <div class="line current"><p>{pending}</p></div>
     {/if}
   </div>
 
-  <footer class="mimi-foot">
+  <footer>
     <button
       type="button"
-      class="mimi-ptt"
-      class:hold={pttHeld}
-      on:pointerdown={(event) => {
+      class="ptt"
+      class:held
+      disabled={glossaryOpen}
+      onpointerdown={(event) => {
         event.preventDefault();
-        onPttChange(true);
+        event.currentTarget.setPointerCapture(event.pointerId);
+        onHeldChange(true);
       }}
-      on:pointerup={() => onPttChange(false)}
-      on:pointercancel={() => onPttChange(false)}
-      on:pointerleave={() => pttHeld && onPttChange(false)}
+      onpointerup={() => onHeldChange(false)}
+      onpointercancel={() => onHeldChange(false)}
     >
-      <span class="ptt-dot"></span>
-      <span>{pttHeld ? '聞き取り中…' : '押しながら話す(スペースキーでも可)'}</span>
+      <span class="dot" aria-hidden="true"></span>
+      {held ? (loading ? 'モデル準備中…' : '聞き取り中…') : '押しながら話す'}
+      <span class="shortcut">スペースキー</span>
     </button>
   </footer>
 </section>
 
 <style>
-  button {
-    font: inherit;
-    cursor: pointer;
-    color: inherit;
-    background: none;
-    border: 0;
-  }
-
-  button:focus-visible {
-    outline: 2px solid var(--blue-focus);
-    outline-offset: 2px;
-    border-radius: 8px;
-  }
-
   .mimi {
     position: absolute;
     inset: 0;
-    z-index: 45;
+    z-index: 50;
     display: grid;
-    grid-template-rows: auto 1fr auto;
-    background: #ffffff;
-    color: #1d1d1f;
-    animation: fadeUp 0.25s ease;
-  }
-
-  .mimi.invert {
-    background: #000;
-    color: #fff;
-  }
-
-  @keyframes fadeUp {
-    from {
-      opacity: 0;
-      transform: translateY(12px);
-    }
-
-    to {
-      opacity: 1;
-      transform: none;
-    }
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .mimi {
-      animation: none;
-    }
-  }
-
-  .spacer {
-    flex: 1;
-  }
-
-  .mimi-top {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 12px 16px;
-    border-bottom: 1px solid rgba(0, 0, 0, 0.09);
-  }
-
-  .mimi.invert .mimi-top,
-  .mimi.invert .mimi-foot {
-    border-color: rgba(255, 255, 255, 0.18);
-  }
-
-  .mimi-badge {
-    font-size: 13px;
-    font-weight: 600;
-    color: #515154;
-  }
-
-  .mimi.invert .mimi-badge {
-    color: rgba(255, 255, 255, 0.75);
-  }
-
-  .mimi-ctl {
-    min-width: 52px;
-    min-height: 44px;
-    padding: 8px 14px;
-    border-radius: 11px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-    background: transparent;
-    font-size: 15px;
-    font-weight: 600;
-  }
-
-  .mimi.invert .mimi-ctl {
-    border-color: rgba(255, 255, 255, 0.35);
-    color: #fff;
-  }
-
-  .mimi-ctl:active:not(:disabled) {
-    transform: scale(0.95);
-  }
-
-  .mimi-ctl:disabled {
-    opacity: 0.4;
-    cursor: default;
-  }
-
-  .mimi-ctl.exit {
-    color: var(--red);
-  }
-
-  .mimi.invert .mimi-ctl.exit {
-    color: #ff6961;
-  }
-
-  .mimi-body {
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: calc(18px * var(--mfs));
-    padding: 24px 40px 28px;
-  }
-
-  .mimi-hint {
-    margin: auto;
-    font-size: 20px;
-    color: #515154;
-    text-align: center;
-    line-height: 1.6;
-  }
-
-  .mimi.invert .mimi-hint {
-    color: rgba(255, 255, 255, 0.75);
-  }
-
-  .mimi-line {
-    animation: fadeUp 0.3s ease;
-  }
-
-  @media (prefers-reduced-motion: reduce) {
-    .mimi-line {
-      animation: none;
-    }
-  }
-
-  .mimi-line p {
-    margin: 0;
-    font-family: var(--caption-font);
-    font-size: calc(26px * var(--mfs));
-    line-height: var(--caption-line);
-    font-weight: 600;
-    letter-spacing: 0;
-    opacity: 0.5;
-    transition: font-size 0.25s ease, opacity 0.25s ease;
-    word-break: break-word;
-  }
-
-  .mimi-line:last-child p {
-    font-size: calc(48px * var(--mfs));
-    opacity: 1;
-  }
-
-  .mimi-foot {
-    padding: 12px 16px 16px;
-    border-top: 1px solid rgba(0, 0, 0, 0.09);
-  }
-
-  .mimi-ptt {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    width: 100%;
-    min-height: 64px;
-    border-radius: 16px;
-    border: 1px solid rgba(0, 0, 0, 0.2);
-    background: #f5f5f7;
-    color: #1d1d1f;
-    font-size: 17px;
-    font-weight: 600;
-    user-select: none;
-    -webkit-user-select: none;
-    touch-action: none;
-    transition: all 0.15s ease;
-  }
-
-  .mimi-ptt .ptt-dot {
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: #86868b;
-    opacity: 0.5;
-    transition: all 0.15s ease;
-  }
-
-  .mimi-ptt.hold {
-    background: var(--green);
-    border-color: var(--green);
-    color: #fff;
-    transform: scale(0.99);
-  }
-
-  .mimi-ptt.hold .ptt-dot {
+    grid-template-rows: auto minmax(0, 1fr) auto;
     background: #fff;
-    opacity: 1;
-    animation: pulse 1.2s ease-out infinite;
+    color: #1d1d1f;
   }
-
-  @media (prefers-reduced-motion: reduce) {
-    .mimi-ptt.hold .ptt-dot {
-      animation: none;
-    }
-  }
-
-  @keyframes pulse {
-    0% {
-      box-shadow: 0 0 0 0 rgba(52, 199, 89, 0.35);
-    }
-
-    100% {
-      box-shadow: 0 0 0 20px rgba(52, 199, 89, 0);
-    }
-  }
-
-  .mimi.invert .mimi-ptt {
-    background: rgba(255, 255, 255, 0.1);
-    border-color: rgba(255, 255, 255, 0.3);
-    color: #fff;
-  }
-
-  .mimi.invert .mimi-ptt.hold {
-    background: var(--green);
-    border-color: var(--green);
+  .mimi.inverted { background: #080808; color: #fff; }
+  header, footer { display: flex; align-items: center; gap: 8px; padding: 14px 20px; border-bottom: 1px solid currentColor; }
+  header { padding-left: 82px; border-color: #ddd; }
+  footer { border-top: 1px solid #ddd; border-bottom: 0; }
+  .inverted header, .inverted footer { border-color: #555; }
+  header strong { font-size: 14px; white-space: nowrap; }
+  header span { font-size: 12px; opacity: .65; white-space: nowrap; }
+  .language { position: relative; min-width: 0; }
+  .language > button { max-width: 230px; overflow: hidden; text-overflow: ellipsis; }
+  .language :global(.lang-pop) { color: #1d1d1f; }
+  .glossary { position: relative; }
+  .glossary-panel { position: absolute; top: calc(100% + 8px); left: 0; z-index: 5; width: min(380px, 85vw); max-height: 60vh; overflow: auto; padding: 16px; border: 1px solid #aaa; border-radius: 9px; background: #fff; color: #1d1d1f; box-shadow: 0 10px 30px #0002; }
+  .glossary-panel strong { font-size: 15px; }
+  .glossary-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+  .glossary-panel p { margin: 8px 0; font-size: 13px; line-height: 1.4; }
+  .glossary-panel form { display: grid; gap: 8px; margin: 12px 0; }
+  .glossary-panel label { display: grid; gap: 4px; font-size: 13px; }
+  .glossary-panel input { min-height: 36px; padding: 6px 8px; border: 1px solid #aaa; border-radius: 6px; font: inherit; }
+  .glossary-panel form button { justify-self: start; }
+  .glossary-panel .glossary-error { color: #c31d2b; }
+  .glossary-rule { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 0; border-top: 1px solid #ddd; font-size: 13px; overflow-wrap: anywhere; }
+  .glossary-rule span { white-space: normal; }
+  .spacer { flex: 1; }
+  header button { min-width: 42px; min-height: 36px; padding: 0 8px; border: 1px solid #aaa; border-radius: 7px; font-size: 13px; white-space: nowrap; }
+  .inverted header button { border-color: #777; }
+  header .exit { color: #c31d2b; }
+  .inverted header .exit { color: #ff747c; }
+  .lines { min-height: 0; overflow: auto; display: flex; flex-direction: column; justify-content: safe flex-end; gap: 22px; padding: 28px 5%; }
+  .hint { margin: auto; color: #666; font-size: 20px; text-align: center; }
+  .inverted .hint { color: #aaa; }
+  .line { flex-shrink: 0; overflow-wrap: anywhere; opacity: .48; }
+  .line:last-child { opacity: 1; }
+  .line p { margin: 0; font-size: calc(30px * var(--mimi-scale)); line-height: 1.35; font-weight: 600; }
+  .line:last-child p:first-child { font-size: calc(48px * var(--mimi-scale)); }
+  .line .translation { margin-top: 5px; color: #0068d8; font-size: calc(27px * var(--mimi-scale)); }
+  .inverted .line .translation { color: #82bbff; }
+  .line .waiting { opacity: .5; }
+  .error { color: #c31d2b; }
+  .ptt { display: flex; align-items: center; justify-content: center; gap: 12px; width: 100%; min-height: 64px; border: 1px solid #aaa; border-radius: 8px; background: #f4f4f5; font-size: 17px; font-weight: 600; touch-action: none; user-select: none; }
+  .inverted .ptt { color: #fff; background: #222; border-color: #777; }
+  .ptt.held, .inverted .ptt.held { color: #fff; background: #16823b; border-color: #16823b; }
+  .dot { width: 13px; height: 13px; border-radius: 50%; background: #999; }
+  .held .dot { background: #fff; }
+  .shortcut { font-size: 12px; font-weight: 400; opacity: .65; }
+  @media (max-width: 700px) {
+    header { flex-wrap: wrap; padding-left: 78px; }
+    header span { display: none; }
+    .shortcut { display: none; }
+    .lines { padding: 20px; }
   }
 </style>

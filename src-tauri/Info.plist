@@ -1,14 +1,13 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "https://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
   <key>NSMicrophoneUsageDescription</key>
-  <string>LivePolyTrans uses the microphone to transcribe and translate your voice.</string>
-  <key>NSSpeechRecognitionUsageDescription</key>
-  <string>LivePolyTrans uses Apple Speech to create live transcripts from audio.</string>
+  <string>Kikimimic transcribes your speech in real time.</string>
+  <!-- Required for the speaker lane's Process Tap. Without this key macOS
+       withholds the permission silently: the tap still runs and its buffers
+       are simply zero-filled (docs/step0-tap-results.md). -->
   <key>NSAudioCaptureUsageDescription</key>
-  <string>LivePolyTrans captures speaker audio so other people's voices can be transcribed and translated.</string>
-  <key>NSScreenCaptureUsageDescription</key>
-  <string>LivePolyTrans captures the display audio stream so speaker audio can be transcribed and translated.</string>
+  <string>Kikimimic transcribes what the other participants say.</string>
 </dict>
 </plist>

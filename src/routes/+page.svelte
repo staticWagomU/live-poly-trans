@@ -1,1807 +1,1889 @@
 <script lang="ts">
-  import '$lib/theme.css';
+  import { onMount } from 'svelte';
   import { invoke } from '@tauri-apps/api/core';
-  import { emit, listen } from '@tauri-apps/api/event';
+  import { listen } from '@tauri-apps/api/event';
   import { getCurrentWindow } from '@tauri-apps/api/window';
-  import { onMount, tick } from 'svelte';
-  import {
-    chooseDefaultLanguagePair,
-    transcriptionCandidateLanguages,
-    updateLanguagePair,
-    type LanguageInfo
-  } from '$lib/languages';
-  import {
-    captureModeFromStreams,
-    streamsForCaptureMode,
-    type AudioStream,
-    type CaptureMode
-  } from '$lib/audioMode';
-  import {
-    appendAudioLevel,
-    emptyAudioLevelHistory,
-    type AudioLevelHistory
-  } from '$lib/audioLevels';
-  import {
-    canDecreaseTranscriptFontScale,
-    canIncreaseTranscriptFontScale,
-    decreaseTranscriptFontScale,
-    DEFAULT_TRANSCRIPT_FONT_SCALE,
-    increaseTranscriptFontScale
-  } from '$lib/transcriptFontSize';
-  import { applyGlossaryToEntries, type GlossaryRule } from '$lib/glossary';
-  import {
-    getAutoStart,
-    getCaptionFontFamily,
-    getCaptionLineHeight,
-    getExportDirectory,
-    getFileNameTemplate,
-    getGlobalShortcutsEnabled,
-    getGlossaryRules,
-    getKeepInMenuBar,
-    getIncludeAudio,
-    getLiveSpeakerOverrides,
-    getMarkdownAutoExport,
-    getOverlayFadeSeconds,
-    getOverlayFontScale,
-    getOverlayLineCount,
-    getOverlayShowTranslation,
-    getOverlayShortcut,
-    getRecordingShortcut,
-    getSpeechModel,
-    getThemePreference,
-    getTranscriptFontScale,
-    getTranslationEngine,
-    getTranslationFallbackEnabled,
-    getOllamaEndpoint,
-    getOllamaModel,
-    SETTINGS_KEYS,
-    setAutoStart as storeAutoStart,
-    setIncludeAudio as storeIncludeAudio,
-    setSpeechModel as storeSpeechModel,
-    setTranscriptFontScale as storeTranscriptFontScale,
-    subscribeSettings,
-    type LiveSpeakerOverrides
-  } from '$lib/settingsStore';
-  import { markdownExportPath } from '$lib/saveSettings';
-  import { resolveSpeakerLabels } from '$lib/speakers';
-  import { applyTranscriptMessage } from '$lib/transcriptInterim';
-  import { chatMessagesToTranscriptEntries, type TranscriptEntry } from '$lib/export/types';
-  import { toPlainText } from '$lib/export/plainText';
-  import {
-    buildTextExport,
-    saveTextExportToFile,
-    timestampLabel,
-    uniqueSpeakerLabels,
-    type TextExportFormat
-  } from '$lib/export/saveTextExport';
-  import {
-    applyTranslationEvent,
-    interleaveThreadItems,
-    recordingStartMarker,
-    recordingStopMarker,
-    transcriptEventToMessage,
-    type ChatMessage,
-    type HelperEvent,
-    type RecordingMarker,
-    type StatusEvent,
-    type TranscriptEvent
-  } from '$lib/transcripts';
-  import {
-    actionItemsForMarkdown,
-    actionItemsForRecordingWindow,
-    mergeActionItems,
-    parseActionItemsJson,
-    rebaseActionSourceIndexes,
-    type ActionItemSourceWindow,
-    type ActionItem
-  } from '$lib/actionItems';
-  import {
-    boundMessagesByChars,
-    planSummaryRequest,
-    recentChatHistory,
-    type ChatTurn
-  } from '$lib/aiContext';
-  import AppToolbar from '$lib/AppToolbar.svelte';
-  import LiveView from '$lib/LiveView.svelte';
+  import LanguagePopover from '$lib/LanguagePopover.svelte';
   import MimiView from '$lib/MimiView.svelte';
-  import RecordingsView from '$lib/RecordingsView.svelte';
-  import SettingsView from '$lib/SettingsView.svelte';
-  import {
-    missingPermissions,
-    permissionStartupNotice,
-    requiredPermissions,
-    type PermissionStatus
-  } from '$lib/permissions';
-  import { streamEnginePayload, type SpeechModelSelection } from '$lib/speechModels';
-  import {
-    emptyStreamSessions,
-    isCurrentSessionEvent,
-    recordingElapsedSeconds,
-    shouldRestartStream,
-    withStreamSession,
-    withoutStreamSessions,
-    type RecordingSession,
-    type StreamSessions
-  } from '$lib/captureState';
-  import { createAsyncCleanupRegistry } from '$lib/asyncCleanup';
-  import { completeCaptureStop } from '$lib/captureLifecycle';
-  import type { CaptionFontFamily, CaptionLineHeight } from '$lib/captionAppearance';
-  import { themeDataAttribute, type ThemePreference } from '$lib/themePreference';
-  import type { TranslationEngine } from '$lib/translationSettings';
-  import { buildOverlayCaptionLines } from '$lib/overlayCaptions';
-  import type { TrayPanelState } from '$lib/trayPanel';
-  import {
-    maxRestartAttempts,
-    remainingRestartAttempts,
-    restartBackoffMs
-  } from '$lib/streamRestart';
+  import { loadGlossary, saveGlossary, type GlossaryRule } from '$lib/glossary';
+  import { pillText, type Languages } from '$lib/languages';
+  import { clock, dayGroup, durationLabel, sessionStart, timeOfDay } from '$lib/format';
 
-  type LanguageDetectionPayload = {
-    installed: LanguageInfo[];
-    supported: LanguageInfo[];
+  type Lane = 'mic' | 'speaker';
+  /// A finished utterance, positioned in this session's recording.
+  type Utterance = {
+    id: number;
+    text: string;
+    startMs: number;
+    endMs: number;
+    lang: string | null;
+    /// A translation is on its way; leave room for it.
+    translating: boolean;
   };
-
-  type CreatedRecording = {
-    id: string;
+  type TranscriptPayload = {
+    lane: Lane;
+    committedDelta: string;
+    volatile: string;
+    utteranceFinal: Utterance | null;
+  };
+  /// `text: null` means this utterance is not getting a translation after all
+  /// (the queue overflowed, or the backend failed).
+  type TranslationPayload = { id: number; lane: Lane; text: string | null; lang: string | null };
+  type StatusPayload = {
+    /// `stopping` is the drain: capture has ended and the last sentences are
+    /// still being translated.
+    state: 'idle' | 'loading' | 'listening' | 'stopping' | 'error';
+    message: string | null;
+    /// Directory this session's WAV files are being written to; stays put
+    /// after a stop so the files can still be found.
+    recordingDir: string | null;
+  };
+  type OutputDevicePrompt = {
+    id: number;
+    previousName: string;
+    detectedName: string;
+  };
+  /// One session on disk, as the library lists it.
+  type Recording = {
+    name: string;
     dir: string;
+    title: string | null;
+    startedAtMs: number | null;
+    durationMs: number;
+    lanes: Lane[];
+    snippet: string;
+    utterances: number;
+  };
+  /// A past session, read back from its transcript.
+  type Session = {
+    name: string;
+    dir: string;
+    title: string | null;
+    startedAtMs: number | null;
+    durationMs: number;
+    lanes: Lane[];
+    lines: {
+      id: number;
+      lane: Lane;
+      startMs: number;
+      endMs: number;
+      lang: string | null;
+      text: string;
+      translation: string | null;
+      speaker: string | null;
+    }[];
   };
 
-  type HelperExitedPayload = {
-    stream: AudioStream;
-    sessionId: string;
-    code: number | null;
+  // Cap the transcript so an hours-long session doesn't grow the DOM
+  // without bound; the oldest lines scroll away first anyway.
+  const MAX_LINES = 500;
+  const isOutputDevicePrompt = getCurrentWindow().label === 'output-device-change';
+
+  const LANE_LABELS: Record<Lane, string> = { mic: 'マイク', speaker: 'スピーカー' };
+  const LANES: Lane[] = ['mic', 'speaker'];
+
+  /// A settled utterance. `id` comes from the backend so a translation
+  /// arriving seconds later can find its line — including across a stop and
+  /// a fresh Record.
+  type Line = {
+    id: number;
+    startMs: number;
+    text: string;
+    translation: string | null;
+    translating: boolean;
   };
+  /// `pending` is the text committed for the utterance still being spoken;
+  /// it becomes a line once the utterance ends and gets its timestamp.
+  type LaneState = { lines: Line[]; pending: string; volatile: string };
 
-  type TranslationBackendErrorPayload = {
-    engine: string;
-    message: string;
-    fallbackEnabled: boolean;
-    stream: AudioStream;
-    segmentId: string;
-    sessionId: string;
-  };
+  const emptyLane = (): LaneState => ({ lines: [], pending: '', volatile: '' });
+  let lanes = $state<Record<Lane, LaneState>>({ mic: emptyLane(), speaker: emptyLane() });
+  let status = $state<StatusPayload>({ state: 'idle', message: null, recordingDir: null });
+  let languages = $state<Languages>({ spoken: ['ja', 'en'], target: 'ja', mutual: false });
+  let busy = $state(false);
+  let mimiActive = $state(false);
+  let mimiExiting = $state(false);
+  let mimiPendingStarts = 0;
+  let mimiSessionLive = false;
+  let mimiHeld = $state(false);
+  let mimiLines = $state<{ id: number; text: string; translation: string | null; translating: boolean }[]>([]);
+  let mimiPending = $state('');
+  let mimiVolatile = $state('');
+  let mimiError = $state<string | null>(null);
+  let mimiRules = $state<GlossaryRule[]>([]);
+  let mimiQueue: Promise<void> = Promise.resolve();
 
-  const summaryRefreshDelayMs = 6000;
+  /// `home` is the library; `session` is one recording — the live one when
+  /// `opened` is null, otherwise the one read back off disk.
+  let view = $state<'home' | 'session'>('home');
+  let opened = $state<Session | null>(null);
+  let recordings = $state<Recording[]>([]);
+  let search = $state('');
+  let langOpen = $state(false);
+  let actionsOpen = $state(false);
+  let editingTitle = $state(false);
+  let titleDraft = $state('');
+  let savingTitle = $state(false);
+  let diarizingDir = $state<string | null>(null);
+  let toast = $state<string | null>(null);
+  let toastTimer: ReturnType<typeof setTimeout> | undefined;
+  let outputDevicePrompt = $state<OutputDevicePrompt | null>(null);
+  let respondingToOutputDevice = $state(false);
+  let outputDevicePromptError = $state<string | null>(null);
+  let outputDeviceTitle = $state<HTMLHeadingElement>();
 
-  let activeTab: 'live' | 'recordings' | 'settings' = 'live';
-  let mainLanguage = 'en-US';
-  let subLanguage = 'ja-JP';
-  let installedLanguages: LanguageInfo[] = [
-    { id: 'en-US', label: 'English' },
-    { id: 'ja-JP', label: 'Japanese' }
-  ];
-  let messages: ChatMessage[] = [];
-  let interimMessages: ChatMessage[] = [];
-  let captureMode: CaptureMode = 'both';
-  let activeStreams = new Set<AudioStream>();
-  let audioLevelHistory: AudioLevelHistory = emptyAudioLevelHistory();
-  let streamSessionIds: StreamSessions = emptyStreamSessions();
-  let restartAttempts: Record<AudioStream, number> = { mic: 0, speaker: 0 };
-  let streamStartedAt: Record<AudioStream, number | null> = { mic: null, speaker: null };
-  // Bumped on every user-initiated start/stop; a pending auto-restart from
-  // before the bump must not resurrect a session the user already stopped.
-  let captureGeneration = 0;
-  let recordingSession: RecordingSession | null = null;
-  let latestActionRecordingWindow: ActionItemSourceWindow | null = null;
-  let recordingElapsed = 0;
-  let recordingTimer: ReturnType<typeof setInterval> | null = null;
-  let isRecordingBusy = false;
-  let markers: RecordingMarker[] = [];
-  let captureTransition: 'starting' | 'stopping' | 'switching' | null = null;
-  let liveView: LiveView | undefined;
-  let statusMessage: string | null = null;
-  let actionNotice: string | null = null;
-  let actionNoticeTimer: ReturnType<typeof setTimeout> | null = null;
-  let aiSummary = '';
-  let summaryCoveredCount = 0;
-  let summaryError: string | null = null;
-  let actionItems: ActionItem[] = [];
-  let actionCoveredCount = 0;
-  let actionNewCount = 0;
-  let actionsError: string | null = null;
-  let aiQuestion = '';
-  let chatTurns: ChatTurn[] = [];
-  let appError: string | null = null;
-  let isSummaryLoading = false;
-  let isActionsLoading = false;
-  let isAnswerLoading = false;
-  let summaryRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-  let lastOverlayPayload = '';
-  let lastTrayPanelPayload = '';
-  let overlayLineCount = 2;
-  let overlayShowTranslation = true;
-  let overlayFadeSeconds = 0;
-  let overlayFontScale = 1;
-  let globalShortcutsEnabled = true;
-  let recordingShortcut = 'CommandOrControl+Alt+R';
-  let overlayShortcut = 'CommandOrControl+Alt+L';
-  let keepInMenuBar = false;
-  let overlayVisible = false;
-  let themePreference: ThemePreference = 'auto';
-  let captionFontFamily: CaptionFontFamily = 'system';
-  let captionLineHeight: CaptionLineHeight = 'normal';
-  let transcriptFontScale = DEFAULT_TRANSCRIPT_FONT_SCALE;
-  let speechModel: SpeechModelSelection = { engine: 'builtin' };
-  let translationEngine: TranslationEngine = 'apple';
-  let translationFallbackEnabled = true;
-  let ollamaEndpoint = 'http://127.0.0.1:11434';
-  let ollamaModel = 'llama3.1';
-  let lastTranslationErrorNoticeKey = '';
-  let confirmingClear = false;
-  let confirmClearTimer: ReturnType<typeof setTimeout> | null = null;
-  let aiOpen = false;
-  let aiUnavailable = false;
-  let autoStartEnabled = true;
-  let includeAudioEnabled = true;
-  let mimiActive = false;
-  let mimiPreviousMode: CaptureMode = 'both';
-  let mimiPreviousRunning = false;
-  let mimiStartCount = 0;
-  let pttHeld = false;
-  let pttReconciling = false;
-  let permissionNotice: string | null = null;
-  let settingsPane:
-    | 'general'
-    | 'appearance'
-    | 'privacy'
-    | 'model'
-    | 'translation'
-    | 'langs'
-    | 'glossary'
-    | 'save' = 'general';
-  let liveSpeakerOverrides: LiveSpeakerOverrides | null = null;
-  let glossaryRules: GlossaryRule[] = [];
+  // The backend is the source of truth for running: a capture error flips
+  // it back to idle/error even though the Record invoke itself succeeded.
+  const running = $derived(status.state === 'loading' || status.state === 'listening');
+  // The folder name alone: it is the session's timestamp, and the full path
+  // is a tooltip away.
+  const recordingName = $derived(status.recordingDir?.split(/[\\/]/).pop() ?? null);
 
-  $: isTranscribing = activeStreams.size > 0;
-  $: isMicCapturing = activeStreams.has('mic');
-  $: isSpeakerCapturing = activeStreams.has('speaker');
-  $: isCaptureBusy = captureTransition !== null;
-  $: isStarting = captureTransition === 'starting';
-  $: selectedCaptureMode = isTranscribing ? captureModeFromStreams(activeStreams) : captureMode;
-  $: threadItems = [...interleaveThreadItems(messages, markers), ...interimMessages];
-  $: captureModeLabel =
-    selectedCaptureMode === 'both'
-      ? 'Speaker + Mic'
-      : selectedCaptureMode === 'mic'
-        ? 'Mic'
-        : 'Speaker';
-  // Only utterances spoken after entering the mode; translations and
-  // speaker labels are intentionally not shown there.
-  $: mimiLines = mimiActive
-    ? [...messages.slice(mimiStartCount), ...interimMessages]
-        .filter((message) => message.role === 'self')
-        .map((message) => message.text)
-    : [];
-  $: publishOverlayCaptions();
-  $: publishTrayPanelState();
-
-  onMount(() => {
-    transcriptFontScale = getTranscriptFontScale();
-    speechModel = getSpeechModel();
-    overlayLineCount = getOverlayLineCount();
-    overlayShowTranslation = getOverlayShowTranslation();
-    overlayFadeSeconds = getOverlayFadeSeconds();
-    overlayFontScale = getOverlayFontScale();
-    globalShortcutsEnabled = getGlobalShortcutsEnabled();
-    recordingShortcut = getRecordingShortcut();
-    overlayShortcut = getOverlayShortcut();
-    keepInMenuBar = getKeepInMenuBar();
-    themePreference = getThemePreference();
-    applyThemePreference(themePreference);
-    captionFontFamily = getCaptionFontFamily();
-    captionLineHeight = getCaptionLineHeight();
-    translationEngine = getTranslationEngine();
-    translationFallbackEnabled = getTranslationFallbackEnabled();
-    ollamaEndpoint = getOllamaEndpoint();
-    ollamaModel = getOllamaModel();
-    autoStartEnabled = getAutoStart();
-    includeAudioEnabled = getIncludeAudio();
-    liveSpeakerOverrides = getLiveSpeakerOverrides();
-    glossaryRules = getGlossaryRules();
-    // A name edited in Settings shows up in the live captions right away;
-    // the incoming events and stored transcripts keep their original labels.
-    const unsubscribeSpeakerNames = [
-      SETTINGS_KEYS.selfSpeakerName,
-      SETTINGS_KEYS.otherSpeakerName
-    ].map((key) =>
-      subscribeSettings(key, () => {
-        liveSpeakerOverrides = getLiveSpeakerOverrides();
-      })
-    );
-    // Same deal for glossary edits: final captions re-render corrected while
-    // the underlying messages stay raw.
-    const unsubscribeGlossary = subscribeSettings(SETTINGS_KEYS.glossary, () => {
-      glossaryRules = getGlossaryRules();
-    });
-    const unsubscribeOverlaySettings = [
-      subscribeSettings(SETTINGS_KEYS.overlayLineCount, () => {
-        overlayLineCount = getOverlayLineCount();
-      }),
-      subscribeSettings(SETTINGS_KEYS.overlayShowTranslation, () => {
-        overlayShowTranslation = getOverlayShowTranslation();
-      }),
-      subscribeSettings(SETTINGS_KEYS.overlayFadeSeconds, () => {
-        overlayFadeSeconds = getOverlayFadeSeconds();
-      }),
-      subscribeSettings(SETTINGS_KEYS.overlayFontScale, () => {
-        overlayFontScale = getOverlayFontScale();
-      }),
-      subscribeSettings(SETTINGS_KEYS.globalShortcutsEnabled, () => {
-        globalShortcutsEnabled = getGlobalShortcutsEnabled();
-        void configureGlobalShortcuts();
-      }),
-      subscribeSettings(SETTINGS_KEYS.recordingShortcut, () => {
-        recordingShortcut = getRecordingShortcut();
-        void configureGlobalShortcuts();
-      }),
-      subscribeSettings(SETTINGS_KEYS.overlayShortcut, () => {
-        overlayShortcut = getOverlayShortcut();
-        void configureGlobalShortcuts();
-      }),
-      subscribeSettings(SETTINGS_KEYS.keepInMenuBar, () => {
-        keepInMenuBar = getKeepInMenuBar();
-      }),
-      subscribeSettings(SETTINGS_KEYS.themePreference, () => {
-        themePreference = getThemePreference();
-        applyThemePreference(themePreference);
-      }),
-      subscribeSettings(SETTINGS_KEYS.captionFontFamily, () => {
-        captionFontFamily = getCaptionFontFamily();
-        void publishOverlayCaptions();
-      }),
-      subscribeSettings(SETTINGS_KEYS.captionLineHeight, () => {
-        captionLineHeight = getCaptionLineHeight();
-        void publishOverlayCaptions();
-      }),
-      subscribeSettings(SETTINGS_KEYS.translationEngine, () => {
-        translationEngine = getTranslationEngine();
-        lastTranslationErrorNoticeKey = '';
-        void restartTranscriptionIfRunning();
-      }),
-      subscribeSettings(SETTINGS_KEYS.translationFallbackEnabled, () => {
-        translationFallbackEnabled = getTranslationFallbackEnabled();
-        lastTranslationErrorNoticeKey = '';
-        void restartTranscriptionIfRunning();
-      }),
-      subscribeSettings(SETTINGS_KEYS.ollamaEndpoint, () => {
-        ollamaEndpoint = getOllamaEndpoint();
-        lastTranslationErrorNoticeKey = '';
-        void restartTranscriptionIfRunning();
-      }),
-      subscribeSettings(SETTINGS_KEYS.ollamaModel, () => {
-        ollamaModel = getOllamaModel();
-        lastTranslationErrorNoticeKey = '';
-        void restartTranscriptionIfRunning();
-      })
-    ];
-    const autoStart = autoStartEnabled;
-
-    const cleanupRegistry = createAsyncCleanupRegistry((error) => {
-      console.error('Failed to remove an app event listener', error);
-    });
-
-    void Promise.all([
-      cleanupRegistry.add(
-        listen<HelperEvent>('transcript-event', (event) => {
-          void handleHelperEvent(event.payload);
-        })
-      ),
-      cleanupRegistry.add(
-        listen<string>('helper-error', (event) => {
-          appError = event.payload;
-        })
-      ),
-      cleanupRegistry.add(
-        listen<TranslationBackendErrorPayload>('translation-backend-error', (event) => {
-          handleTranslationBackendError(event.payload);
-        })
-      ),
-      cleanupRegistry.add(
-        listen<HelperExitedPayload>('helper-exited', (event) => {
-          void handleHelperExit(event.payload);
-        })
-      ),
-      cleanupRegistry.add(
-        listen<string>('tray-command', (event) => {
-          void handleTrayCommand(event.payload);
-        })
-      ),
-      cleanupRegistry.add(
-        listen('tray-panel-request-state', () => {
-          void publishTrayPanelState(true);
-        })
-      ),
-      cleanupRegistry.add(
-        listen<string>('shortcut-error', (event) => {
-          appError = event.payload;
-        })
-      ),
-      cleanupRegistry.add(
-        getCurrentWindow().onCloseRequested(async (event) => {
-          if (!keepInMenuBar) {
-            return;
-          }
-          event.preventDefault();
-          await getCurrentWindow().hide();
-        })
-      )
-    ])
-      .then(async () => {
-        if (cleanupRegistry.isDisposed()) {
-          return;
-        }
-
-        await detectLanguages();
-
-        // Launching used to fire every privacy dialog at once, because asking
-        // was the only way to learn the answer. Reading the grants first keeps
-        // the first launch quiet: if something is missing we explain it and
-        // let the user grant it one at a time from Settings.
-        const missing = await missingCapturePermissions();
-
-        // The app transcribes from launch (the new base behavior); the
-        // preference only decides whether we start paused instead.
-        if (autoStart && missing.length === 0 && !cleanupRegistry.isDisposed()) {
-          await startTranscription();
-        }
-      })
-      .catch((error) => {
-        if (!cleanupRegistry.isDisposed()) {
-          appError = `Could not initialize the app: ${String(error)}`;
-          cleanupRegistry.dispose();
-        }
-      });
-    void configureGlobalShortcuts();
-
-    return () => {
-      cleanupRegistry.dispose();
-      unsubscribeSpeakerNames.forEach((unsubscribe) => unsubscribe());
-      unsubscribeGlossary();
-      unsubscribeOverlaySettings.forEach((unsubscribe) => unsubscribe());
-      applyThemePreference('auto');
-      if (summaryRefreshTimer) {
-        clearTimeout(summaryRefreshTimer);
-      }
-      if (actionNoticeTimer) {
-        clearTimeout(actionNoticeTimer);
-      }
-      if (confirmClearTimer) {
-        clearTimeout(confirmClearTimer);
-      }
-      if (recordingTimer) {
-        clearInterval(recordingTimer);
-      }
-    };
+  $effect(() => {
+    if (isOutputDevicePrompt && outputDevicePrompt && outputDeviceTitle) {
+      outputDeviceTitle.focus();
+    }
   });
 
-  /// Reads the grants without prompting and turns whatever is missing into a
-  /// banner. A probe failure returns nothing missing on purpose — capture then
-  /// runs as before and reports the real error rather than being held back by
-  /// an inconclusive check.
-  async function missingCapturePermissions() {
-    let status: PermissionStatus | null = null;
+  function showToast(message: string) {
+    toast = message;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => (toast = null), 2400);
+  }
+
+  function mountOutputDevicePrompt() {
+    const unlisten = listen<OutputDevicePrompt | null>('output-device-prompt', (event) => {
+      outputDevicePrompt = event.payload;
+      respondingToOutputDevice = false;
+      outputDevicePromptError = null;
+    });
+    const unlistenError = listen<string>('output-device-switch-error', (event) => {
+      respondingToOutputDevice = false;
+      outputDevicePromptError = event.payload;
+    });
+    invoke<OutputDevicePrompt | null>('get_output_device_prompt')
+      .then((pending) => (outputDevicePrompt = pending))
+      .catch((error: unknown) => (outputDevicePromptError = String(error)));
+    return () => {
+      unlisten.then((fn) => fn());
+      unlistenError.then((fn) => fn());
+    };
+  }
+
+  function mountMainWindow() {
+    const unlistenTranscript = listen<TranscriptPayload>('transcript', (event) => {
+      if (mimiActive) {
+        mimiPending += event.payload.committedDelta;
+        if (event.payload.utteranceFinal) {
+          const line = event.payload.utteranceFinal;
+          mimiLines.push({
+            id: line.id,
+            text: line.text,
+            translation: null,
+            translating: line.translating
+          });
+          mimiPending = '';
+        }
+        mimiVolatile = event.payload.volatile;
+        return;
+      }
+      const lane = lanes[event.payload.lane];
+      lane.pending += event.payload.committedDelta;
+      const finished = event.payload.utteranceFinal;
+      if (finished) {
+        // The final text is the authoritative version of the same words —
+        // and the only one that comes with a position in the recording.
+        lane.lines.push({
+          id: finished.id,
+          startMs: finished.startMs,
+          text: finished.text,
+          translation: null,
+          translating: finished.translating
+        });
+        lane.lines.splice(0, lane.lines.length - MAX_LINES);
+        lane.pending = '';
+      }
+      lane.volatile = event.payload.volatile;
+    });
+    // Translations arrive seconds after their sentence and out of order
+    // between lanes, so they are matched by id rather than by position.
+    const unlistenTranslation = listen<TranslationPayload>('translation', (event) => {
+      if (mimiActive) {
+        const line = mimiLines.find((line) => line.id === event.payload.id);
+        if (line) {
+          line.translation = event.payload.text;
+          line.translating = false;
+        }
+        return;
+      }
+      const line = lanes[event.payload.lane].lines.find((l) => l.id === event.payload.id);
+      if (!line) return; // scrolled off the top, or from a cleared session
+      line.translation = event.payload.text;
+      line.translating = false;
+    });
+    const unlistenStatus = listen<StatusPayload>('status', (event) => {
+      const wasRunning = running;
+      status = event.payload;
+      if (mimiActive) {
+        if (status.state === 'loading' || status.state === 'listening') {
+          if (!mimiSessionLive) {
+            mimiSessionLive = true;
+            if (mimiPendingStarts) mimiPendingStarts--;
+          }
+        } else if (status.state === 'idle' || status.state === 'error') {
+          if (!mimiSessionLive && mimiPendingStarts && status.state === 'error') {
+            mimiPendingStarts--;
+          }
+          mimiSessionLive = false;
+          if (mimiExiting && !mimiPendingStarts) {
+            mimiActive = false;
+            mimiExiting = false;
+          }
+        }
+      }
+      // A session that just ended is a new row in the library.
+      if (wasRunning && !running && !mimiActive) void refresh();
+    });
+    const unlistenOutputDevice = listen<string>('output-device-switched', (event) => {
+      showToast(`スピーカー録音を「${event.payload}」へ切り替えました`);
+    });
+    // Status events only fire on change; ask for the current snapshot so a
+    // (re)loaded webview doesn't show "idle" while the backend is listening.
+    invoke<StatusPayload>('get_status').then((s) => {
+      status = s;
+      // Reloading mid-session lands on the session, not on the library: the
+      // recording is what the window is for while it runs.
+      if (s.state === 'loading' || s.state === 'listening') view = 'session';
+    });
+    invoke<Languages>('get_languages').then((l) => {
+      languages = l;
+    });
+    void refresh();
+    return () => {
+      unlistenTranscript.then((fn) => fn());
+      unlistenTranslation.then((fn) => fn());
+      unlistenStatus.then((fn) => fn());
+      unlistenOutputDevice.then((fn) => fn());
+    };
+  }
+
+  onMount(() => {
+    if (!isOutputDevicePrompt) mimiRules = loadGlossary();
+    return isOutputDevicePrompt ? mountOutputDevicePrompt() : mountMainWindow();
+  });
+
+  function updateMimiRules(rules: GlossaryRule[]) {
+    mimiRules = rules;
     try {
-      status = await invoke<PermissionStatus>('permission_status');
+      saveGlossary(rules);
     } catch (error) {
-      console.error('Could not read the privacy permissions', error);
+      mimiError = `辞書を保存できませんでした: ${error}`;
     }
-
-    const missing = missingPermissions(status, requiredPermissions(captureMode));
-    permissionNotice = permissionStartupNotice(missing);
-    return missing;
   }
 
-  function openPrivacySettings() {
-    settingsPane = 'privacy';
-    activeTab = 'settings';
+  async function respondToOutputDevice(switchDevice: boolean) {
+    if (!outputDevicePrompt || respondingToOutputDevice) return;
+    respondingToOutputDevice = true;
+    outputDevicePromptError = null;
+    try {
+      await invoke('respond_output_device_change', {
+        promptId: outputDevicePrompt.id,
+        switchDevice
+      });
+    } catch (error) {
+      respondingToOutputDevice = false;
+      outputDevicePromptError = String(error);
+    }
   }
 
-  async function handleTrayCommand(command: string) {
-    switch (command) {
-      case 'toggle-recording':
-        await toggleRecordingSession();
-        break;
-      case 'toggle-pause':
-        await toggleTranscription();
-        break;
-      case 'toggle-overlay':
-        await toggleOverlay();
-        break;
-      case 'adjust-overlay':
-        await beginOverlayAdjustment();
-        break;
-      case 'cycle-capture-mode':
-        await cycleCaptureMode();
-        break;
-      case 'show-main':
-        activeTab = 'live';
-        await getCurrentWindow().show();
-        await getCurrentWindow().setFocus();
-        break;
-      case 'open-settings':
-        settingsPane = 'general';
-        activeTab = 'settings';
-        await getCurrentWindow().show();
-        await getCurrentWindow().setFocus();
-        break;
+  async function refresh() {
+    try {
+      recordings = await invoke<Recording[]>('list_recordings');
+    } catch (error) {
+      showToast(`録音一覧を読めませんでした: ${error}`);
+    }
+  }
+
+  // ── The running session's clock ──────────────────────────────────────
+  // Counted from the moment the recording directory is named after, not from
+  // when this page mounted, so a reloaded webview shows the true elapsed time.
+  let nowMs = $state(Date.now());
+  $effect(() => {
+    if (!running) return;
+    const timer = setInterval(() => (nowMs = Date.now()), 1000);
+    return () => clearInterval(timer);
+  });
+  const startedAt = $derived(sessionStart(recordingName));
+  const elapsed = $derived(startedAt === null ? 0 : Math.max(0, nowMs - startedAt));
+
+  // ── The transcript as one stream ─────────────────────────────────────
+  // Mic and speaker share the recording's clock to within ~15ms (plan.md
+  // Step 4), so ordering by `startMs` reconstructs the conversation. The
+  // speaker pill carries the attribution the two columns used to.
+  type StreamLine = {
+    key: string;
+    lane: Lane;
+    startMs: number;
+    text: string;
+    translation: string | null;
+    speaker: string | null;
+    translating: boolean;
+  };
+
+  const stream = $derived.by<StreamLine[]>(() => {
+    if (opened) {
+      return opened.lines.map((l) => ({
+        key: `${l.lane}-${l.id}`,
+        lane: l.lane,
+        startMs: l.startMs,
+        text: l.text,
+        translation: l.translation,
+        speaker: l.speaker,
+        translating: false
+      }));
+    }
+    return LANES.flatMap((lane) =>
+      lanes[lane].lines.map((l) => ({
+        key: `${lane}-${l.id}`,
+        lane,
+        startMs: l.startMs,
+        text: l.text,
+        translation: l.translation,
+        speaker: null,
+        translating: l.translating
+      }))
+    ).sort((a, b) => a.startMs - b.startMs || a.key.localeCompare(b.key));
+  });
+
+  /// The utterance each lane is still in the middle of. It has no settled
+  /// position yet, so it sits after everything that does.
+  const inFlight = $derived(
+    opened ? [] : LANES.filter((lane) => lanes[lane].pending || lanes[lane].volatile)
+  );
+
+  const hasTranscript = $derived(stream.length > 0 || inFlight.length > 0);
+
+  // ── Following the tail ───────────────────────────────────────────────
+  // Follow the live text like a teleprompter — but only while the reader is
+  // at the tail. Scrolling up to reread history pauses the follow; returning
+  // near the bottom resumes it.
+  let follow = true;
+  const FOLLOW_SLACK_PX = 48;
+
+  function onTranscriptScroll(event: Event) {
+    const el = event.currentTarget as HTMLElement;
+    follow = el.scrollHeight - el.scrollTop - el.clientHeight < FOLLOW_SLACK_PX;
+  }
+
+  // Re-runs whenever the transcript changes because the attachment reads it.
+  function followTail(el: HTMLElement) {
+    void stream.length;
+    void inFlight.length;
+    void lanes.mic.pending;
+    void lanes.mic.volatile;
+    void lanes.speaker.pending;
+    void lanes.speaker.volatile;
+    if (follow) el.scrollTo({ top: el.scrollHeight });
+  }
+
+  // ── Session identity ─────────────────────────────────────────────────
+  const sessionTitle = $derived.by(() => {
+    if (!opened) return '新しい録音';
+    if (opened.title) return opened.title;
+    if (opened.startedAtMs === null) return opened.name;
+    const d = new Date(opened.startedAtMs);
+    return `${d.getFullYear()}/${d.getMonth() + 1}/${d.getDate()} ${timeOfDay(opened.startedAtMs)}`;
+  });
+
+  /// What the badge says, straight off the pipeline's state — including the
+  /// drain after Stop, when the last sentences are still being translated.
+  const badge = $derived.by(() => {
+    if (opened?.dir === diarizingDir) return { tone: 'busy', glyph: '◌', text: '話者を分離中' };
+    if (opened) return { tone: 'done', glyph: '✓', text: '文字起こし' };
+    switch (status.state) {
+      case 'loading':
+        return { tone: 'busy', glyph: '◌', text: 'モデルを読み込み中' };
+      case 'listening':
+        return { tone: 'live', glyph: '●', text: '録音中' };
+      case 'stopping':
+        return { tone: 'busy', glyph: '◌', text: '残りを翻訳中' };
+      case 'error':
+        return { tone: 'error', glyph: '⚠', text: status.message ?? 'エラー' };
       default:
-        console.warn(`Unknown tray command: ${command}`);
+        return { tone: 'done', glyph: '✓', text: '文字起こし完了' };
     }
-  }
+  });
 
-  async function cycleCaptureMode() {
-    const modes: CaptureMode[] = ['both', 'mic', 'speaker'];
-    const currentIndex = modes.indexOf(selectedCaptureMode);
-    await selectCaptureMode(modes[(currentIndex + 1) % modes.length] ?? 'both');
-  }
-
-  async function configureGlobalShortcuts() {
+  // ── Actions ──────────────────────────────────────────────────────────
+  async function toggle() {
+    busy = true;
+    const wasRunning = running;
     try {
-      await invoke('configure_global_shortcuts', {
-        enabled: globalShortcutsEnabled,
-        recordingShortcut,
-        overlayShortcut
-      });
-    } catch (error) {
-      appError = `Global shortcut setup failed: ${String(error)}`;
-    }
-  }
-
-  /// Re-evaluated whenever Settings reports a change, so granting the last
-  /// missing permission clears the banner without a relaunch.
-  function applyPermissionStatus(status: PermissionStatus) {
-    permissionNotice = permissionStartupNotice(
-      missingPermissions(status, requiredPermissions(captureMode))
-    );
-  }
-
-  async function detectLanguages(preserveSelection = false) {
-    try {
-      const payload = await invoke<LanguageDetectionPayload>('detect_languages');
-      applyInstalledLanguages(payload.installed, preserveSelection);
-    } catch (error) {
-      appError = String(error);
-    }
-  }
-
-  function applyInstalledLanguages(installed: LanguageInfo[], preserveSelection = true) {
-    installedLanguages = installed.length > 0 ? installed : installedLanguages;
-
-    const stillInstalled = (id: string) =>
-      installedLanguages.some((language) => language.id === id);
-    // An empty sub language means "翻訳しない" and is always valid.
-    if (
-      preserveSelection &&
-      stillInstalled(mainLanguage) &&
-      (subLanguage === '' || stillInstalled(subLanguage))
-    ) {
-      return;
-    }
-
-    const pair = chooseDefaultLanguagePair(installedLanguages, navigator.language);
-    mainLanguage = pair.source;
-    subLanguage = pair.target;
-  }
-
-  function handleLanguageChange(which: 'source' | 'target', value: string) {
-    const pair = updateLanguagePair(
-      { source: mainLanguage, target: subLanguage },
-      which,
-      value
-    );
-    mainLanguage = pair.source;
-    subLanguage = pair.target;
-    void restartTranscriptionIfRunning();
-  }
-
-  /// Language/engine changes need fresh helper processes. With transcription
-  /// always on, that restart happens in place instead of asking the user to
-  /// stop and start manually. An open recording session survives: restarted
-  /// streams reattach via the recordingDir spawn argument.
-  async function restartTranscriptionIfRunning() {
-    if (!isTranscribing || isCaptureBusy) {
-      return;
-    }
-
-    captureTransition = 'switching';
-    try {
-      captureGeneration += 1;
-      clearStreamSessions([...activeStreams]);
-      activeStreams = new Set();
-      interimMessages = [];
-      await invoke('stop_all_sessions');
-      for (const stream of streamsForCaptureMode(captureMode)) {
-        await startStream(stream);
+      await invoke(wasRunning ? 'stop_capture' : 'start_capture');
+      if (!wasRunning) {
+        // The backend's status event may lag the accepted Start; reflect it
+        // now so a quick second click means Stop, not another Start.
+        if (!running) status = { ...status, state: 'loading', message: null };
+        startLive();
       }
     } catch (error) {
-      appError = String(error);
+      status = { ...status, state: 'error', message: String(error) };
     } finally {
-      captureTransition = null;
+      busy = false;
     }
   }
 
-  async function handleHelperEvent(payload: HelperEvent) {
-    if (!isCurrentSessionEvent(streamSessionIds, payload)) {
-      return;
-    }
-
-    if (payload.type === 'transcript') {
-      await applyTranscriptEvent(payload);
-    } else if (payload.type === 'translation') {
-      messages = applyTranslationEvent(messages, payload);
-    } else if (payload.type === 'status') {
-      handleStatusEvent(payload);
-    } else if (payload.type === 'audio-level') {
-      audioLevelHistory = appendAudioLevel(audioLevelHistory, payload);
-    }
-  }
-
-  function handleStatusEvent(event: StatusEvent) {
-    if (event.state === 'downloading-language') {
-      statusMessage = `Downloading ${event.lang ?? ''} speech model…`;
-    } else if (event.state === 'language-ready') {
-      statusMessage = null;
-    }
-  }
-
-  function handleTranslationBackendError(payload: TranslationBackendErrorPayload) {
-    const key = `${payload.engine}:${payload.message}:${payload.fallbackEnabled}`;
-    if (key === lastTranslationErrorNoticeKey) {
-      return;
-    }
-    lastTranslationErrorNoticeKey = key;
-
-    const label =
-      payload.engine === 'deepl' ? 'DeepL' : payload.engine === 'ollama' ? 'Ollama' : '翻訳';
-    showActionNotice(
-      payload.fallbackEnabled
-        ? `${label}翻訳に失敗しました。Apple 翻訳へフォールバックします。`
-        : `${label}翻訳に失敗しました: ${payload.message}`
-    );
-  }
-
-  async function applyTranscriptEvent(event: TranscriptEvent) {
-    const shouldScrollToLatest = liveView?.shouldStickToLatest() ?? true;
-    const message = transcriptEventToMessage(event);
-    if (recordingSession) {
-      message.inRecording = true;
-    }
-    const nextState = applyTranscriptMessage({ messages, interimMessages }, message);
-    messages = nextState.messages;
-    interimMessages = nextState.interimMessages;
-
-    await tick();
-
-    if (shouldScrollToLatest) {
-      liveView?.scrollToLatest('auto');
-    } else {
-      liveView?.syncJumpToLatestButton();
-    }
-
-    if (event.isFinal) {
-      scheduleSummaryRefresh();
-    }
-  }
-
-  function createStreamSessionId(stream: AudioStream) {
-    return `${stream}-${Date.now()}-${crypto.randomUUID()}`;
-  }
-
-  function setStreamSession(stream: AudioStream, sessionId: string | null) {
-    streamSessionIds = withStreamSession(streamSessionIds, stream, sessionId);
-  }
-
-  function clearStreamSessions(streams: AudioStream[]) {
-    streamSessionIds = withoutStreamSessions(streamSessionIds, streams);
-    audioLevelHistory = streams.reduce(
-      (history, stream) => ({ ...history, [stream]: [] }),
-      audioLevelHistory
-    );
-  }
-
-  function setTranscriptFontScale(scale: number) {
-    transcriptFontScale = scale;
-    storeTranscriptFontScale(scale);
-  }
-
-  function applyThemePreference(preference: ThemePreference) {
-    const attribute = themeDataAttribute(preference);
-    if (attribute === null) {
-      document.documentElement.removeAttribute('data-theme');
-    } else {
-      document.documentElement.dataset.theme = attribute;
-    }
-  }
-
-  function setAutoStartEnabled(enabled: boolean) {
-    autoStartEnabled = enabled;
-    storeAutoStart(enabled);
-  }
-
-  function setIncludeAudioEnabled(enabled: boolean) {
-    includeAudioEnabled = enabled;
-    storeIncludeAudio(enabled);
-  }
-
-  function setSpeechModel(selection: SpeechModelSelection) {
-    speechModel = selection;
-    storeSpeechModel(selection);
-    void restartTranscriptionIfRunning();
-  }
-
-  /// Rewords raw helper errors for the two launch-time failures a person
-  /// can actually fix themselves (privacy permissions).
-  function captureStartGuidance(error: string): string {
-    if (/microphone/i.test(error)) {
-      return `Microphone access is not allowed. Enable LivePolyTrans under System Settings > Privacy & Security > Microphone, then press Resume.\n${error}`;
-    }
-    if (/screen\s*(capture|recording)/i.test(error)) {
-      return `Screen Recording access (needed for system audio) is not allowed. Enable LivePolyTrans under System Settings > Privacy & Security > Screen & System Audio Recording, then press Resume.\n${error}`;
-    }
-    return error;
-  }
-
-  async function startTranscription() {
-    if (isCaptureBusy || isTranscribing) {
-      return;
-    }
-
-    appError = null;
-    statusMessage = null;
-    captureTransition = 'starting';
-    try {
-      captureGeneration += 1;
-      restartAttempts = { mic: 0, speaker: 0 };
-      const failures: string[] = [];
-
-      for (const stream of streamsForCaptureMode(captureMode)) {
-        try {
-          await startStream(stream);
-        } catch (error) {
-          failures.push(`${stream}: ${String(error)}`);
-        }
-      }
-
-      if (failures.length > 0) {
-        appError = captureStartGuidance(failures.join('\n'));
-      }
-    } finally {
-      captureTransition = null;
-    }
-  }
-
-  /// Stops capture without any user interaction. Interim (unconfirmed)
-  /// captions are discarded on purpose — in push-to-talk this prevents a
-  /// half-heard phrase from lingering as if it were said.
-  async function pauseCapture() {
-    if (isCaptureBusy || !isTranscribing) {
-      return;
-    }
-
-    appError = null;
-    statusMessage = null;
-    captureTransition = 'stopping';
-    captureGeneration += 1;
-    clearStreamSessions([...activeStreams]);
-    activeStreams = new Set();
-    interimMessages = [];
-    const stopErrors = await completeCaptureStop(() => invoke('stop_all_sessions'));
-    if (stopErrors.length > 0) {
-      appError = `Could not fully pause capture:\n${stopErrors.map(String).join('\n')}`;
-    }
-    captureTransition = null;
-  }
-
-  /// Stop reinterpreted as pause: capture goes quiet but the conversation,
-  /// summary, and (after confirmation) any recording session survive.
-  async function pauseTranscription() {
-    if (isCaptureBusy || !isTranscribing) {
-      return;
-    }
-
-    if (recordingSession) {
-      const alsoStopRecording = window.confirm(
-        '一時停止すると録音も終了します。録音は Recordings に保存されます。続けますか?'
-      );
-      if (!alsoStopRecording) {
-        return;
-      }
-      await stopRecordingSession();
-    }
-
-    await pauseCapture();
-  }
-
-  async function toggleTranscription() {
-    if (isTranscribing) {
-      await pauseTranscription();
-    } else {
-      await startTranscription();
-    }
-  }
-
-  /// Face-to-face (mimi) mode: mic only, push-to-talk. Speaker capture is
-  /// stopped on entry so the other person reading captions aloud cannot be
-  /// re-transcribed into an endless loop; the previous source configuration
-  /// comes back on exit.
-  async function enterMimi() {
-    if (mimiActive) {
-      return;
-    }
-
-    mimiPreviousMode = captureMode;
-    mimiPreviousRunning = isTranscribing;
-    mimiStartCount = messages.length;
-    pttHeld = false;
+  function enterMimi() {
+    if (running || busy || mimiActive) return;
+    mimiLines = [];
+    mimiPending = '';
+    mimiVolatile = '';
+    mimiError = null;
+    mimiPendingStarts = 0;
+    mimiSessionLive = false;
+    mimiExiting = false;
     mimiActive = true;
-    activeTab = 'live';
-    captureMode = 'mic';
-
-    if (recordingSession) {
-      await stopRecordingSession();
-    }
-    await pauseCapture();
   }
 
-  async function exitMimi() {
-    if (!mimiActive) {
-      return;
-    }
-
-    mimiActive = false;
-    pttHeld = false;
-    captureMode = mimiPreviousMode;
-    await pauseCapture();
-    if (mimiPreviousRunning) {
-      await startTranscription();
-    }
-  }
-
-  function setPtt(held: boolean) {
-    if (!mimiActive) {
-      return;
-    }
-
-    pttHeld = held;
-    void reconcilePtt();
-  }
-
-  /// Press/release races capture start/stop (helper spawn takes a moment).
-  /// Instead of acting on each event, converge capture state onto the
-  /// current held state until they match.
-  async function reconcilePtt() {
-    if (pttReconciling) {
-      return;
-    }
-
-    pttReconciling = true;
-    try {
-      while (mimiActive && pttHeld !== isTranscribing) {
-        if (isCaptureBusy) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          continue;
-        }
-
-        if (pttHeld) {
-          await startTranscription();
-        } else {
-          await pauseCapture();
-        }
-      }
-    } finally {
-      pttReconciling = false;
-    }
-  }
-
-  async function toggleRecordingSession() {
-    if (isRecordingBusy) {
-      return;
-    }
-
-    isRecordingBusy = true;
-    try {
-      if (recordingSession) {
-        await stopRecordingSession();
-      } else {
-        await startRecordingSession();
-      }
-    } finally {
-      isRecordingBusy = false;
-    }
-  }
-
-  async function startRecordingSession() {
-    if (!isTranscribing) {
-      appError = 'Recording needs live transcription. Press Resume first.';
-      return;
-    }
-
-    try {
-      const created = await invoke<CreatedRecording>('start_recording_session', {
-        includeAudio: includeAudioEnabled
-      });
-      recordingSession = {
-        id: created.id,
-        dir: created.dir,
-        startedAtMs: Date.now(),
-        startMessageIndex: messages.length
-      };
-      latestActionRecordingWindow = {
-        id: created.id,
-        startMessageIndex: messages.length
-      };
-      recordingElapsed = 0;
-      recordingTimer = setInterval(() => {
-        if (recordingSession) {
-          recordingElapsed = recordingElapsedSeconds(recordingSession, Date.now());
-        }
-      }, 1000);
-      markers = [...markers, recordingStartMarker(created.id, new Date().toISOString(), messages.length)];
-      showActionNotice('Recording started — transcription keeps running.');
-    } catch (error) {
-      appError = String(error);
-    }
-  }
-
-  async function stopRecordingSession() {
-    const session = recordingSession;
-    if (!session) {
-      return;
-    }
-
-    recordingSession = null;
-    latestActionRecordingWindow = {
-      id: session.id,
-      startMessageIndex: session.startMessageIndex,
-      endMessageIndex: messages.length
-    };
-    if (recordingTimer) {
-      clearInterval(recordingTimer);
-      recordingTimer = null;
-    }
-    const durationSeconds = recordingElapsedSeconds(session, Date.now());
-
-    try {
-      await invoke('stop_recording_session', { id: session.id });
-      await persistRecordingActions(latestActionRecordingWindow);
-      markers = [
-        ...markers,
-        recordingStopMarker(session.id, new Date().toISOString(), messages.length, durationSeconds)
-      ];
-      const autoExportPath = await autoExportRecordingMarkdown(session);
-      showActionNotice(
-        autoExportPath
-          ? `Saved to Recordings and exported: ${autoExportPath.split('/').pop() ?? autoExportPath}`
-          : 'Saved to Recordings.'
-      );
-    } catch (error) {
-      appError = String(error);
-    }
-  }
-
-  async function autoExportRecordingMarkdown(session: RecordingSession): Promise<string | null> {
-    if (!getMarkdownAutoExport()) {
-      return null;
-    }
-
-    const exportDirectory = getExportDirectory();
-    if (exportDirectory === '') {
-      return null;
-    }
-
-    const recordingMessages = messages.slice(session.startMessageIndex);
-    if (recordingMessages.length === 0) {
-      return null;
-    }
-
-    const entries = resolveLiveEntries(chatMessagesToTranscriptEntries(recordingMessages));
-    const startedAt = new Date(session.startedAtMs);
-    const path = markdownExportPath(exportDirectory, getFileNameTemplate(), {
-      date: startedAt,
-      title: session.id,
-      lang: `${mainLanguage}-${subLanguage || 'none'}`
-    });
-    const file = buildTextExport('markdown', entries, {
-      baseName: session.id,
-      markdownMeta: {
-        dateLabel: startedAt.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
-        participants: uniqueSpeakerLabels(entries),
-        summary: aiSummary.trim() === '' ? undefined : aiSummary,
-        actionItems: actionItemsForMarkdown(
-          actionItemsForRecordingWindow(actionItems, {
-            id: session.id,
-            startMessageIndex: session.startMessageIndex,
-            endMessageIndex: messages.length
-          })
-        )
+  function setMimiHeld(held: boolean) {
+    if (!mimiActive || (mimiExiting && held) || mimiHeld === held) return;
+    mimiHeld = held;
+    if (held) mimiPendingStarts++;
+    mimiQueue = mimiQueue.then(async () => {
+      if (held && !mimiActive) return;
+      await invoke(held ? 'start_mimi_capture' : 'stop_capture', held ? { rules: $state.snapshot(mimiRules) } : {});
+    }).catch((error: unknown) => {
+      mimiHeld = false;
+      mimiError = String(error);
+      if (held) mimiPendingStarts--;
+      if (mimiExiting && !mimiPendingStarts && !mimiSessionLive) {
+        mimiActive = false;
+        mimiExiting = false;
       }
     });
-
-    await invoke('save_text_file', { path, contents: file.contents });
-    return path;
   }
 
-  async function selectCaptureMode(mode: CaptureMode) {
-    if (isCaptureBusy) {
+  function exitMimi() {
+    if (!mimiActive || mimiExiting) return;
+    setMimiHeld(false);
+    if (!mimiPendingStarts && !mimiSessionLive) {
+      mimiActive = false;
       return;
     }
-
-    appError = null;
-    captureMode = mode;
-
-    if (!isTranscribing) {
-      return;
-    }
-
-    captureTransition = 'switching';
-
-    try {
-      const nextStreams = new Set(streamsForCaptureMode(mode));
-      const currentStreams = new Set(activeStreams);
-
-      for (const stream of nextStreams) {
-        if (!currentStreams.has(stream)) {
-          await startStream(stream);
-        }
-      }
-
-      for (const stream of currentStreams) {
-        if (!nextStreams.has(stream)) {
-          await stopStream(stream);
-        }
-      }
-    } catch (error) {
-      appError = String(error);
-    } finally {
-      captureTransition = null;
-    }
-  }
-
-  async function startStream(stream: AudioStream) {
-    const sessionId = createStreamSessionId(stream);
-    setStreamSession(stream, sessionId);
-
-    try {
-      await invoke('start_stream_session', {
-        stream,
-        sourceLanguage: mainLanguage,
-        targetLanguage: subLanguage,
-        languages: selectedTranscriptionLanguages(),
-        sessionId,
-        // A stream (re)started while a recording session is open attaches
-        // its recorder at spawn; mid-stream start/stop rides the control
-        // channel instead.
-        recordingDir: recordingSession?.dir ?? null,
-        recordingAudio: includeAudioEnabled,
-        translationEngine,
-        translationFallbackEnabled,
-        ollamaEndpoint,
-        ollamaModel,
-        ...streamEnginePayload(speechModel)
-      });
-    } catch (error) {
-      if (streamSessionIds[stream] === sessionId) {
-        setStreamSession(stream, null);
-      }
-      throw error;
-    }
-
-    activeStreams.add(stream);
-    activeStreams = new Set(activeStreams);
-    streamStartedAt = { ...streamStartedAt, [stream]: Date.now() };
-  }
-
-  async function stopStream(stream: AudioStream) {
-    setStreamSession(stream, null);
-    activeStreams.delete(stream);
-    activeStreams = new Set(activeStreams);
-    await invoke('stop_stream_session', { stream });
-  }
-
-  async function handleHelperExit(payload: HelperExitedPayload) {
-    if (!isCurrentSessionEvent(streamSessionIds, payload)) {
-      return;
-    }
-
-    setStreamSession(payload.stream, null);
-    activeStreams.delete(payload.stream);
-    activeStreams = new Set(activeStreams);
-
-    const startedAt = streamStartedAt[payload.stream];
-    const uptimeMs = startedAt !== null ? Date.now() - startedAt : null;
-    const generation = captureGeneration;
-
-    for (const attempt of remainingRestartAttempts(restartAttempts[payload.stream], uptimeMs)) {
-      restartAttempts = { ...restartAttempts, [payload.stream]: attempt };
-      statusMessage = `Restarting ${payload.stream} capture (attempt ${attempt}/${maxRestartAttempts})…`;
-
-      await new Promise((resolve) => setTimeout(resolve, restartBackoffMs(attempt)));
-
-      const stillWanted = shouldRestartStream({
-        generationAtExit: generation,
-        currentGeneration: captureGeneration,
-        captureMode,
-        stream: payload.stream,
-        sessions: streamSessionIds
-      });
-      if (!stillWanted) {
-        statusMessage = null;
-        return;
-      }
-
-      try {
-        await startStream(payload.stream);
-        statusMessage = null;
-        return;
-      } catch (error) {
-        appError = `Restarting ${payload.stream} capture failed: ${String(error)}`;
-      }
-    }
-
-    statusMessage = null;
-    appError = `${payload.stream} capture stopped unexpectedly (code ${payload.code ?? '?'}) and automatic restart gave up. Press Resume to start again.`;
-
-    // The crash path never goes through pauseTranscription, so an open
-    // recording session would otherwise stay unfinalized and be orphaned.
-    if (activeStreams.size === 0) {
-      interimMessages = [];
-      try {
-        await stopRecordingSession();
-      } catch (error) {
-        appError = `${appError}\nCould not finalize the recording: ${String(error)}`;
-      }
-    }
-  }
-
-  function selectedTranscriptionLanguages() {
-    return transcriptionCandidateLanguages(mainLanguage, subLanguage);
-  }
-
-  function scheduleSummaryRefresh() {
-    // A Mac without Apple Intelligence fails every request the same way;
-    // retrying on each utterance would just spam the error.
-    if (aiUnavailable) {
-      return;
-    }
-
-    if (summaryRefreshTimer) {
-      clearTimeout(summaryRefreshTimer);
-    }
-
-    summaryRefreshTimer = setTimeout(() => {
-      void generateMeetingSummary(true);
-      void extractMeetingActions(true);
-    }, summaryRefreshDelayMs);
-  }
-
-  async function generateMeetingSummary(automatic = false) {
-    if (isSummaryLoading) {
-      return;
-    }
-
-    const plan = planSummaryRequest(messages, summaryCoveredCount, aiSummary);
-    if (!plan) {
-      return;
-    }
-
-    isSummaryLoading = true;
-    if (!automatic) {
-      appError = null;
-    }
-
-    try {
-      aiSummary = await invoke<string>('ai_generate_summary', {
-        messages: plan.messages,
-        sourceLanguage: mainLanguage,
-        previousSummary: plan.previousSummary
-      });
-      summaryCoveredCount = plan.coveredCount;
-      summaryError = null;
-    } catch (error) {
-      summaryError = String(error);
-      if (/Apple Intelligence is unavailable/i.test(summaryError)) {
-        aiUnavailable = true;
-      }
-    } finally {
-      isSummaryLoading = false;
-    }
-  }
-
-  async function extractMeetingActions(automatic = false) {
-    if (isActionsLoading) {
-      return;
-    }
-
-    const source = messages.slice(actionCoveredCount);
-    if (source.length === 0) {
-      return;
-    }
-
-    const bounded = boundMessagesByChars(source, 6000);
-    const globalOffset = actionCoveredCount + source.length - bounded.kept.length;
-    isActionsLoading = true;
-    if (!automatic) {
-      appError = null;
-    }
-
-    try {
-      const raw = await invoke<string>('ai_extract_actions', {
-        messages: bounded.kept,
-        language: mainLanguage
-      });
-      const parsed = parseActionItemsJson(raw);
-      if (!parsed.ok) {
-        actionsError = parsed.error;
-        return;
-      }
-
-      const beforeCount = actionItems.length;
-      actionItems = mergeActionItems(
-        actionItems,
-        rebaseActionSourceIndexes(parsed.items, globalOffset)
-      );
-      void persistLatestRecordingActions();
-      actionNewCount += Math.max(0, actionItems.length - beforeCount);
-      actionCoveredCount = messages.length;
-      actionsError = null;
-    } catch (error) {
-      actionsError = String(error);
-      if (/Apple Intelligence is unavailable/i.test(actionsError)) {
-        aiUnavailable = true;
-      }
-    } finally {
-      isActionsLoading = false;
-    }
-  }
-
-  function toggleActionItem(id: string, done: boolean) {
-    actionItems = actionItems.map((item) => (item.id === id ? { ...item, done } : item));
-    void persistLatestRecordingActions();
-  }
-
-  function jumpToActionSource(item: ActionItem) {
-    if (item.sourceIndex === null) {
-      liveView?.scrollToLatest();
-      return;
-    }
-
-    void liveView?.scrollToMessageIndex(item.sourceIndex);
-  }
-
-  function acknowledgeActionItems() {
-    actionNewCount = 0;
-  }
-
-  async function persistRecordingActions(window: ActionItemSourceWindow | null) {
-    if (window === null) {
-      return;
-    }
-
-    await invoke('update_recording_actions', {
-      id: window.id,
-      actions: actionItemsForRecordingWindow(actionItems, window)
+    mimiExiting = true;
+    mimiQueue = mimiQueue.then(async () => {
+      await invoke('stop_capture');
+    }).catch((error: unknown) => {
+      showToast(`対面モードを停止できませんでした: ${error}`);
+      mimiActive = false;
+      mimiExiting = false;
     });
   }
 
-  async function persistLatestRecordingActions() {
+  /// Recording always starts from a clean transcript: the previous session's
+  /// lines belong to the recording on disk, not to this one.
+  function startLive() {
+    for (const lane of LANES) lanes[lane] = emptyLane();
+    opened = null;
+    follow = true;
+    view = 'session';
+  }
+
+  async function openRecording(recording: Recording) {
     try {
-      await persistRecordingActions(latestActionRecordingWindow);
+      opened = await invoke<Session>('read_recording', { dir: recording.dir });
+      editingTitle = false;
+      follow = false;
+      view = 'session';
     } catch (error) {
-      appError = String(error);
+      showToast(`この録音を開けませんでした: ${error}`);
     }
   }
 
-  async function askMeetingQuestion() {
-    const question = aiQuestion.trim();
-    if (!question || isAnswerLoading) {
-      return;
-    }
-
-    isAnswerLoading = true;
-    appError = null;
-    const history = recentChatHistory(chatTurns);
-    const bounded = boundMessagesByChars(messages, 6000);
-    chatTurns = [...chatTurns, { question, answer: '' }];
-    aiQuestion = '';
-
+  async function diarizeRecording() {
+    if (!opened || diarizingDir) return;
+    const dir = opened.dir;
+    actionsOpen = false;
+    diarizingDir = dir;
     try {
-      const answer = await invoke<string>('ai_ask', {
-        question,
-        messages: bounded.kept,
-        language: mainLanguage,
-        history
-      });
-      chatTurns = chatTurns.map((turn, index) =>
-        index === chatTurns.length - 1 ? { ...turn, answer } : turn
-      );
+      const session = await invoke<Session>('diarize_recording', { dir });
+      if (opened?.dir === dir) opened = session;
+      showToast('話者分離が完了しました');
     } catch (error) {
-      appError = String(error);
-      if (/Apple Intelligence is unavailable/i.test(appError)) {
-        aiUnavailable = true;
-      }
-      chatTurns = chatTurns.slice(0, -1);
-      aiQuestion = question;
+      showToast(`話者分離に失敗しました: ${error}`);
     } finally {
-      isAnswerLoading = false;
+      diarizingDir = null;
     }
   }
 
-  function handleGlobalKeydown(event: KeyboardEvent) {
-    if (!event.metaKey || event.ctrlKey || event.altKey) {
+  function goHome() {
+    view = 'home';
+    editingTitle = false;
+    langOpen = false;
+    actionsOpen = false;
+    void refresh();
+  }
+
+  function beginTitleEdit() {
+    if (!opened) return;
+    titleDraft = sessionTitle;
+    editingTitle = true;
+    actionsOpen = false;
+  }
+
+  function cancelTitleEdit() {
+    editingTitle = false;
+    titleDraft = '';
+  }
+
+  function focusTitleInput(input: HTMLInputElement) {
+    input.focus();
+    input.select();
+  }
+
+  async function saveTitle() {
+    if (!opened || savingTitle) return;
+    const title = titleDraft.trim();
+    if (!title) {
+      showToast('タイトルを入力してください');
       return;
     }
 
-    if (event.shiftKey && event.key.toLowerCase() === 'c') {
-      event.preventDefault();
-      void copyTranscript();
-      return;
-    }
-
-    if (event.shiftKey) {
-      return;
-    }
-
-    switch (event.key) {
-      case 's':
-        event.preventDefault();
-        void saveTranscript();
-        break;
-      case '+':
-      case '=':
-        event.preventDefault();
-        if (canIncreaseTranscriptFontScale(transcriptFontScale)) {
-          setTranscriptFontScale(increaseTranscriptFontScale(transcriptFontScale));
-        }
-        break;
-      case '-':
-        event.preventDefault();
-        if (canDecreaseTranscriptFontScale(transcriptFontScale)) {
-          setTranscriptFontScale(decreaseTranscriptFontScale(transcriptFontScale));
-        }
-        break;
-      case '0':
-        event.preventDefault();
-        setTranscriptFontScale(DEFAULT_TRANSCRIPT_FONT_SCALE);
-        break;
-    }
-  }
-
-  function showActionNotice(text: string) {
-    actionNotice = text;
-    if (actionNoticeTimer) {
-      clearTimeout(actionNoticeTimer);
-    }
-    actionNoticeTimer = setTimeout(() => {
-      actionNotice = null;
-    }, 5000);
-  }
-
-  // Custom live speaker names and glossary corrections live in settings, not
-  // the messages, so frontend-generated text (clipboard / save-as) resolves
-  // labels and applies the glossary here. The ⌘S JSON path stays raw on
-  // purpose: it is the faithful record.
-  function resolveLiveEntries(entries: TranscriptEntry[]): TranscriptEntry[] {
-    return applyGlossaryToEntries(
-      resolveSpeakerLabels(entries, liveSpeakerOverrides),
-      glossaryRules
-    );
-  }
-
-  async function copyTranscript() {
-    const text = toPlainText(resolveLiveEntries(chatMessagesToTranscriptEntries(messages)));
-
+    savingTitle = true;
     try {
-      await navigator.clipboard.writeText(text);
-      showActionNotice('Transcript copied.');
+      const saved = await invoke<string>('set_recording_title', { dir: opened.dir, title });
+      opened.title = saved;
+      const listed = recordings.find((recording) => recording.dir === opened?.dir);
+      if (listed) listed.title = saved;
+      cancelTitleEdit();
+      showToast('タイトルを変更しました');
     } catch (error) {
-      appError = String(error);
+      showToast(`タイトルを変更できませんでした: ${error}`);
+    } finally {
+      savingTitle = false;
     }
   }
 
-  async function saveTranscript() {
-    if (messages.length === 0) {
-      return;
-    }
-
+  async function applyLanguages(next: Languages) {
+    const previous = languages;
+    languages = next; // optimistic: the control must not lag the click
+    langOpen = false;
     try {
-      const result = await invoke<{ json_path: string; text_path: string }>('save_transcript', {
-        messages
-      });
-      const fileName = result.json_path.split('/').pop() ?? result.json_path;
-      showActionNotice(`Saved to Downloads: ${fileName}`);
+      await invoke('set_languages', { languages: next });
+      showToast(`次の発話から「${pillText(next)}」で認識します`);
     } catch (error) {
-      appError = String(error);
+      languages = previous;
+      showToast(`言語を変更できませんでした: ${error}`);
     }
   }
 
-  // Format-picking save (Phase 1-4): unlike ⌘S it generates the text on the
-  // frontend and lets the user choose the destination in a save dialog.
-  async function saveTranscriptAs(format: TextExportFormat) {
-    if (messages.length === 0) {
-      return;
-    }
-
-    const entries = resolveLiveEntries(chatMessagesToTranscriptEntries(messages));
-    const now = new Date();
-    try {
-      const file = buildTextExport(format, entries, {
-        baseName: `LivePolyTrans-transcript-${timestampLabel(now)}`,
-        markdownMeta: {
-          dateLabel: now.toLocaleString('ja-JP', { dateStyle: 'medium', timeStyle: 'short' }),
-          participants: uniqueSpeakerLabels(entries),
-          summary: aiSummary.trim() === '' ? undefined : aiSummary,
-          actionItems: actionItemsForMarkdown(actionItems)
-        }
-      });
-      const destination = await saveTextExportToFile(file);
-      if (destination !== null) {
-        const fileName = destination.split('/').pop() ?? destination;
-        showActionNotice(`Saved: ${fileName}`);
-      }
-    } catch (error) {
-      appError = String(error);
-    }
+  /// `[mm:ss] 話者: 原文` with the translation hung under it, which is how the
+  /// transcript reads on screen and how it should paste.
+  function transcriptText(scope: 'full' | 'original' | 'translation'): string {
+    return stream
+      .map((line) => {
+        const body = scope === 'translation' ? (line.translation ?? line.text) : line.text;
+        const head = `[${clock(line.startMs)}] ${speakerLabel(line.lane, line.speaker)}: ${body}`;
+        if (scope !== 'full' || !line.translation) return head;
+        return `${head}\n    ${line.translation}`;
+      })
+      .join('\n');
   }
 
-  async function toggleOverlay() {
-    try {
-      const visible = await invoke<boolean>('toggle_overlay');
-      overlayVisible = visible;
-      if (visible) {
-        setTimeout(() => void publishOverlayCaptions(true), 100);
-      }
-    } catch (error) {
-      appError = String(error);
-    }
+  function speakerLabel(lane: Lane, speaker: string | null): string {
+    const number = speaker?.match(/^speaker_(\d+)$/)?.[1];
+    return `${LANE_LABELS[lane]}${number === undefined ? '' : ` · 話者${Number(number) + 1}`}`;
   }
 
-  async function publishTrayPanelState(force = false) {
-    const state: TrayPanelState = {
-      isRecording: recordingSession !== null,
-      isTranscribing,
-      recordingElapsedSeconds: recordingElapsed,
-      captureMode: selectedCaptureMode,
-      activeStreams: [...activeStreams],
-      mainLanguage,
-      subLanguage,
-      overlayVisible,
-      audioLevelHistory
-    };
-    const payload = JSON.stringify(state);
-    if (!force && payload === lastTrayPanelPayload) {
-      return;
-    }
+  const COPY_LABELS = { full: '文字起こし全文', original: '原文', translation: '翻訳' } as const;
 
-    lastTrayPanelPayload = payload;
+  async function copy(scope: 'full' | 'original' | 'translation') {
+    actionsOpen = false;
     try {
-      await emit('tray-panel-state', state);
+      await navigator.clipboard.writeText(transcriptText(scope));
+      showToast(`${COPY_LABELS[scope]}をコピーしました`);
     } catch {
-      // The tray panel may not exist until the user clicks the menu-bar icon.
+      showToast('コピーできませんでした');
     }
   }
 
-  async function beginOverlayAdjustment() {
-    try {
-      await invoke('begin_overlay_adjustment');
-    } catch (error) {
-      appError = String(error);
+  // ── The library list ─────────────────────────────────────────────────
+  /// Recordings under the heading they belong to. The list is already newest
+  /// first, so a group ends exactly where its heading changes.
+  const sections = $derived.by(() => {
+    const term = search.trim().toLocaleLowerCase();
+    const groups: { label: string; items: Recording[] }[] = [];
+    for (const recording of recordings) {
+      const haystack =
+        `${recording.title ?? ''} ${recording.snippet} ${recording.name}`.toLocaleLowerCase();
+      if (term && !haystack.includes(term)) continue;
+      const label = dayGroup(recording.startedAtMs);
+      const last = groups.at(-1);
+      if (last && last.label === label) last.items.push(recording);
+      else groups.push({ label, items: [recording] });
     }
-  }
+    return groups;
+  });
 
-  async function publishOverlayCaptions(force = false) {
-    const lines = buildOverlayCaptionLines([...messages, ...interimMessages], {
-      mainLanguage,
-      subLanguage,
-      maxLines: overlayLineCount,
-      showTranslation: overlayShowTranslation
-    });
-    const settings = {
-      fadeSeconds: overlayFadeSeconds,
-      fontScale: overlayFontScale,
-      captionFontFamily,
-      captionLineHeight
-    };
-    const payload = JSON.stringify({ lines, settings });
-    if (!force && payload === lastOverlayPayload) {
+  const matchCount = $derived(sections.reduce((n, s) => n + s.items.length, 0));
+
+  /// A recording with nothing recognised still has to be tellable apart from
+  /// the next one, so it falls back to when it was made.
+  const rowTitle = (recording: Recording) =>
+    recording.title ||
+    recording.snippet ||
+    (recording.startedAtMs === null ? recording.name : `${timeOfDay(recording.startedAtMs)} の録音`);
+
+  const laneSummary = (list: Lane[]) => list.map((lane) => LANE_LABELS[lane]).join(' + ');
+
+  function onkeydown(event: KeyboardEvent) {
+    if (isOutputDevicePrompt) {
+      if (event.key === 'Escape' && outputDevicePrompt && !respondingToOutputDevice) {
+        event.preventDefault();
+        void respondToOutputDevice(false);
+      }
       return;
     }
-
-    lastOverlayPayload = payload;
-    try {
-      await emit('overlay-captions', { lines, settings });
-    } catch {
-      // The overlay window is optional; failing to publish should not affect
-      // the live transcript path.
+    if (event.key === 'Escape') {
+      actionsOpen = false;
+      if (!langOpen) return;
+      // The popover handles its own Escape (it backs out of the catalogue
+      // first); this only catches the case where it is not mounted.
     }
   }
 
-  // Clear wipes the whole meeting (transcript, summary, chat) with no undo
-  // and sits right next to Save, so it asks for a second click and disarms
-  // by itself.
-  function requestClearConversation() {
-    if (confirmingClear) {
-      clearConversation();
-      return;
-    }
-
-    confirmingClear = true;
-    if (confirmClearTimer) {
-      clearTimeout(confirmClearTimer);
-    }
-    confirmClearTimer = setTimeout(() => {
-      confirmingClear = false;
-    }, 4000);
-  }
-
-  function clearConversation() {
-    if (confirmClearTimer) {
-      clearTimeout(confirmClearTimer);
-    }
-    confirmingClear = false;
-    audioLevelHistory = emptyAudioLevelHistory();
-    messages = [];
-    interimMessages = [];
-    markers = [];
-    latestActionRecordingWindow = null;
-    aiSummary = '';
-    summaryCoveredCount = 0;
-    summaryError = null;
-    actionItems = [];
-    actionCoveredCount = 0;
-    actionNewCount = 0;
-    actionsError = null;
-    chatTurns = [];
-    appError = null;
-    actionNotice = null;
+  /// Clicking anywhere else closes whatever is open — the menus are transient
+  /// and should not need a second visit to the same button.
+  function onpointerdown(event: PointerEvent) {
+    const target = event.target as HTMLElement;
+    if (!target.closest('.lang-anchor')) langOpen = false;
+    if (!target.closest('.session-actions')) actionsOpen = false;
   }
 </script>
 
-<svelte:head>
-  <title>LivePolyTrans</title>
-</svelte:head>
+<svelte:window {onkeydown} {onpointerdown} />
 
-<svelte:window on:keydown={handleGlobalKeydown} />
-
-<main class="stage">
-  <section class="window" aria-label="LivePolyTrans" style="position: relative;">
-    <AppToolbar
-      bind:activeTab
-      {selectedCaptureMode}
-      {isCaptureBusy}
-      {isTranscribing}
-      {mainLanguage}
-      {subLanguage}
-      {installedLanguages}
-      {activeStreams}
-      {audioLevelHistory}
-      isRecordingSession={recordingSession !== null}
-      {recordingElapsed}
-      {isRecordingBusy}
-      {aiOpen}
-      {transcriptFontScale}
-      onSelectCaptureMode={selectCaptureMode}
-      onLanguageChange={handleLanguageChange}
-      onRefreshLanguages={() => detectLanguages(true)}
-      onToggleAiPanel={() => (aiOpen = !aiOpen)}
-      onToggleRecordingSession={toggleRecordingSession}
-      onCopy={copyTranscript}
-      onSave={saveTranscript}
-      onSaveAs={saveTranscriptAs}
-      onToggleOverlay={toggleOverlay}
-      onAdjustOverlay={beginOverlayAdjustment}
-      onFontScaleChange={setTranscriptFontScale}
-      onEnterMimi={() => void enterMimi()}
-    />
-
-    {#if mimiActive}
-      <MimiView
-        lines={mimiLines}
-        {pttHeld}
-        {captionFontFamily}
-        {captionLineHeight}
-        onPttChange={setPtt}
-        onExit={() => void exitMimi()}
-      />
-    {/if}
-
-    <div class="content-shell">
-      <div class="app-alert-slot">
-        {#if permissionNotice && activeTab !== 'settings'}
-          <div class="app-notice" role="status">
-            <p>{permissionNotice}</p>
-            <button type="button" on:click={openPrivacySettings}>設定を開く</button>
-          </div>
-        {/if}
-        {#if appError}
-          <div class="app-alert" role="alert">
-            <p>{appError}</p>
-            <button type="button" aria-label="Dismiss error" on:click={() => (appError = null)}>
-              &times;
-            </button>
-          </div>
+{#if isOutputDevicePrompt}
+  <div
+    class="output-device-prompt"
+    role="alertdialog"
+    aria-modal="true"
+    aria-labelledby="output-device-title"
+    aria-describedby="output-device-description"
+  >
+    {#if outputDevicePrompt}
+      <div class="output-device-icon" aria-hidden="true">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="output-device-copy">
+        <h1 id="output-device-title" tabindex="-1" bind:this={outputDeviceTitle}>
+          オーディオ出力が変わりました
+        </h1>
+        <p id="output-device-description">
+          「{outputDevicePrompt.detectedName}」が検出されました。スピーカー録音の出力先を
+          「{outputDevicePrompt.previousName}」から切り替えますか？
+        </p>
+        {#if outputDevicePromptError}
+          <p class="output-device-error" role="alert">{outputDevicePromptError}</p>
         {/if}
       </div>
+      <div class="output-device-actions">
+        <button
+          class="output-device-button"
+          type="button"
+          disabled={respondingToOutputDevice}
+          onclick={() => respondToOutputDevice(false)}>今のまま</button
+        >
+        <button
+          class="output-device-button primary"
+          type="button"
+          disabled={respondingToOutputDevice}
+          onclick={() => respondToOutputDevice(true)}
+        >
+          {respondingToOutputDevice ? '処理中…' : '切り替える'}
+        </button>
+      </div>
+    {/if}
+  </div>
+{:else}
+  <main class="app-window">
+  <header class="window-toolbar">
+    {#if view === 'session'}
+      <button class="back-button" type="button" aria-label="録音一覧に戻る" onclick={goHome}>‹</button
+      >
+    {/if}
+    <span class="window-title">{view === 'home' ? '録音' : sessionTitle}</span>
+    <span class="toolbar-spacer"></span>
 
-      {#if activeTab === 'live'}
-        <LiveView
-          bind:this={liveView}
-          {threadItems}
-          hasFinalMessages={messages.length > 0}
-          {mainLanguage}
-          {subLanguage}
-          {transcriptFontScale}
-          {captionFontFamily}
-          {captionLineHeight}
-          {statusMessage}
-          {actionNotice}
-          {isTranscribing}
-          {isStarting}
-          {isCaptureBusy}
-          {captureModeLabel}
-          {speechModel}
-          {confirmingClear}
-          speakerOverrides={liveSpeakerOverrides}
-          {glossaryRules}
-          onTogglePause={toggleTranscription}
-          onCopy={copyTranscript}
-          onSave={saveTranscript}
-          onClear={requestClearConversation}
-          {aiOpen}
-          {aiSummary}
-          {summaryError}
-          {isSummaryLoading}
-          {aiUnavailable}
-          {actionItems}
-          {actionNewCount}
-          {actionsError}
-          {isActionsLoading}
-          {chatTurns}
-          bind:aiQuestion
-          {isAnswerLoading}
-          onRefreshSummary={() => generateMeetingSummary(false)}
-          onRefreshActions={() => extractMeetingActions(false)}
-          onToggleAction={toggleActionItem}
-          onJumpAction={jumpToActionSource}
-          onOpenActions={acknowledgeActionItems}
-          onAsk={askMeetingQuestion}
-        />
-      {:else if activeTab === 'recordings'}
-        <RecordingsView />
-      {:else}
-        <SettingsView
-          isRecording={isTranscribing}
-          onInstalledChanged={(installed) => applyInstalledLanguages(installed)}
-          {speechModel}
-          onSpeechModelChanged={setSpeechModel}
-          {autoStartEnabled}
-          onAutoStartChange={setAutoStartEnabled}
-          {includeAudioEnabled}
-          onIncludeAudioChange={setIncludeAudioEnabled}
-          initialPane={settingsPane}
-          onPermissionsChanged={applyPermissionStatus}
-        />
+    <button
+      class="toolbar-button"
+      type="button"
+      disabled={running || busy}
+      title={running ? '録音を停止してから対面モードを開く' : '対面モードを開く'}
+      onclick={enterMimi}
+    >対面モード</button>
+
+    {#if running}
+      <div class="toolbar-group">
+        <button
+          class="toolbar-button record-active"
+          type="button"
+          aria-label="録音中のセッションを表示"
+          onclick={() => {
+            opened = null;
+            view = 'session';
+          }}
+        >
+          <span aria-hidden="true">●</span><span>{clock(elapsed)}</span>
+        </button>
+        <button class="toolbar-button stop-button" type="button" disabled={busy} onclick={toggle}>
+          <span aria-hidden="true">■</span><span class="long-label">停止</span>
+        </button>
+      </div>
+    {:else}
+      <button class="toolbar-button" type="button" disabled={busy} onclick={toggle}>
+        <span class="record-symbol" aria-hidden="true">●</span>
+        <span class="long-label">録音を開始</span>
+      </button>
+    {/if}
+  </header>
+
+  {#if view === 'home'}
+    <section class="home-view" aria-label="すべての録音">
+      <div class="home-heading">
+        <div>
+          <h1>すべての録音</h1>
+          <span class="count">
+            {recordings.length}件{running ? ' · 1件を録音中' : ''}
+          </span>
+        </div>
+        <label class="search-field">
+          <span aria-hidden="true">⌕</span>
+          <input type="search" bind:value={search} placeholder="録音を検索" aria-label="録音を検索" />
+        </label>
+      </div>
+
+      {#if running}
+        <div class="recording-section">
+          <h2 class="section-label">録音中</h2>
+          <div class="recording-list">
+            <button
+              class="recording-row active-session-row"
+              type="button"
+              onclick={() => {
+                opened = null;
+                view = 'session';
+              }}
+            >
+              <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+              <span class="row-main">
+                <span class="row-title">新しい録音</span>
+                <span class="row-meta">録音中 · {clock(elapsed)}</span>
+              </span>
+              <span class="row-source">マイク + スピーカー</span>
+              <span class="row-chevron" aria-hidden="true">›</span>
+            </button>
+          </div>
+        </div>
       {/if}
-    </div>
-  </section>
-</main>
+
+      {#each sections as section (section.label)}
+        <div class="recording-section">
+          <h2 class="section-label">{section.label}</h2>
+          <div class="recording-list">
+            {#each section.items as recording (recording.dir)}
+              <button
+                class="recording-row"
+                type="button"
+                onclick={() => openRecording(recording)}
+                title={recording.dir}
+              >
+                <span class="row-icon" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+                <span class="row-main">
+                  <span class="row-title">{rowTitle(recording)}</span>
+                  <span class="row-meta">
+                    {recording.startedAtMs === null
+                      ? recording.name
+                      : timeOfDay(recording.startedAtMs)} · {durationLabel(recording.durationMs)}
+                    {recording.utterances ? ` · ${recording.utterances}発話` : ' · 文字起こしなし'}
+                  </span>
+                </span>
+                <span class="row-source">{laneSummary(recording.lanes)}</span>
+                <span class="row-chevron" aria-hidden="true">›</span>
+              </button>
+            {/each}
+          </div>
+        </div>
+      {/each}
+
+      {#if !matchCount}
+        <div class="empty-state">
+          {recordings.length ? '該当する録音はありません' : 'まだ録音がありません'}
+        </div>
+      {/if}
+    </section>
+  {:else}
+    <section class="session-view" aria-label={sessionTitle}>
+      <div class="session-head">
+        <div class="session-identity">
+          {#if opened && editingTitle}
+            <form
+              class="title-editor"
+              onsubmit={(event) => {
+                event.preventDefault();
+                void saveTitle();
+              }}
+            >
+              <input
+                type="text"
+                bind:value={titleDraft}
+                maxlength="100"
+                aria-label="録音タイトル"
+                disabled={savingTitle}
+                onkeydown={(event) => {
+                  if (event.key !== 'Escape') return;
+                  event.preventDefault();
+                  cancelTitleEdit();
+                }}
+                {@attach focusTitleInput}
+              />
+              <button
+                class="title-editor-button"
+                type="button"
+                disabled={savingTitle}
+                onclick={cancelTitleEdit}>取消</button
+              >
+              <button
+                class="title-editor-button primary"
+                type="submit"
+                disabled={savingTitle || !titleDraft.trim()}>保存</button
+              >
+            </form>
+          {:else}
+            <h1>{sessionTitle}</h1>
+          {/if}
+          <div class="session-meta">
+            {#if opened}
+              <span>{durationLabel(opened.durationMs)} · {laneSummary(opened.lanes)}</span>
+            {/if}
+            <span class="state-badge {badge.tone}">
+              <span aria-hidden="true">{badge.glyph}</span>{badge.text}
+            </span>
+
+            {#if !opened}
+              <!-- Languages are a live setting: they take effect from the next
+                   utterance, so they belong to a session that is still running.
+                   A recording already on disk is history. -->
+              <span class="lang-anchor">
+                <button
+                  class="lang-pill"
+                  type="button"
+                  aria-haspopup="dialog"
+                  aria-expanded={langOpen}
+                  aria-label="言語と翻訳の設定を変更"
+                  onclick={() => (langOpen = !langOpen)}
+                >
+                  <span>{pillText(languages)}</span>
+                  <span class="chev" aria-hidden="true">▾</span>
+                </button>
+                {#if langOpen}
+                  <LanguagePopover
+                    {languages}
+                    onapply={applyLanguages}
+                    onclose={() => (langOpen = false)}
+                  />
+                {/if}
+              </span>
+
+              {#if running}
+                <span class="capture-badges">
+                  {#each LANES as lane (lane)}
+                    {@const active = !!(lanes[lane].pending || lanes[lane].volatile)}
+                    <span
+                      class="capture-badge"
+                      class:active
+                      aria-label={`${LANE_LABELS[lane]}${active ? 'を認識中' : 'は待機中'}`}
+                    >
+                      <span class="level-meter" aria-hidden="true"><i></i><i></i><i></i></span>
+                      {LANE_LABELS[lane]}
+                    </span>
+                  {/each}
+                </span>
+              {/if}
+            {/if}
+          </div>
+        </div>
+
+        <div class="session-actions">
+          <button
+            class="toolbar-button icon-button"
+            type="button"
+            aria-label="この録音の操作"
+            aria-haspopup="menu"
+            aria-expanded={actionsOpen}
+            disabled={!opened && !hasTranscript}
+            onclick={() => (actionsOpen = !actionsOpen)}>•••</button
+          >
+          {#if actionsOpen}
+            <div class="actions-menu" role="menu">
+              {#if opened}
+                <div class="menu-heading">録音</div>
+                <button class="menu-item" type="button" role="menuitem" onclick={beginTitleEdit}>
+                  タイトルを変更
+                </button>
+                <button
+                  class="menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={diarizingDir !== null}
+                  onclick={diarizeRecording}
+                >話者分離を実行</button>
+                <div class="menu-separator"></div>
+              {/if}
+              <div class="menu-heading">クリップボード</div>
+              <button
+                class="menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!hasTranscript}
+                onclick={() => copy('full')}
+              >
+                全文をコピー
+              </button>
+              <button
+                class="menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!hasTranscript}
+                onclick={() => copy('original')}
+              >
+                原文のみをコピー
+              </button>
+              <button
+                class="menu-item"
+                type="button"
+                role="menuitem"
+                disabled={!hasTranscript}
+                onclick={() => copy('translation')}
+              >
+                翻訳のみをコピー
+              </button>
+            </div>
+          {/if}
+        </div>
+      </div>
+
+      <div
+        class="transcript"
+        class:live={!opened && running}
+        onscroll={onTranscriptScroll}
+        aria-live={opened ? 'off' : 'polite'}
+        aria-atomic="false"
+        {@attach followTail}
+      >
+        <div class="transcript-header">
+          <span class="transcript-label">
+            {opened ? '文字起こし' : running ? 'リアルタイム文字起こし' : '文字起こし'}
+          </span>
+          <button
+            class="copy-all-button"
+            type="button"
+            disabled={!hasTranscript}
+            onclick={() => copy('full')}
+          >
+            <span aria-hidden="true">⧉</span>{opened ? '全文をコピー' : 'ここまでをコピー'}
+          </button>
+        </div>
+
+        {#each stream as line (line.key)}
+          <div class="transcript-line">
+            <span class="timestamp">{clock(line.startMs)}</span>
+            <span class="speaker lane-{line.lane}">{speakerLabel(line.lane, line.speaker)}</span>
+            <span class="utterance">
+              {line.text}
+              {#if line.translation}
+                <span class="translation">{line.translation}</span>
+              {:else if line.translating}
+                <span class="translation waiting">訳しています…</span>
+              {/if}
+            </span>
+          </div>
+        {/each}
+
+        {#each inFlight as lane (lane)}
+          <div class="transcript-line">
+            <span class="timestamp pending">··:··</span>
+            <span class="speaker lane-{lane}">{LANE_LABELS[lane]}</span>
+            <span class="utterance partial"
+              >{lanes[lane].pending}<span class="volatile">{lanes[lane].volatile}</span></span
+            >
+          </div>
+        {/each}
+
+        {#if !hasTranscript}
+          <p class="empty-state">
+            {opened
+              ? 'この録音には文字起こしがありません。'
+              : running
+                ? '話しかけてください。認識した文がここに出ます。'
+                : '「録音を開始」を押すと、ここに文字起こしが出ます。'}
+          </p>
+        {/if}
+      </div>
+    </section>
+  {/if}
+
+  {#if toast}
+    <div class="toast" role="status" aria-live="polite">{toast}</div>
+  {/if}
+  {#if mimiActive}
+    <MimiView
+      lines={mimiLines}
+      rules={mimiRules}
+      {languages}
+      pending={`${mimiPending}${mimiVolatile}`}
+      held={mimiHeld}
+      loading={status.state === 'loading'}
+      error={mimiError ?? (status.state === 'error' ? status.message : null)}
+      onHeldChange={setMimiHeld}
+      onLanguagesChange={applyLanguages}
+      onRulesChange={updateMimiRules}
+      onExit={exitMimi}
+    />
+  {/if}
+  </main>
+{/if}
 
 <style>
-  :global(body) {
-    margin: 0;
-    min-height: 100vh;
-    overflow: hidden;
-    background: var(--canvas-parchment);
-    color: var(--legacy-ink);
-    font-family:
-      -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', sans-serif;
+  /* The window's palette, from mockups/desktop-prototype.html. Global so the
+     popover — a separate component with its own scope — resolves them too. */
+  :global(:root) {
+    --accent: #0068d8;
+    --accent-soft: rgba(0, 104, 216, 0.12);
+    --record: #d70015;
+    --record-soft: rgba(215, 0, 21, 0.1);
+    --speaker-a: #0068d8;
+    --speaker-b: #9a4f00;
+    --success: #16823b;
+    --text: #1d1d1f;
+    --secondary: #5b5c63;
+    --muted: #686970;
+    --separator: rgba(30, 30, 36, 0.12);
+    --surface: #fbfbfd;
+    --surface-raised: rgba(255, 255, 255, 0.92);
+    --shadow-menu: 0 18px 52px rgba(0, 0, 0, 0.24);
   }
 
   :global(*) {
     box-sizing: border-box;
   }
-
-  button {
+  :global(body) {
+    margin: 0;
+    color: var(--text);
+    background: var(--surface);
+    font-family:
+      -apple-system,
+      BlinkMacSystemFont,
+      'SF Pro Text',
+      'Hiragino Sans',
+      sans-serif;
+  }
+  :global(button),
+  :global(input) {
     font: inherit;
+    color: inherit;
+  }
+  :global(button) {
+    border: 0;
+    background: none;
     cursor: pointer;
   }
-
-  button:focus-visible {
-    outline: 3px solid rgba(0, 102, 204, 0.24);
+  :global(button:disabled) {
+    cursor: default;
+    opacity: 0.45;
+  }
+  :global(button:focus-visible),
+  :global(input:focus-visible) {
+    outline: 3px solid rgba(0, 104, 216, 0.62);
     outline-offset: 2px;
   }
 
-  .stage {
-    min-height: 100vh;
-    background: var(--canvas-parchment);
-  }
-
-  .window {
-    display: grid;
-    width: 100vw;
+  .app-window {
+    position: relative;
     height: 100vh;
     overflow: hidden;
-    grid-template-rows: auto 1fr;
-    border: 0;
-    border-radius: 0;
-    background: var(--legacy-canvas);
-  }
-
-  .content-shell {
     display: grid;
-    min-height: 0;
+    grid-template-rows: 54px minmax(0, 1fr);
+  }
+
+  /* ── Output device confirmation ───────────────────────────────────── */
+  .output-device-prompt {
+    width: 100vw;
+    height: 100vh;
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
+    column-gap: 16px;
+    padding: 25px 26px 22px;
     overflow: hidden;
-    grid-template-rows: auto minmax(0, 1fr);
+    background: var(--surface);
+  }
+  .output-device-icon {
+    width: 48px;
+    height: 48px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border-radius: 8px;
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .output-device-icon span {
+    width: 4px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+  .output-device-icon span:nth-child(1) {
+    height: 16px;
+  }
+  .output-device-icon span:nth-child(2) {
+    height: 28px;
+  }
+  .output-device-icon span:nth-child(3) {
+    height: 21px;
+  }
+  .output-device-copy {
+    min-width: 0;
+  }
+  .output-device-copy h1 {
+    margin: 1px 0 8px;
+    font-size: 17px;
+    line-height: 1.3;
+    letter-spacing: 0;
+  }
+  .output-device-copy p {
+    margin: 0;
+    color: var(--secondary);
+    font-size: 13.5px;
+    line-height: 1.55;
+    overflow-wrap: anywhere;
+  }
+  .output-device-copy .output-device-error {
+    margin-top: 7px;
+    color: var(--record);
+    font-size: 12px;
+  }
+  .output-device-actions {
+    grid-column: 1 / -1;
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    padding-top: 18px;
+  }
+  .output-device-button {
+    min-width: 96px;
+    height: 34px;
+    padding: 0 16px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.88);
+    font-size: 13px;
+    font-weight: 600;
+  }
+  .output-device-button:hover:not(:disabled) {
+    background: rgba(120, 120, 128, 0.1);
+  }
+  .output-device-button.primary {
+    color: #fff;
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .output-device-button.primary:hover:not(:disabled) {
+    background: #005bbd;
   }
 
-  .app-alert-slot {
-    min-height: 0;
-  }
-
-  .app-alert {
+  /* ── Toolbar ─────────────────────────────────────────────────────── */
+  .window-toolbar {
+    min-width: 0;
     display: flex;
     align-items: center;
     gap: 12px;
-    border-bottom: 1px solid rgba(179, 38, 30, 0.18);
-    background: #fff4f3;
-    color: #9f211b;
-    padding: 8px 16px;
+    /* Room for the traffic lights: this is the real window's title bar. */
+    padding: 0 14px 0 82px;
+    border-bottom: 1px solid var(--separator);
+    background: rgba(252, 252, 253, 0.84);
+    backdrop-filter: blur(24px) saturate(180%);
   }
-
-  .app-alert p {
-    max-height: 54px;
-    flex: 1;
-    overflow: auto;
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.4;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-
-  .app-alert button {
-    width: 26px;
-    height: 26px;
-    flex: 0 0 auto;
-    border: 0;
-    border-radius: 6px;
-    background: transparent;
-    color: currentColor;
-    font-size: 20px;
+  .back-button {
+    width: 30px;
+    height: 30px;
+    display: grid;
+    place-items: center;
+    border-radius: 7px;
+    color: var(--secondary);
+    font-size: 25px;
     line-height: 1;
   }
-
-  .app-alert button:hover {
-    background: rgba(179, 38, 30, 0.08);
+  .back-button:hover {
+    background: rgba(120, 120, 128, 0.12);
   }
-
-  /* Missing permissions are a normal first-launch state, not a failure, so
-     this reads as guidance rather than the red error alert above. */
-  .app-notice {
+  .window-title {
+    min-width: 0;
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .toolbar-spacer {
+    flex: 1;
+  }
+  .toolbar-group {
     display: flex;
     align-items: center;
-    gap: 12px;
-    border-bottom: 1px solid rgba(0, 102, 204, 0.2);
-    background: var(--blue-soft);
-    color: var(--blue);
-    padding: 8px 16px;
+    gap: 8px;
   }
-
-  .app-notice p {
-    flex: 1;
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-
-  .app-notice button {
-    flex: 0 0 auto;
-    border: 0;
+  .toolbar-button {
+    min-height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    padding: 0 11px;
+    border: 1px solid var(--separator);
     border-radius: 7px;
-    background: var(--blue);
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 12.5px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .toolbar-button:hover:not(:disabled) {
+    background: rgba(120, 120, 128, 0.1);
+  }
+  .record-symbol {
+    color: var(--record);
+    font-size: 14px;
+  }
+  .record-active {
+    color: var(--record);
+    border-color: rgba(215, 0, 21, 0.24);
+    background: var(--record-soft);
+    font-variant-numeric: tabular-nums;
+  }
+  .stop-button {
     color: #fff;
-    padding: 5px 12px;
+    border-color: var(--record);
+    background: var(--record);
+  }
+  .stop-button:hover:not(:disabled) {
+    background: #b90013;
+  }
+  .icon-button {
+    width: 30px;
+    padding: 0;
+    font-size: 15px;
+  }
+
+  /* ── Library ─────────────────────────────────────────────────────── */
+  .home-view {
+    min-height: 0;
+    overflow: auto;
+    padding: 30px 34px 34px;
+  }
+  .home-heading {
+    display: flex;
+    align-items: end;
+    gap: 18px;
+    margin-bottom: 22px;
+  }
+  .home-heading h1 {
+    margin: 0;
+    font-size: 25px;
+    line-height: 1.2;
+  }
+  .count {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .search-field {
+    position: relative;
+    width: 260px;
+    margin-left: auto;
+  }
+  .search-field span {
+    position: absolute;
+    left: 10px;
+    top: 7px;
+    color: var(--muted);
+    font-size: 14px;
+    pointer-events: none;
+  }
+  .search-field input {
+    width: 100%;
+    height: 32px;
+    padding: 0 10px 0 30px;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    background: rgba(120, 120, 128, 0.12);
+    font-size: 13px;
+  }
+  .search-field input:focus {
+    border-color: rgba(0, 104, 216, 0.35);
+    background: #fff;
+  }
+  .recording-section + .recording-section {
+    margin-top: 22px;
+  }
+  .section-label {
+    margin: 0 0 7px 8px;
+    color: var(--muted);
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .recording-list {
+    overflow: hidden;
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.72);
+  }
+  .recording-row {
+    width: 100%;
+    min-height: 62px;
+    display: grid;
+    grid-template-columns: 44px minmax(170px, 1fr) 140px 16px;
+    align-items: center;
+    gap: 14px;
+    padding: 11px 16px;
+    text-align: left;
+  }
+  .recording-row + .recording-row {
+    border-top: 1px solid var(--separator);
+  }
+  .recording-row:hover {
+    background: rgba(0, 104, 216, 0.06);
+  }
+  .row-icon {
+    width: 38px;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    border-radius: 9px;
+    color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .row-icon i {
+    width: 2px;
+    border-radius: 2px;
+    background: currentColor;
+  }
+  .row-icon i:nth-child(1) {
+    height: 10px;
+  }
+  .row-icon i:nth-child(2) {
+    height: 20px;
+  }
+  .row-icon i:nth-child(3) {
+    height: 14px;
+  }
+  .row-icon i:nth-child(4) {
+    height: 24px;
+  }
+  .row-icon i:nth-child(5) {
+    height: 12px;
+  }
+  .row-main {
+    min-width: 0;
+  }
+  .row-title {
+    display: block;
+    overflow: hidden;
+    font-size: 14px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .row-meta,
+  .row-source {
+    display: block;
+    color: var(--muted);
+    font-size: 12px;
+    line-height: 1.45;
+  }
+  .row-source {
+    text-align: right;
+    white-space: nowrap;
+  }
+  .row-chevron {
+    color: var(--muted);
+    font-size: 18px;
+  }
+  .active-session-row {
+    color: var(--record);
+    background: var(--record-soft);
+  }
+  .active-session-row .row-icon {
+    color: var(--record);
+    background: rgba(215, 0, 21, 0.1);
+  }
+  .active-session-row .row-meta {
+    color: #a00012;
+    font-variant-numeric: tabular-nums;
+  }
+  .empty-state {
+    padding: 48px 0;
+    color: var(--muted);
+    text-align: center;
+    font-size: 13px;
+  }
+
+  /* ── Session ─────────────────────────────────────────────────────── */
+  .session-view {
+    min-height: 0;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .session-head {
+    display: flex;
+    align-items: start;
+    gap: 12px;
+    padding: 22px 24px 14px;
+  }
+  .session-identity {
+    min-width: 0;
+  }
+  .session-head h1 {
+    margin: 0 0 4px;
+    font-size: 20px;
+    line-height: 1.25;
+  }
+  .title-editor {
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 4px;
+  }
+  .title-editor input {
+    width: min(420px, 55vw);
+    height: 30px;
+    padding: 0 9px;
+    border: 1px solid rgba(0, 104, 216, 0.55);
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 0 0 3px rgba(0, 104, 216, 0.12);
+    font-size: 16px;
+    font-weight: 650;
+  }
+  .title-editor-button {
+    min-height: 28px;
+    padding: 0 8px;
+    border-radius: 6px;
+    color: var(--accent);
     font-size: 12px;
     font-weight: 600;
-    cursor: pointer;
+  }
+  .title-editor-button:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+  .title-editor-button.primary {
+    color: #fff;
+    background: var(--accent);
+  }
+  .title-editor-button.primary:hover:not(:disabled) {
+    background: #005bbd;
+  }
+  .session-meta {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .state-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 7px;
+    border-radius: 6px;
+    color: var(--success);
+    background: rgba(22, 130, 59, 0.1);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .state-badge.live {
+    color: var(--record);
+    background: var(--record-soft);
+  }
+  .state-badge.busy {
+    color: var(--secondary);
+    background: rgba(120, 120, 128, 0.12);
+  }
+  .state-badge.error {
+    color: var(--record);
+    background: var(--record-soft);
+  }
+  .capture-badges {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* Dim until that lane actually has words in flight: the badge reports what
+     is being heard, and a permanently lit meter would report nothing. */
+  .capture-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 3px 8px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    color: var(--muted);
+    background: rgba(120, 120, 128, 0.08);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .capture-badge.active {
+    color: #116d31;
+    border-color: rgba(22, 130, 59, 0.2);
+    background: rgba(22, 130, 59, 0.08);
+  }
+  .level-meter {
+    height: 12px;
+    display: inline-flex;
+    align-items: end;
+    gap: 2px;
+    color: currentColor;
+  }
+  .level-meter i {
+    width: 2px;
+    border-radius: 2px;
+    background: currentColor;
+    transform-origin: bottom;
+  }
+  .level-meter i:nth-child(1) {
+    height: 5px;
+  }
+  .level-meter i:nth-child(2) {
+    height: 11px;
+  }
+  .level-meter i:nth-child(3) {
+    height: 8px;
+  }
+  .capture-badge.active .level-meter i {
+    animation: input-level 850ms ease-in-out infinite alternate;
+  }
+  .capture-badge.active .level-meter i:nth-child(2) {
+    animation-delay: 140ms;
+  }
+  .capture-badge.active .level-meter i:nth-child(3) {
+    animation-delay: 260ms;
+  }
+
+  .lang-anchor {
+    position: relative;
+    display: inline-flex;
+  }
+  .lang-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 24px;
+    padding: 3px 8px;
+    border: 1px solid var(--separator);
+    border-radius: 6px;
+    color: var(--text);
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .lang-pill:hover {
+    border-color: rgba(0, 104, 216, 0.4);
+    background: var(--accent-soft);
+  }
+  .lang-pill[aria-expanded='true'] {
+    color: #fff;
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .lang-pill .chev {
+    color: var(--muted);
+    font-size: 9px;
+  }
+  .lang-pill[aria-expanded='true'] .chev {
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .session-actions {
+    position: relative;
+    margin-left: auto;
+    display: flex;
+    gap: 7px;
+  }
+  .actions-menu {
+    position: absolute;
+    right: 0;
+    top: 36px;
+    z-index: 35;
+    width: 220px;
+    padding: 6px;
+    border: 1px solid var(--separator);
+    border-radius: 10px;
+    background: var(--surface-raised);
+    box-shadow: var(--shadow-menu);
+    backdrop-filter: blur(28px) saturate(180%);
+    animation: appear 160ms ease-out;
+  }
+  .menu-heading {
+    padding: 6px 9px 4px;
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .menu-item {
+    width: 100%;
+    min-height: 29px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 9px;
+    border-radius: 6px;
+    text-align: left;
+    font-size: 13px;
+  }
+  .menu-item:hover {
+    color: #fff;
+    background: var(--accent);
+  }
+  .menu-item:disabled {
+    color: var(--muted);
+    background: transparent;
+  }
+  .menu-separator {
+    height: 1px;
+    margin: 5px 8px;
+    background: var(--separator);
+  }
+
+  /* ── Transcript ──────────────────────────────────────────────────── */
+  .transcript {
+    min-height: 0;
+    overflow: auto;
+    padding: 4px 24px 30px;
+  }
+  .transcript-header {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 0 12px;
+    background: linear-gradient(var(--surface) 70%, transparent);
+  }
+  .transcript-label {
+    color: var(--muted);
+    font-size: 11px;
+    font-weight: 650;
+  }
+  .copy-all-button {
+    min-height: 26px;
+    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 0 9px;
+    border: 1px solid var(--separator);
+    border-radius: 7px;
+    color: var(--accent);
+    background: rgba(255, 255, 255, 0.82);
+    font-size: 12px;
+    font-weight: 600;
+  }
+  .copy-all-button:hover:not(:disabled) {
+    background: var(--accent-soft);
+  }
+  .transcript-line {
+    display: grid;
+    grid-template-columns: 48px 120px minmax(0, 1fr);
+    gap: 10px;
+    align-items: baseline;
+    padding: 7px 0;
+    border-radius: 6px;
+  }
+  .transcript-line:hover {
+    background: rgba(120, 120, 128, 0.07);
+  }
+  .timestamp {
+    color: var(--muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    user-select: none;
+  }
+  /* The line still being spoken has no settled position yet. */
+  .timestamp.pending {
+    color: rgba(104, 105, 112, 0.4);
+  }
+  .speaker {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    width: max-content;
+    padding: 2px 7px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 650;
+  }
+  .speaker::before {
+    content: '';
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+  .speaker.lane-mic {
+    color: var(--speaker-a);
+    background: var(--accent-soft);
+  }
+  .speaker.lane-speaker {
+    color: var(--speaker-b);
+    background: rgba(154, 79, 0, 0.1);
+  }
+  .utterance {
+    font-size: 14px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+  }
+  /* While recording, the transcript is read across the room rather than up
+     close, so the live text takes a size up. */
+  .transcript.live .utterance {
+    font-size: 17px;
+    font-weight: 600;
+    line-height: 1.5;
+  }
+  /* The translation reads as a second voice under the sentence, not as part
+     of it: its own line, dimmer. */
+  .translation {
+    display: block;
+    margin-top: 2px;
+    color: var(--muted);
+    font-size: 12.5px;
+    line-height: 1.6;
+    font-weight: 400;
+  }
+  .translation.waiting {
+    color: rgba(104, 105, 112, 0.55);
+    font-style: italic;
+  }
+  .volatile {
+    color: var(--muted);
+  }
+  .partial::after {
+    content: '';
+    display: inline-block;
+    width: 2px;
+    height: 1em;
+    margin-left: 3px;
+    vertical-align: -0.15em;
+    background: var(--accent);
+    animation: blink 1s steps(1) infinite;
+  }
+
+  .toast {
+    position: absolute;
+    right: 24px;
+    bottom: 24px;
+    z-index: 80;
+    max-width: 320px;
+    padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    border-radius: 10px;
+    color: #fff;
+    background: rgba(24, 24, 30, 0.84);
+    backdrop-filter: blur(24px) saturate(170%);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.38);
+    font-size: 12.5px;
+    line-height: 1.5;
+    animation: appear 160ms ease-out;
+  }
+
+  @keyframes appear {
+    from {
+      opacity: 0;
+      transform: translateY(6px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes blink {
+    50% {
+      opacity: 0;
+    }
+  }
+  @keyframes input-level {
+    from {
+      transform: scaleY(0.48);
+    }
+    to {
+      transform: scaleY(1);
+    }
+  }
+
+  @media (max-width: 820px) {
+    .home-view {
+      padding: 22px 20px;
+    }
+    .home-heading {
+      align-items: stretch;
+      flex-wrap: wrap;
+    }
+    .search-field {
+      width: 100%;
+      margin-left: 0;
+    }
+    .recording-row {
+      grid-template-columns: 40px minmax(150px, 1fr) 16px;
+    }
+    .row-source {
+      display: none;
+    }
+    .session-head {
+      padding: 18px 18px 12px;
+    }
+    .title-editor {
+      flex-wrap: wrap;
+    }
+    .title-editor input {
+      width: 100%;
+    }
+    .transcript {
+      padding-inline: 18px;
+    }
+    .long-label {
+      display: none;
+    }
+  }
+
+  @media (prefers-contrast: more) {
+    :global(:root) {
+      --separator: rgba(0, 0, 0, 0.32);
+      --muted: #494a50;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    :global(*),
+    :global(*::before),
+    :global(*::after) {
+      animation: none !important;
+      transition: none !important;
+    }
   }
 </style>
