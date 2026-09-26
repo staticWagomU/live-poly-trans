@@ -52,6 +52,12 @@ pub enum Cmd {
         prompt_id: u64,
         switch_device: bool,
     },
+    /// Re-recognise a diarized recording's shared lines (postprocess::split)
+    /// with the models this worker already holds. Idle only.
+    Split {
+        dir: PathBuf,
+        reply: std::sync::mpsc::Sender<anyhow::Result<()>>,
+    },
 }
 
 #[derive(Clone, serde::Deserialize)]
@@ -195,9 +201,9 @@ struct TranslationPayload {
 #[derive(Clone, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StatusPayload {
-    state: &'static str,
+    pub(crate) state: &'static str,
     message: Option<String>,
-    recording_dir: Option<String>,
+    pub(crate) recording_dir: Option<String>,
 }
 
 /// Latest status snapshot for the `get_status` command. Status events only
@@ -479,6 +485,9 @@ pub fn run(cmd_rx: Receiver<Cmd>, ui: Ui, policy: PolicyStore) {
         match cmd {
             Cmd::Stop => {}                       // Stop while idle
             Cmd::RespondOutputDevice { .. } => {} // no prompt while idle
+            Cmd::Split { dir, reply } => {
+                let _ = reply.send(split(&ui, &mut engines, &mut translations, &dir));
+            }
             Cmd::Start { mimi, rules } => {
                 match run_session(&cmd_rx, &ui, &mut engines, &mut translations, mimi, &rules) {
                     Ok(()) => emit_status(&ui, "idle", None),
@@ -505,6 +514,50 @@ fn load_engines(
         *engines = Some(Rc::new(RefCell::new(loaded)));
     }
     Ok(Rc::clone(engines.as_ref().expect("engines just ensured")))
+}
+
+/// A translation may wait on the model loading first.
+const SPLIT_TRANSLATE_TIMEOUT: Duration = Duration::from_secs(120);
+
+fn split(
+    ui: &Ui,
+    engines: &mut Option<Models>,
+    translations: &mut Translations,
+    dir: &std::path::Path,
+) -> anyhow::Result<()> {
+    let loading = engines.is_none();
+    let models = load_engines(ui, engines, &translations.policy().spoken)?;
+    if loading {
+        emit_status(ui, "idle", None);
+    }
+    let mut transcribe = |samples: &[f32], lang: Option<&str>| {
+        kkm_core::AsrEngine::transcribe(&mut models.borrow_mut().engine, samples, lang)
+    };
+    let mut translate = |text: &str, source: Option<&str>, target: &str| {
+        let id = translations.next_id;
+        translations.next_id += 1;
+        translations.lane.submit(kkm_core::translate::Job {
+            id,
+            lane: Lane::Mic,
+            text: text.to_string(),
+            source: source.map(str::to_string),
+            target: target.to_string(),
+        });
+        // A late result from an earlier session may still be in the channel.
+        loop {
+            let outcome = translations.lane.wait(SPLIT_TRANSLATE_TIMEOUT)?;
+            if outcome.id == id {
+                return match outcome.status {
+                    Status::Done(text) => Some(text),
+                    Status::Failed(e) => {
+                        eprintln!("split translation: {e}");
+                        None
+                    }
+                };
+            }
+        }
+    };
+    crate::postprocess::split(dir, &mut transcribe, &mut translate)
 }
 
 fn run_session(
@@ -1349,6 +1402,9 @@ fn run_capture_loop(
         match cmd_rx.recv_timeout(POLL_INTERVAL) {
             Ok(Cmd::Stop) => break,
             Ok(Cmd::Start { .. }) => {} // already running
+            Ok(Cmd::Split { reply, .. }) => {
+                let _ = reply.send(Err(anyhow::anyhow!("録音の終了後に話者を分離してください")));
+            }
             Ok(Cmd::RespondOutputDevice {
                 prompt_id,
                 switch_device,

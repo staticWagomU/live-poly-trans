@@ -19,13 +19,13 @@ cd "$repo_dir"
 # Keep the documented entry point usable from an ordinary shell. The flake
 # owns the Rust and Bun versions, so enter it here instead of requiring every
 # caller to remember `nix develop -c`.
-if ! command -v cargo >/dev/null 2>&1 || ! command -v bun >/dev/null 2>&1; then
+if ! command -v cargo >/dev/null 2>&1 || ! command -v bun >/dev/null 2>&1 || ! command -v uv >/dev/null 2>&1; then
   if [[ "${KKM_BUILD_ENV_READY:-}" == "1" ]]; then
-    echo "error: cargo and bun are unavailable inside the Nix development environment" >&2
+    echo "error: cargo, bun or uv are unavailable inside the Nix development environment" >&2
     exit 127
   fi
   if ! command -v nix >/dev/null 2>&1; then
-    echo "error: cargo or bun is unavailable, and nix is not installed" >&2
+    echo "error: cargo, bun or uv is unavailable, and nix is not installed" >&2
     exit 127
   fi
   echo "==> entering Nix development environment"
@@ -42,5 +42,5 @@ bun run tauri build
 app="target/release/bundle/macos/Kikimimic.app"
 echo "==> built $app"
 if [[ "${1-}" == "--open" ]]; then
-  open "$app"
+  open --env "KKM_UV_BIN=$(command -v uv)" "$app"
 fi

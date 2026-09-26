@@ -98,8 +98,10 @@ v1にあった以下はv2スコープ外: オーバーレイ、トレイ、AI要
 
 ### Step 5: 話者分離（SHOULD）
 
-- [ ] 録音ファイルへのポストプロセス話者分離（pyannote / WhisperX等を検証して選定）
-      ※ `~/.cache/huggingface/hub` に `pyannote/speaker-diarization-community-1` が既にある
+- [x] 録音後の `mix.wav` に Nemotron-3-Diarization（MLX）を実行し、RTTMを別保存して発話へ話者を付ける
+      ※ Apple Silicon + uv が必要。日本語での話者割り当て精度と実アプリ操作は実録音で継続確認する
+- [x] 2人以上の話者が重なる発話を話者ターンで切り分け、レーンのWAVを切り出して再認識・再翻訳する（`postprocess/transcript.jsonl`）
+      ※ パイプラインワーカーのWhisper・翻訳レーンを再利用する（llama backendは1プロセス1回しか初期化できない）。実録音での分割品質は継続確認
 
 ### Step 6: ASRエンジンの複線化（Nemotron Streaming）
 

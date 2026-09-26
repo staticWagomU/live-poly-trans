@@ -70,6 +70,7 @@
       lang: string | null;
       text: string;
       translation: string | null;
+      speaker: string | null;
     }[];
   };
 
@@ -123,6 +124,7 @@
   let editingTitle = $state(false);
   let titleDraft = $state('');
   let savingTitle = $state(false);
+  let diarizingDir = $state<string | null>(null);
   let toast = $state<string | null>(null);
   let toastTimer: ReturnType<typeof setTimeout> | undefined;
   let outputDevicePrompt = $state<OutputDevicePrompt | null>(null);
@@ -324,6 +326,7 @@
     startMs: number;
     text: string;
     translation: string | null;
+    speaker: string | null;
     translating: boolean;
   };
 
@@ -335,6 +338,7 @@
         startMs: l.startMs,
         text: l.text,
         translation: l.translation,
+        speaker: l.speaker,
         translating: false
       }));
     }
@@ -345,6 +349,7 @@
         startMs: l.startMs,
         text: l.text,
         translation: l.translation,
+        speaker: null,
         translating: l.translating
       }))
     ).sort((a, b) => a.startMs - b.startMs || a.key.localeCompare(b.key));
@@ -393,6 +398,7 @@
   /// What the badge says, straight off the pipeline's state — including the
   /// drain after Stop, when the last sentences are still being translated.
   const badge = $derived.by(() => {
+    if (opened?.dir === diarizingDir) return { tone: 'busy', glyph: '◌', text: '話者を分離中' };
     if (opened) return { tone: 'done', glyph: '✓', text: '文字起こし' };
     switch (status.state) {
       case 'loading':
@@ -494,6 +500,22 @@
     }
   }
 
+  async function diarizeRecording() {
+    if (!opened || diarizingDir) return;
+    const dir = opened.dir;
+    actionsOpen = false;
+    diarizingDir = dir;
+    try {
+      const session = await invoke<Session>('diarize_recording', { dir });
+      if (opened?.dir === dir) opened = session;
+      showToast('話者分離が完了しました');
+    } catch (error) {
+      showToast(`話者分離に失敗しました: ${error}`);
+    } finally {
+      diarizingDir = null;
+    }
+  }
+
   function goHome() {
     view = 'home';
     editingTitle = false;
@@ -561,11 +583,16 @@
     return stream
       .map((line) => {
         const body = scope === 'translation' ? (line.translation ?? line.text) : line.text;
-        const head = `[${clock(line.startMs)}] ${LANE_LABELS[line.lane]}: ${body}`;
+        const head = `[${clock(line.startMs)}] ${speakerLabel(line.lane, line.speaker)}: ${body}`;
         if (scope !== 'full' || !line.translation) return head;
         return `${head}\n    ${line.translation}`;
       })
       .join('\n');
+  }
+
+  function speakerLabel(lane: Lane, speaker: string | null): string {
+    const number = speaker?.match(/^speaker_(\d+)$/)?.[1];
+    return `${LANE_LABELS[lane]}${number === undefined ? '' : ` · 話者${Number(number) + 1}`}`;
   }
 
   const COPY_LABELS = { full: '文字起こし全文', original: '原文', translation: '翻訳' } as const;
@@ -904,6 +931,13 @@
                 <button class="menu-item" type="button" role="menuitem" onclick={beginTitleEdit}>
                   タイトルを変更
                 </button>
+                <button
+                  class="menu-item"
+                  type="button"
+                  role="menuitem"
+                  disabled={diarizingDir !== null}
+                  onclick={diarizeRecording}
+                >話者分離を実行</button>
                 <div class="menu-separator"></div>
               {/if}
               <div class="menu-heading">クリップボード</div>
@@ -964,7 +998,7 @@
         {#each stream as line (line.key)}
           <div class="transcript-line">
             <span class="timestamp">{clock(line.startMs)}</span>
-            <span class="speaker lane-{line.lane}">{LANE_LABELS[line.lane]}</span>
+            <span class="speaker lane-{line.lane}">{speakerLabel(line.lane, line.speaker)}</span>
             <span class="utterance">
               {line.text}
               {#if line.translation}
@@ -1676,7 +1710,7 @@
   }
   .transcript-line {
     display: grid;
-    grid-template-columns: 48px 74px minmax(0, 1fr);
+    grid-template-columns: 48px 120px minmax(0, 1fr);
     gap: 10px;
     align-items: baseline;
     padding: 7px 0;

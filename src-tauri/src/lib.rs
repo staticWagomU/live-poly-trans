@@ -6,12 +6,13 @@
 mod capture;
 mod library;
 mod pipeline;
+mod postprocess;
 mod record;
 mod soniox;
 mod translate;
 
 use std::sync::mpsc::Sender;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 use kkm_core::language::LanguagePolicy;
 use tauri::{Manager, State};
@@ -21,6 +22,7 @@ struct PipelineHandle {
     status: pipeline::StatusStore,
     policy: pipeline::PolicyStore,
     output_device_prompt: pipeline::OutputDevicePromptStore,
+    postprocess: Arc<Mutex<()>>,
 }
 
 impl PipelineHandle {
@@ -97,6 +99,48 @@ fn list_recordings(app: tauri::AppHandle) -> Result<Vec<library::Recording>, Str
 #[tauri::command]
 fn read_recording(dir: String) -> Result<library::Session, String> {
     library::read(std::path::Path::new(&dir)).map_err(|e| format!("{e:#}"))
+}
+
+#[tauri::command]
+async fn diarize_recording(
+    app: tauri::AppHandle,
+    state: State<'_, PipelineHandle>,
+    dir: String,
+) -> Result<library::Session, String> {
+    let lock = Arc::clone(&state.postprocess);
+    let status = state.status.clone();
+    let cmd_tx = state.cmd_tx.lock().unwrap().clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = lock
+            .try_lock()
+            .map_err(|_| "話者分離はすでに実行中です".to_string())?;
+        let base = library::base(&app).map_err(|e| format!("{e:#}"))?;
+        let dir = library::resolve_recording(&base, std::path::Path::new(&dir))
+            .map_err(|e| format!("{e:#}"))?;
+        // Splitting lines re-recognises them with the pipeline's own models,
+        // which a session in progress is using.
+        if matches!(
+            status.lock().unwrap().state,
+            "loading" | "listening" | "stopping"
+        ) {
+            return Err("録音の終了後に話者を分離してください".into());
+        }
+        postprocess::run(&app, &dir).map_err(|e| format!("{e:#}"))?;
+        let (reply, answer) = std::sync::mpsc::channel();
+        cmd_tx
+            .send(pipeline::Cmd::Split {
+                dir: dir.clone(),
+                reply,
+            })
+            .map_err(|_| "pipeline worker is gone".to_string())?;
+        answer
+            .recv()
+            .map_err(|_| "pipeline worker is gone".to_string())?
+            .map_err(|e| format!("{e:#}"))?;
+        library::read(&dir).map_err(|e| format!("{e:#}"))
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// Change only the title users see. The timestamped directory remains the
@@ -184,6 +228,7 @@ pub fn run() {
                 status,
                 policy,
                 output_device_prompt,
+                postprocess: Arc::new(Mutex::new(())),
             });
             Ok(())
         })
@@ -198,6 +243,7 @@ pub fn run() {
             set_languages,
             list_recordings,
             read_recording,
+            diarize_recording,
             set_recording_title
         ])
         .run(tauri::generate_context!())

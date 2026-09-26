@@ -214,6 +214,10 @@ pub struct Line {
     /// `None` when nothing was translated for it — the session was not
     /// translating, or the queue dropped it (record.rs).
     pub translation: Option<String>,
+    /// The language `translation` is in, kept so a re-translation matches it.
+    #[serde(skip)]
+    pub translation_lang: Option<String>,
+    pub speaker: Option<String>,
 }
 
 /// A finished session, read back for the transcript view.
@@ -238,10 +242,33 @@ pub struct Session {
 pub fn read(dir: &Path) -> anyhow::Result<Session> {
     let recording =
         read_session(dir).ok_or_else(|| anyhow::anyhow!("{} is not a recording", dir.display()))?;
-    let text = std::fs::read_to_string(dir.join("transcript.jsonl")).unwrap_or_default();
+    // Speaker-split lines, once a diarization has produced them; until then
+    // the live transcript, labelled from whatever diarization there is.
+    let split = dir.join(crate::postprocess::TRANSCRIPT);
+    let lines = if split.is_file() {
+        transcript_lines(&split)
+    } else {
+        let mut lines = transcript_lines(&dir.join("transcript.jsonl"));
+        crate::postprocess::label_lines(dir, &mut lines);
+        lines
+    };
 
+    Ok(Session {
+        name: recording.name,
+        dir: recording.dir,
+        title: recording.title,
+        started_at_ms: recording.started_at_ms,
+        duration_ms: recording.duration_ms,
+        lanes: recording.lanes,
+        lines,
+    })
+}
+
+/// One stream in spoken order, each utterance joined to its translation.
+pub fn transcript_lines(path: &Path) -> Vec<Line> {
+    let text = std::fs::read_to_string(path).unwrap_or_default();
     let mut lines: Vec<Line> = Vec::new();
-    let mut translations: Vec<(u64, String)> = Vec::new();
+    let mut translations: Vec<(u64, Option<String>, String)> = Vec::new();
     for raw in text.lines() {
         let Ok(v) = serde_json::from_str::<serde_json::Value>(raw) else {
             continue;
@@ -257,31 +284,27 @@ pub fn read(dir: &Path) -> anyhow::Result<Session> {
                 lang: v["lang"].as_str().map(str::to_string),
                 text: body,
                 translation: None,
+                translation_lang: None,
+                speaker: v["speaker"].as_str().map(str::to_string),
             }),
-            Some("translation") => translations.push((id, body)),
+            Some("translation") => {
+                translations.push((id, v["lang"].as_str().map(str::to_string), body))
+            }
             _ => continue,
         }
     }
-    for (id, body) in translations {
+    for (id, lang, body) in translations {
         // A translation whose utterance is not in the file is dropped rather
         // than shown on its own: a sentence with no original is noise.
         if let Some(line) = lines.iter_mut().find(|l| l.id == id) {
             line.translation = Some(body);
+            line.translation_lang = lang;
         }
     }
     // One stream in spoken order. `start_ms` is on the recording's clock for
     // both lanes (pipeline::SessionClock), so this is the conversation.
     lines.sort_by_key(|l| (l.start_ms, l.id));
-
-    Ok(Session {
-        name: recording.name,
-        dir: recording.dir,
-        title: recording.title,
-        started_at_ms: recording.started_at_ms,
-        duration_ms: recording.duration_ms,
-        lanes: recording.lanes,
-        lines,
-    })
+    lines
 }
 
 /// Where [`list`] looks, so the command and the recorder agree on one place.
@@ -518,6 +541,115 @@ mod tests {
         assert_eq!(read.lines[0].lane, "mic");
         assert_eq!(read.lines[0].lang.as_deref(), Some("ja"));
         assert_eq!(read.duration_ms, 1_000);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_saved_nemotron_rttm_labels_only_overlapping_utterances() {
+        let base = scratch("diarized");
+        let dir = session(&base, "20260819090503", &["mic"], 48_000);
+        std::fs::write(
+            dir.join("transcript.jsonl"),
+            [
+                r#"{"type":"utterance","id":1,"lane":"mic","startMs":100,"endMs":900,"text":"hello"}"#,
+                r#"{"type":"utterance","id":2,"lane":"mic","startMs":900,"endMs":1000,"text":"bye"}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        std::fs::create_dir(dir.join("postprocess")).unwrap();
+        std::fs::write(
+            dir.join("postprocess/nemotron.rttm"),
+            "SPEAKER audio 1 0.100 0.150 <NA> <NA> speaker_0 <NA> <NA>\n\
+             SPEAKER audio 1 0.300 0.550 <NA> <NA> speaker_1 <NA> <NA>\n",
+        )
+        .unwrap();
+
+        let lines = read(&dir).unwrap().lines;
+        assert_eq!(lines[0].speaker.as_deref(), Some("speaker_1"));
+        assert_eq!(lines[1].speaker, None);
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn a_line_two_speakers_share_is_re_recognised_and_re_translated_per_speaker() {
+        let base = scratch("split");
+        let dir = session(&base, "20260819090503", &["mic"], 5 * 48_000);
+        std::fs::write(
+            dir.join("transcript.jsonl"),
+            [
+                r#"{"type":"utterance","id":1,"lane":"mic","startMs":0,"endMs":2000,"lang":"ja","text":"こんにちはさようなら"}"#,
+                r#"{"type":"utterance","id":2,"lane":"mic","startMs":2000,"endMs":3000,"lang":"ja","text":"続き"}"#,
+                r#"{"type":"utterance","id":3,"lane":"mic","startMs":3000,"endMs":5000,"lang":"ja","text":"元の文"}"#,
+                r#"{"type":"translation","id":1,"lang":"en","text":"hello goodbye"}"#,
+            ]
+            .join("\n"),
+        )
+        .unwrap();
+        std::fs::create_dir(dir.join("postprocess")).unwrap();
+        std::fs::write(
+            dir.join("postprocess/nemotron.rttm"),
+            "SPEAKER audio 1 0.000 1.000 <NA> <NA> speaker_0 <NA> <NA>\n\
+             SPEAKER audio 1 1.000 2.000 <NA> <NA> speaker_1 <NA> <NA>\n\
+             SPEAKER audio 1 3.000 1.000 <NA> <NA> speaker_0 <NA> <NA>\n\
+             SPEAKER audio 1 4.000 1.000 <NA> <NA> speaker_1 <NA> <NA>\n",
+        )
+        .unwrap();
+
+        // The third line's pieces come back empty, as silence or noise would:
+        // the line stays as it was rather than vanish.
+        let mut heard = ["こんにちは", "さようなら", "", ""].into_iter();
+        crate::postprocess::split(
+            &dir,
+            &mut |samples: &[f32], lang: Option<&str>| {
+                assert!(samples.len() >= 16_000, "whisper skips under a second");
+                assert_eq!(lang, Some("ja"));
+                Ok(kkm_core::Hypothesis {
+                    text: heard.next().unwrap().into(),
+                    start_ms: 0,
+                    end_ms: 0,
+                    lang: None,
+                })
+            },
+            &mut |text: &str, source: Option<&str>, target: &str| {
+                assert_eq!(source, Some("ja"));
+                Some(format!("{target}:{text}"))
+            },
+        )
+        .unwrap();
+
+        let lines: Vec<_> = read(&dir)
+            .unwrap()
+            .lines
+            .into_iter()
+            .map(|l| {
+                (
+                    l.speaker.unwrap(),
+                    l.start_ms,
+                    l.end_ms,
+                    l.text,
+                    l.translation,
+                )
+            })
+            .collect();
+        let line = |speaker: &str, start, end, text: &str, translation: Option<&str>| {
+            (
+                speaker.to_string(),
+                start,
+                end,
+                text.to_string(),
+                translation.map(str::to_string),
+            )
+        };
+        assert_eq!(
+            lines,
+            [
+                line("speaker_0", 0, 1000, "こんにちは", Some("en:こんにちは")),
+                line("speaker_1", 1000, 2000, "さようなら", Some("en:さようなら")),
+                line("speaker_1", 2000, 3000, "続き", None),
+                line("speaker_0", 3000, 5000, "元の文", None),
+            ]
+        );
         std::fs::remove_dir_all(&base).unwrap();
     }
 
