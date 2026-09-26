@@ -126,15 +126,7 @@ fn normalize_title(raw: &str) -> anyhow::Result<String> {
 /// filesystem and must not accept an arbitrary path from the webview.
 pub fn set_title(base: &Path, dir: &Path, raw_title: &str) -> anyhow::Result<String> {
     let title = normalize_title(raw_title)?;
-    let base = base
-        .canonicalize()
-        .with_context(|| format!("resolve recording base {}", base.display()))?;
-    let dir = dir
-        .canonicalize()
-        .with_context(|| format!("resolve recording {}", dir.display()))?;
-    if dir.parent() != Some(base.as_path()) || read_session(&dir).is_none() {
-        anyhow::bail!("{} is not a recording in {}", dir.display(), base.display());
-    }
+    let dir = resolve_recording(base, dir)?;
 
     let mut payload = serde_json::to_vec_pretty(&Metadata {
         title: title.clone(),
@@ -149,6 +141,19 @@ pub fn set_title(base: &Path, dir: &Path, raw_title: &str) -> anyhow::Result<Str
         return Err(error).with_context(|| format!("save recording title {}", target.display()));
     }
     Ok(title)
+}
+
+pub fn resolve_recording(base: &Path, dir: &Path) -> anyhow::Result<PathBuf> {
+    let base = base
+        .canonicalize()
+        .with_context(|| format!("resolve recording base {}", base.display()))?;
+    let dir = dir
+        .canonicalize()
+        .with_context(|| format!("resolve recording {}", dir.display()))?;
+    if dir.parent() != Some(base.as_path()) || read_session(&dir).is_none() {
+        anyhow::bail!("{} is not a recording in {}", dir.display(), base.display());
+    }
+    Ok(dir)
 }
 
 /// The wall clock in the directory name, as local time. The `-2` suffix a
