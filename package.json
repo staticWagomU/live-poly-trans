@@ -7,8 +7,9 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "check": "svelte-check --output human",
-    "tauri": "tauri"
+    "check": "svelte-kit sync && svelte-check --output human",
+    "tauri": "tauri",
+    "prepare": "svelte-kit sync"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.6.0",
