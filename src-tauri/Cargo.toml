@@ -23,6 +23,7 @@ kkm-core = { path = "../crates/kkm-core" }
 # it would put llama's ggml next to whisper's (docs/step0-results.md).
 kkm-translate = { path = "../crates/kkm-translate" }
 kkm-whisper = { path = "../crates/kkm-whisper" }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "charset", "http2", "rustls"] }
 rtrb = "0.4.0"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

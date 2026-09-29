@@ -20,7 +20,7 @@ v1の実装は `v1` ブランチに保存されている。
 
 ## 実行準備
 
-モデルファイルを `models/` に置く（gitignore済み）:
+モデルファイルを `models/` に置く（gitignore済み）。アプリの「モデル」画面からも取得できる。その場合はアプリデータの `models` に保存され、こちらのコピーより優先される。起動時にどれか足りなければその画面が先に開く。ダウンロードはボタンを押したときだけ始まる。
 
 - `ggml-large-v3-turbo-q8_0.bin` — Whisper本体（q8_0が既定。q5_0はMetalで逆に遅い、docs/step0-results.md参照）
 - `ggml-silero-v5.1.2.bin` — Silero VAD（whisper.cpp配布のGGML版）

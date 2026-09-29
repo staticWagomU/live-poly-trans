@@ -293,19 +293,10 @@ fn recognizer(backend: &AsrBackend) -> Box<dyn Recognizer> {
     }
 }
 
-/// Where models are looked for, in order: what a download put in the app's
-/// own directory first, then the checkout's `models/` so `cargo run` works
-/// without one. The latter is a build-machine path and only ever a fallback.
+/// Where models are looked for. The download command fills the first
+/// directory; this only asks.
 fn models(app: &AppHandle) -> ModelManager {
-    let mut dirs = Vec::new();
-    if let Ok(dir) = app.path().app_data_dir() {
-        dirs.push(dir.join("models"));
-    }
-    dirs.push(PathBuf::from(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/../models"
-    )));
-    ModelManager::new(dirs)
+    crate::model_files::manager(app)
 }
 
 fn lane_name(lane: Lane) -> &'static str {
