@@ -5,8 +5,10 @@
   import { getCurrentWindow } from '@tauri-apps/api/window';
   import LanguagePopover from '$lib/LanguagePopover.svelte';
   import MimiView from '$lib/MimiView.svelte';
+  import ModelsScreen from '$lib/ModelsScreen.svelte';
   import { loadGlossary, saveGlossary, type GlossaryRule } from '$lib/glossary';
   import { pillText, type Languages } from '$lib/languages';
+  import { modelCopy, type ModelDownloadEvent, type ModelFileStatus } from '$lib/models';
   import { clock, dayGroup, durationLabel, sessionStart, timeOfDay } from '$lib/format';
 
   type Lane = 'mic' | 'speaker';
@@ -114,8 +116,13 @@
   let mimiQueue: Promise<void> = Promise.resolve();
 
   /// `home` is the library; `session` is one recording — the live one when
-  /// `opened` is null, otherwise the one read back off disk.
-  let view = $state<'home' | 'session'>('home');
+  /// `opened` is null, otherwise the one read back off disk. `models` is the
+  /// download screen, shown first at launch when a required file is missing.
+  /// `checking` lasts until that first look at disk.
+  let view = $state<'home' | 'session' | 'models' | 'checking'>('checking');
+  let modelsReturn = $state<'home' | 'session'>('home');
+  let modelFiles = $state<ModelFileStatus[]>([]);
+  let modelErrors = $state<Record<string, string>>({});
   let opened = $state<Session | null>(null);
   let recordings = $state<Recording[]>([]);
   let search = $state('');
@@ -249,11 +256,50 @@
     });
     // Status events only fire on change; ask for the current snapshot so a
     // (re)loaded webview doesn't show "idle" while the backend is listening.
-    invoke<StatusPayload>('get_status').then((s) => {
-      status = s;
+    const unlistenDownload = listen<ModelDownloadEvent>('model-download', (event) => {
+      const file = modelFiles.find((item) => item.id === event.payload.id);
+      // A late event must not pull a finished file back to "downloading".
+      if (!file || file.state === 'ready') return;
+      file.state = 'downloading';
+      file.bytes = event.payload.receivedBytes;
+      file.totalBytes = event.payload.totalBytes;
+      file.canDownload = false;
+    });
+    const statusPromise = invoke<StatusPayload>('get_status')
+      .then((s) => {
+        status = s;
+        return s;
+      })
+      .catch((error: unknown) => {
+        showToast(`状態を確認できませんでした: ${error}`);
+        return status;
+      });
+    const modelsPromise = invoke<ModelFileStatus[]>('model_status')
+      .then((files) => {
+        modelFiles = files;
+        return files;
+      })
+      .catch((error: unknown) => {
+        showToast(`モデルの状態を確認できませんでした: ${error}`);
+        return null;
+      });
+    void Promise.all([statusPromise, modelsPromise]).then(([s, files]) => {
       // Reloading mid-session lands on the session, not on the library: the
       // recording is what the window is for while it runs.
-      if (s.state === 'loading' || s.state === 'listening') view = 'session';
+      const live = s.state === 'loading' || s.state === 'listening';
+      if (live) {
+        view = 'session';
+        return;
+      }
+      // The user may already have left the checking state (opened a
+      // recording, or the model screen itself).
+      if (view !== 'checking') return;
+      if (files?.some((file) => file.state === 'missing')) {
+        modelsReturn = 'home';
+        view = 'models';
+        return;
+      }
+      view = 'home';
     });
     invoke<Languages>('get_languages').then((l) => {
       languages = l;
@@ -264,6 +310,7 @@
       unlistenTranslation.then((fn) => fn());
       unlistenStatus.then((fn) => fn());
       unlistenOutputDevice.then((fn) => fn());
+      unlistenDownload.then((fn) => fn());
     };
   }
 
@@ -524,6 +571,68 @@
     void refresh();
   }
 
+  function openModels() {
+    if (view === 'models') {
+      closeModels();
+      return;
+    }
+    modelsReturn = view === 'session' ? 'session' : 'home';
+    view = 'models';
+    void refreshModels();
+  }
+
+  function closeModels() {
+    const next = modelsReturn;
+    view = next;
+    if (next === 'home') void refresh();
+  }
+
+  async function refreshModels() {
+    try {
+      const files = await invoke<ModelFileStatus[]>('model_status');
+      modelFiles = files;
+      for (const file of files) {
+        if (file.state === 'ready') delete modelErrors[file.id];
+      }
+    } catch (error) {
+      showToast(`モデルの状態を確認できませんでした: ${error}`);
+    }
+  }
+
+  function errorText(error: unknown): string {
+    return typeof error === 'string' ? error : error instanceof Error ? error.message : String(error);
+  }
+
+  async function downloadOne(id: string, quiet = false) {
+    const file = modelFiles.find((item) => item.id === id);
+    if (!file || file.state === 'downloading' || file.state === 'ready' || !file.canDownload) return;
+    file.state = 'downloading';
+    file.bytes = 0;
+    file.totalBytes = null;
+    file.canDownload = false;
+    delete modelErrors[id];
+    try {
+      await invoke('download_model', { id });
+    } catch (error) {
+      modelErrors[id] = errorText(error);
+      if (!quiet) showToast(`${modelCopy(id).title}を保存できませんでした`);
+    }
+    await refreshModels();
+    if (!quiet && !modelErrors[id] && modelFiles.some((item) => item.id === id && item.state === 'ready')) {
+      showToast(`${modelCopy(id).title}を保存しました`);
+    }
+  }
+
+  async function downloadMissing() {
+    const ids = modelFiles
+      .filter((file) => file.state === 'missing' && file.canDownload)
+      .map((file) => file.id);
+    await Promise.all(ids.map((id) => downloadOne(id, true)));
+    const failed = ids.filter((id) => modelErrors[id]);
+    if (failed.length) showToast(`${failed.length}件のダウンロードに失敗しました`);
+    else if (ids.length) showToast('モデルを保存しました');
+  }
+
   function beginTitleEdit() {
     if (!opened) return;
     titleDraft = sessionTitle;
@@ -644,6 +753,16 @@
       }
       return;
     }
+    if ((event.metaKey || event.ctrlKey) && event.key === ',') {
+      event.preventDefault();
+      openModels();
+      return;
+    }
+    if (event.key === 'Escape' && view === 'models') {
+      event.preventDefault();
+      closeModels();
+      return;
+    }
     if (event.key === 'Escape') {
       actionsOpen = false;
       if (!langOpen) return;
@@ -708,12 +827,26 @@
 {:else}
   <main class="app-window">
   <header class="window-toolbar">
-    {#if view === 'session'}
-      <button class="back-button" type="button" aria-label="録音一覧に戻る" onclick={goHome}>‹</button
+    {#if view === 'session' || view === 'models'}
+      <button
+        class="back-button"
+        type="button"
+        aria-label={view === 'models' && modelsReturn === 'session' ? '録音に戻る' : '録音一覧に戻る'}
+        onclick={() => (view === 'models' ? closeModels() : goHome())}>‹</button
       >
     {/if}
-    <span class="window-title">{view === 'home' ? '録音' : sessionTitle}</span>
+    <span class="window-title">{view === 'session' ? sessionTitle : view === 'models' ? 'モデル' : '録音'}</span>
     <span class="toolbar-spacer"></span>
+
+    <button
+      class="toolbar-button"
+      class:models-open={view === 'models'}
+      type="button"
+      aria-pressed={view === 'models'}
+      aria-label="モデルのダウンロード"
+      title="モデルのダウンロード"
+      onclick={openModels}>モデル</button
+    >
 
     <button
       class="toolbar-button"
@@ -748,7 +881,19 @@
     {/if}
   </header>
 
-  {#if view === 'home'}
+  {#if view === 'checking'}
+    <section class="home-view" aria-label="モデルを確認しています">
+      <p class="empty-state">モデルを確認しています…</p>
+    </section>
+  {:else if view === 'models'}
+    <ModelsScreen
+      models={modelFiles}
+      errors={modelErrors}
+      onDownload={(id) => void downloadOne(id)}
+      onDownloadMissing={() => void downloadMissing()}
+      onClose={closeModels}
+    />
+  {:else if view === 'home'}
     <section class="home-view" aria-label="すべての録音">
       <div class="home-heading">
         <div>
@@ -1260,6 +1405,11 @@
   }
   .toolbar-button:hover:not(:disabled) {
     background: rgba(120, 120, 128, 0.1);
+  }
+  .toolbar-button.models-open {
+    color: var(--accent);
+    border-color: rgba(0, 104, 216, 0.45);
+    background: var(--accent-soft);
   }
   .record-symbol {
     color: var(--record);

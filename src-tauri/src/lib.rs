@@ -5,6 +5,7 @@
 
 mod capture;
 mod library;
+mod model_files;
 mod pipeline;
 mod postprocess;
 mod record;
@@ -230,6 +231,7 @@ pub fn run() {
                 output_device_prompt,
                 postprocess: Arc::new(Mutex::new(())),
             });
+            app.manage(model_files::Downloads::default());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -244,7 +246,9 @@ pub fn run() {
             list_recordings,
             read_recording,
             diarize_recording,
-            set_recording_title
+            set_recording_title,
+            model_files::model_status,
+            model_files::download_model
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
